@@ -195,8 +195,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: breakability-batch-${{ matrix.batch.id }}
-          path: /tmp/build-results.json
+          path: /tmp/build-results-${{ matrix.batch.id }}.json
           retention-days: 7
+          if-no-files-found: warn
 
   finalize:
     name: "Merge and Report"
@@ -244,6 +245,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.token || github.token }}
         run: |
+          # Ensure required labels exist
+          gh label create "breakability-merge-plan" --repo "$GITHUB_REPOSITORY" \
+            --description "Breakability analysis merge plan" --color "0E8A16" 2>/dev/null || true
+
           if [[ ! -f /tmp/build-results.json ]]; then
             echo "No results file found, skipping merge plan"
             exit 0
@@ -373,6 +378,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.token || github.token }}
         run: |
+          # Ensure required label exists
+          gh label create "breakability-analysis" --repo "$GITHUB_REPOSITORY" \
+            --description "Breakability analysis task" --color "1D76DB" 2>/dev/null || true
+
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
           PR_COUNT="${{ needs.discover.outputs.total }}"
 
