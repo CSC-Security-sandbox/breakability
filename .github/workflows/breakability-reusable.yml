@@ -1,7 +1,7 @@
 # Reusable Breakability Analysis Workflow
 #
 # This is the RECOMMENDED way to use breakability analysis.
-# It runs a 3-job pipeline: discover → parallel deterministic analysis → merge + Copilot agent.
+# It runs a 3-job pipeline: discover → parallel deterministic analysis → merge + report.
 # 
 # Usage in your repo:
 #   jobs:
@@ -11,6 +11,7 @@
 #         batch_count: 4
 #       secrets:
 #         token: ${{ secrets.GITHUB_TOKEN }}
+#         breakability_pat: ${{ secrets.BREAKABILITY_PAT }}
 #
 name: Breakability Analysis (Reusable)
 
@@ -28,7 +29,7 @@ on:
         type: number
         default: 1
       skip_agent:
-        description: 'Skip Copilot agent (deterministic only, posts fallback comments)'
+        description: 'Skip Copilot agent (deterministic only, posts fallback comments + merge plan)'
         required: false
         type: boolean
         default: false
@@ -51,6 +52,9 @@ on:
       token:
         description: 'GitHub token with PR and Issues write permissions'
         required: false
+      breakability_pat:
+        description: 'PAT with read access to CSC-Security-sandbox/breakability repo (for cross-repo script download)'
+        required: true
 
 permissions:
   contents: write
@@ -63,7 +67,7 @@ concurrency:
 
 jobs:
   discover:
-    name: 🔍 Discover PRs
+    name: "\U0001F50D Discover PRs"
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.gen.outputs.matrix }}
@@ -91,11 +95,10 @@ jobs:
 
           if [[ "$TOTAL" -eq 0 ]]; then
             echo "matrix={\"batch\":[]}" >> "$GITHUB_OUTPUT"
-            echo "⚠️ No Dependabot PRs found"
+            echo "No Dependabot PRs found"
             exit 0
           fi
 
-          # Split into batches
           BATCH_SIZE=$(( (TOTAL + BATCH_COUNT - 1) / BATCH_COUNT ))
           BATCHES="["
           BATCH_ID=1
@@ -115,17 +118,16 @@ jobs:
             fi
           done <<< "$PR_NUMS"
 
-          # Remaining PRs
           if [[ -n "$BATCH_PRS" ]]; then
             BATCHES="${BATCHES}${BATCH_ID:+,}{\"id\":$BATCH_ID,\"prs\":\"$BATCH_PRS\"}"
           fi
           BATCHES="${BATCHES}]"
 
           echo "matrix={\"batch\":$BATCHES}" >> "$GITHUB_OUTPUT"
-          echo "✅ Discovered $TOTAL PRs → split into $(echo $BATCHES | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))' 2>/dev/null || echo $BATCH_COUNT) batches"
+          echo "Discovered $TOTAL PRs split into $(echo $BATCHES | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))' 2>/dev/null || echo $BATCH_COUNT) batches"
 
   analyze:
-    name: 🔨 Batch ${{ matrix.batch.id }}
+    name: "Batch ${{ matrix.batch.id }}"
     needs: discover
     if: ${{ needs.discover.outputs.total > 0 }}
     runs-on: ubuntu-latest
@@ -149,11 +151,17 @@ jobs:
         with:
           python-version: ${{ inputs.python_version }}
 
-      - name: Checkout breakability scripts
-        uses: actions/checkout@v4
-        with:
-          repository: CSC-Security-sandbox/breakability
-          path: .breakability
+      - name: Download breakability scripts
+        env:
+          GH_TOKEN: ${{ secrets.breakability_pat }}
+        run: |
+          mkdir -p .breakability/scripts
+          for f in scripts/build-check.sh scripts/merge-results.sh scripts/post-fallback-comments.sh; do
+            gh api repos/CSC-Security-sandbox/breakability/contents/$f \
+              -H "Accept: application/vnd.github.raw+json" > .breakability/$f
+          done
+          chmod +x .breakability/scripts/*.sh
+          echo "Downloaded breakability scripts"
 
       - name: Run deterministic analysis
         env:
@@ -163,7 +171,6 @@ jobs:
           BATCH_ID: ${{ matrix.batch.id }}
           REPO_ROOT: ${{ github.workspace }}
         run: |
-          chmod +x .breakability/scripts/build-check.sh
           bash .breakability/scripts/build-check.sh
 
       - name: Upload batch results
@@ -174,7 +181,7 @@ jobs:
           retention-days: 7
 
   finalize:
-    name: 📊 Merge & Analyze
+    name: "Merge and Report"
     needs: [discover, analyze]
     if: always() && needs.discover.outputs.total > 0
     runs-on: ubuntu-latest
@@ -183,11 +190,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Checkout breakability scripts
-        uses: actions/checkout@v4
-        with:
-          repository: CSC-Security-sandbox/breakability
-          path: .breakability
+      - name: Download breakability scripts
+        env:
+          GH_TOKEN: ${{ secrets.breakability_pat }}
+        run: |
+          mkdir -p .breakability/scripts
+          for f in scripts/build-check.sh scripts/merge-results.sh scripts/post-fallback-comments.sh; do
+            gh api repos/CSC-Security-sandbox/breakability/contents/$f \
+              -H "Accept: application/vnd.github.raw+json" > .breakability/$f
+          done
+          chmod +x .breakability/scripts/*.sh
+          echo "Downloaded breakability scripts"
 
       - name: Download all batch results
         uses: actions/download-artifact@v4
@@ -199,16 +212,119 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.token || github.token }}
         run: |
-          chmod +x .breakability/scripts/merge-results.sh
           bash .breakability/scripts/merge-results.sh /tmp/batch-results /tmp/build-results.json
 
-      - name: Post fallback comments (deterministic-only mode)
-        if: ${{ inputs.skip_agent == true }}
+      - name: Post fallback comments on PRs
+        if: always()
         env:
           GH_TOKEN: ${{ secrets.token || github.token }}
         run: |
-          chmod +x .breakability/scripts/post-fallback-comments.sh
           bash .breakability/scripts/post-fallback-comments.sh
+
+      - name: Post deterministic merge plan
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.token || github.token }}
+        run: |
+          if [[ ! -f /tmp/build-results.json ]]; then
+            echo "No results file found, skipping merge plan"
+            exit 0
+          fi
+
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
+          PR_COUNT="${{ needs.discover.outputs.total }}"
+
+          # Generate merge plan from build-results.json
+          MERGE_PLAN=$(python3 << 'PYEOF'
+          import json, sys
+
+          with open("/tmp/build-results.json") as f:
+              data = json.load(f)
+
+          prs = data.get("prs", {})
+          if not prs:
+              print("No PRs in results.")
+              sys.exit(0)
+
+          safe = []
+          review = []
+          fails = []
+
+          for pr_num, info in sorted(prs.items(), key=lambda x: int(x[0])):
+              build = info.get("build", {})
+              verdict = build.get("verdict", "unknown")
+              pkg = info.get("package", "unknown")
+              from_v = info.get("from_version", "?")
+              to_v = info.get("to_version", "?")
+              semver = info.get("semver_change", "unknown")
+              vl = build.get("verification_label", "")
+              entry = f"#{pr_num} `{pkg}` {from_v} → {to_v} ({semver}) {vl}"
+
+              if verdict == "pass":
+                  safe.append(entry)
+              elif verdict == "fail":
+                  fails.append(entry)
+              else:
+                  review.append(entry)
+
+          lines = []
+          if safe:
+              lines.append(f"### Safe to Merge ({len(safe)} PRs)")
+              for i, s in enumerate(safe, 1):
+                  lines.append(f"{i}. {s}")
+              lines.append("")
+
+          if review:
+              lines.append(f"### Review Recommended ({len(review)} PRs)")
+              for i, r in enumerate(review, 1):
+                  lines.append(f"{i}. {r}")
+              lines.append("")
+
+          if fails:
+              lines.append(f"### Build Failures ({len(fails)} PRs)")
+              for i, f_entry in enumerate(fails, 1):
+                  lines.append(f"{i}. {f_entry}")
+              lines.append("")
+
+          lines.append(f"**Summary:** {len(safe)} safe, {len(review)} review, {len(fails)} failing")
+          print("\n".join(lines))
+          PYEOF
+          )
+
+          if [[ -z "$MERGE_PLAN" ]]; then
+            echo "Empty merge plan, skipping"
+            exit 0
+          fi
+
+          # Close old merge plan issues
+          OLD_ISSUES=$(gh issue list --repo "$GITHUB_REPOSITORY" \
+            --label "breakability-merge-plan" --state open \
+            --json number --jq '.[].number' 2>/dev/null || true)
+          for ISSUE_NUM in $OLD_ISSUES; do
+            gh issue close "$ISSUE_NUM" --repo "$GITHUB_REPOSITORY" \
+              --comment "Superseded by new analysis run at $TIMESTAMP" 2>/dev/null || true
+          done
+
+          # Create the merge plan issue
+          gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Merge Plan $TIMESTAMP ($PR_COUNT PRs)" \
+            --body "## Merge Plan — $TIMESTAMP
+
+          **PRs analyzed:** $PR_COUNT
+          **Generated by:** Deterministic pipeline (breakability-analysis)
+
+          ---
+
+          $MERGE_PLAN
+
+          ---
+
+          > This merge plan is generated from deterministic build results.
+          > Merge safe PRs in the order listed. Re-run analysis after merging to refresh." \
+            --label "breakability-merge-plan"
+
+          echo "Merge plan created"
 
       - name: Commit results for Copilot agent
         if: ${{ inputs.skip_agent != true }}
@@ -242,7 +358,6 @@ jobs:
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
           PR_COUNT="${{ needs.discover.outputs.total }}"
 
-          # Close old analysis issues
           OLD_ISSUES=$(gh issue list --repo "$GITHUB_REPOSITORY" \
             --label "breakability-analysis" --state open \
             --json number --jq '.[].number' 2>/dev/null || true)
@@ -251,10 +366,9 @@ jobs:
               --comment "Superseded by new analysis run at $TIMESTAMP" 2>/dev/null || true
           done
 
-          # Create analysis task
           ISSUE_URL=$(gh issue create \
             --repo "$GITHUB_REPOSITORY" \
-            --title "🔍 Breakability Analysis — $TIMESTAMP ($PR_COUNT PRs)" \
+            --title "Breakability Analysis $TIMESTAMP ($PR_COUNT PRs)" \
             --body "## Breakability Analysis Task
 
           **Run:** $TIMESTAMP
@@ -263,10 +377,10 @@ jobs:
 
           ### Instructions
 
-          You are the \`breakability-analyst\` agent. Execute the following:
+          You are the breakability-analyst agent. Execute the following:
 
-          1. Fetch build results: \`git fetch origin breakability-results && git show origin/breakability-results:build-results.json > /tmp/build-results.json\`
-          2. Read the full analysis instructions from \`.github/breakability-prompt.md\`
+          1. Fetch build results: git fetch origin breakability-results && git show origin/breakability-results:build-results.json > /tmp/build-results.json
+          2. Read the full analysis instructions from .github/breakability-prompt.md
           3. Follow Section 7 (Execution) of that file exactly:
              - Read build-results.json
              - Create ONE merge plan Issue
@@ -276,10 +390,10 @@ jobs:
           ### Key Rules
           - NEVER close, merge, or modify any PR
           - NEVER override build verdicts
-          - Copy \`verification_label\` from JSON verbatim
+          - Copy verification_label from JSON verbatim
           - 100% PR comment coverage is mandatory
           - Use the comment formats from Section 4 of breakability-prompt.md" \
             --assignee "copilot" \
             --label "breakability-analysis")
 
-          echo "✅ Analysis task created: $ISSUE_URL"
+          echo "Analysis task created: $ISSUE_URL"

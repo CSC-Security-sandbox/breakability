@@ -69,3 +69,4 @@ jobs:
       skip_agent: ${{ github.event.inputs.skip_agent == 'true' }}
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }}
+      breakability_pat: ${{ secrets.BREAKABILITY_PAT }}
