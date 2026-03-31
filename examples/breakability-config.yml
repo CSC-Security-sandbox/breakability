@@ -1,0 +1,55 @@
+# Breakability Configuration (Optional)
+#
+# Place this file at .github/breakability-config.yml in your repo.
+# Only needed if you have private registries or custom build commands.
+# If this file doesn't exist, defaults work for public dependencies.
+
+# ─────────────────────────────────────────────────────────
+# Private Registry Authentication
+# ─────────────────────────────────────────────────────────
+# registries:
+#   npm:
+#     registry_url: "https://npm.pkg.github.com"
+#     scope: "@your-org"
+#     # Token read from env var NPM_TOKEN (set as repo secret)
+#     token_env: "NPM_TOKEN"
+#   go:
+#     goprivate: "github.com/your-org/*"
+#     # Token read from env var GOPRIVATE_TOKEN
+#     token_env: "GOPRIVATE_TOKEN"
+#   python:
+#     index_url: "https://pypi.your-org.com/simple/"
+#     token_env: "PIP_TOKEN"
+
+# ─────────────────────────────────────────────────────────
+# Build Overrides
+# ─────────────────────────────────────────────────────────
+# build_commands:
+#   # Override default build detection per directory
+#   "services/api":
+#     command: "npm run build:api"
+#     install: "npm ci --ignore-scripts"
+#   "modules/go-lib":
+#     command: "go build -tags=integration ./..."
+
+# ─────────────────────────────────────────────────────────
+# Ignore Patterns
+# ─────────────────────────────────────────────────────────
+# ignore:
+#   # Skip these directories during analysis
+#   directories:
+#     - "legacy/"
+#     - "deprecated/"
+#   # Skip PRs updating these packages
+#   packages:
+#     - "@types/jest"
+#     - "eslint-plugin-*"
+
+# ─────────────────────────────────────────────────────────
+# Notification Settings
+# ─────────────────────────────────────────────────────────
+# notifications:
+#   # Slack webhook for summary (future feature)
+#   slack_webhook_env: "SLACK_WEBHOOK_URL"
+#   # Only notify on BUILD_FAILS
+#   on_fail_only: true

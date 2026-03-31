@@ -1,0 +1,71 @@
+# Caller Workflow Template for Breakability Analysis
+#
+# Copy this file to your repo at .github/workflows/breakability.yml
+# It triggers on: cron (weekly), manual dispatch, or new Dependabot PRs.
+#
+# ZERO additional secrets needed for basic use.
+# If your repo has private registries, see the breakability-config.yml template.
+
+name: Breakability Analysis
+
+on:
+  # Run weekly on Monday at 6 AM UTC (adjust to your timezone)
+  schedule:
+    - cron: '0 6 * * 1'
+
+  # Manual trigger from Actions tab
+  workflow_dispatch:
+    inputs:
+      pr_filter:
+        description: 'Comma-separated PR numbers (empty = all open Dependabot PRs)'
+        required: false
+        default: ''
+      batch_count:
+        description: 'Number of parallel batches (increase for large monorepos)'
+        required: false
+        default: '4'
+      skip_agent:
+        description: 'Skip Copilot agent analysis (deterministic only)'
+        required: false
+        type: boolean
+        default: false
+
+  # Trigger on new Dependabot PRs
+  pull_request:
+    types: [opened]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  # Gate: only run on Dependabot PRs (for pull_request trigger)
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - id: check
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            if [[ "${{ github.actor }}" == "dependabot[bot]" ]]; then
+              echo "should_run=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+              echo "⏭️ Not a Dependabot PR — skipping"
+            fi
+          else
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  breakability:
+    needs: check
+    if: needs.check.outputs.should_run == 'true'
+    uses: CSC-Security-sandbox/breakability/.github/workflows/breakability-reusable.yml@main
+    with:
+      pr_filter: ${{ github.event.inputs.pr_filter || '' }}
+      batch_count: ${{ fromJson(github.event.inputs.batch_count || '4') }}
+      skip_agent: ${{ github.event.inputs.skip_agent == 'true' }}
+    secrets:
+      token: ${{ secrets.GITHUB_TOKEN }}

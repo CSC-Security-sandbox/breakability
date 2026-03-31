@@ -1,0 +1,285 @@
+# Reusable Breakability Analysis Workflow
+#
+# This is the RECOMMENDED way to use breakability analysis.
+# It runs a 3-job pipeline: discover → parallel deterministic analysis → merge + Copilot agent.
+# 
+# Usage in your repo:
+#   jobs:
+#     breakability:
+#       uses: CSC-Security-sandbox/breakability/.github/workflows/breakability-reusable.yml@main
+#       with:
+#         batch_count: 4
+#       secrets:
+#         token: ${{ secrets.GITHUB_TOKEN }}
+#
+name: Breakability Analysis (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      pr_filter:
+        description: 'Comma-separated PR numbers (empty = all open Dependabot PRs)'
+        required: false
+        type: string
+        default: ''
+      batch_count:
+        description: 'Number of parallel batches'
+        required: false
+        type: number
+        default: 1
+      skip_agent:
+        description: 'Skip Copilot agent (deterministic only, posts fallback comments)'
+        required: false
+        type: boolean
+        default: false
+      node_version:
+        description: 'Node.js version'
+        required: false
+        type: string
+        default: '20'
+      go_version:
+        description: 'Go version'
+        required: false
+        type: string
+        default: '1.22'
+      python_version:
+        description: 'Python version'
+        required: false
+        type: string
+        default: '3.12'
+    secrets:
+      token:
+        description: 'GitHub token with PR and Issues write permissions'
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: breakability-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    name: 🔍 Discover PRs
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+      pr_list: ${{ steps.gen.outputs.pr_list }}
+      total: ${{ steps.gen.outputs.total }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Discover Dependabot PRs
+        id: gen
+        env:
+          GH_TOKEN: ${{ secrets.token || github.token }}
+          BATCH_COUNT: ${{ inputs.batch_count }}
+          PR_FILTER: ${{ inputs.pr_filter }}
+        run: |
+          if [[ -n "$PR_FILTER" ]]; then
+            PR_NUMS=$(echo "$PR_FILTER" | tr ',' '\n' | sed 's/ //g' | sort -n)
+          else
+            PR_NUMS=$(gh pr list --state open --app dependabot --json number --jq '.[].number' | sort -n)
+          fi
+
+          TOTAL=$(echo "$PR_NUMS" | grep -c '[0-9]' || echo 0)
+          echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
+          echo "pr_list=$(echo $PR_NUMS | tr '\n' ',')" >> "$GITHUB_OUTPUT"
+
+          if [[ "$TOTAL" -eq 0 ]]; then
+            echo "matrix={\"batch\":[]}" >> "$GITHUB_OUTPUT"
+            echo "⚠️ No Dependabot PRs found"
+            exit 0
+          fi
+
+          # Split into batches
+          BATCH_SIZE=$(( (TOTAL + BATCH_COUNT - 1) / BATCH_COUNT ))
+          BATCHES="["
+          BATCH_ID=1
+          BATCH_PRS=""
+          COUNT=0
+
+          while IFS= read -r pr; do
+            [[ -z "$pr" ]] && continue
+            COUNT=$((COUNT + 1))
+            BATCH_PRS="${BATCH_PRS}${BATCH_PRS:+,}${pr}"
+
+            if [[ "$COUNT" -ge "$BATCH_SIZE" ]]; then
+              BATCHES="${BATCHES}${BATCH_ID:+,}{\"id\":$BATCH_ID,\"prs\":\"$BATCH_PRS\"}"
+              BATCH_ID=$((BATCH_ID + 1))
+              BATCH_PRS=""
+              COUNT=0
+            fi
+          done <<< "$PR_NUMS"
+
+          # Remaining PRs
+          if [[ -n "$BATCH_PRS" ]]; then
+            BATCHES="${BATCHES}${BATCH_ID:+,}{\"id\":$BATCH_ID,\"prs\":\"$BATCH_PRS\"}"
+          fi
+          BATCHES="${BATCHES}]"
+
+          echo "matrix={\"batch\":$BATCHES}" >> "$GITHUB_OUTPUT"
+          echo "✅ Discovered $TOTAL PRs → split into $(echo $BATCHES | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))' 2>/dev/null || echo $BATCH_COUNT) batches"
+
+  analyze:
+    name: 🔨 Batch ${{ matrix.batch.id }}
+    needs: discover
+    if: ${{ needs.discover.outputs.total > 0 }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go_version }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+
+      - name: Checkout breakability scripts
+        uses: actions/checkout@v4
+        with:
+          repository: CSC-Security-sandbox/breakability
+          path: .breakability
+
+      - name: Run deterministic analysis
+        env:
+          GH_TOKEN: ${{ secrets.token || github.token }}
+          GITHUB_TOKEN: ${{ secrets.token || github.token }}
+          PR_FILTER: ${{ matrix.batch.prs }}
+          BATCH_ID: ${{ matrix.batch.id }}
+          REPO_ROOT: ${{ github.workspace }}
+        run: |
+          chmod +x .breakability/scripts/build-check.sh
+          bash .breakability/scripts/build-check.sh
+
+      - name: Upload batch results
+        uses: actions/upload-artifact@v4
+        with:
+          name: breakability-batch-${{ matrix.batch.id }}
+          path: /tmp/build-results.json
+          retention-days: 7
+
+  finalize:
+    name: 📊 Merge & Analyze
+    needs: [discover, analyze]
+    if: always() && needs.discover.outputs.total > 0
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout breakability scripts
+        uses: actions/checkout@v4
+        with:
+          repository: CSC-Security-sandbox/breakability
+          path: .breakability
+
+      - name: Download all batch results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: breakability-batch-*
+          path: /tmp/batch-results/
+
+      - name: Merge results
+        env:
+          GH_TOKEN: ${{ secrets.token || github.token }}
+        run: |
+          chmod +x .breakability/scripts/merge-results.sh
+          bash .breakability/scripts/merge-results.sh /tmp/batch-results /tmp/build-results.json
+
+      - name: Post fallback comments (deterministic-only mode)
+        if: ${{ inputs.skip_agent == true }}
+        env:
+          GH_TOKEN: ${{ secrets.token || github.token }}
+        run: |
+          chmod +x .breakability/scripts/post-fallback-comments.sh
+          bash .breakability/scripts/post-fallback-comments.sh
+
+      - name: Commit results for Copilot agent
+        if: ${{ inputs.skip_agent != true }}
+        env:
+          GH_TOKEN: ${{ secrets.token || github.token }}
+        run: |
+          RESULTS_BRANCH="breakability-results"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout --orphan "$RESULTS_BRANCH" 2>/dev/null || git checkout "$RESULTS_BRANCH" 2>/dev/null || true
+          git reset --hard HEAD 2>/dev/null || true
+
+          cp /tmp/build-results.json ./build-results.json
+          if ls /tmp/pr-*.diff 1>/dev/null 2>&1; then
+            tar czf ./pr-diffs.tar.gz -C /tmp/ $(ls /tmp/pr-*.diff | xargs -I{} basename {})
+          fi
+
+          git add build-results.json pr-diffs.tar.gz 2>/dev/null || git add build-results.json
+          git commit -m "Breakability results $(date -u +%Y-%m-%dT%H:%M:%SZ)" --allow-empty
+          git push origin "$RESULTS_BRANCH" --force
+
+          git checkout "${{ github.ref_name }}" 2>/dev/null || git checkout main
+
+      - name: Trigger Copilot agent via Issue
+        if: ${{ inputs.skip_agent != true }}
+        env:
+          GH_TOKEN: ${{ secrets.token || github.token }}
+        run: |
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
+          PR_COUNT="${{ needs.discover.outputs.total }}"
+
+          # Close old analysis issues
+          OLD_ISSUES=$(gh issue list --repo "$GITHUB_REPOSITORY" \
+            --label "breakability-analysis" --state open \
+            --json number --jq '.[].number' 2>/dev/null || true)
+          for ISSUE_NUM in $OLD_ISSUES; do
+            gh issue close "$ISSUE_NUM" --repo "$GITHUB_REPOSITORY" \
+              --comment "Superseded by new analysis run at $TIMESTAMP" 2>/dev/null || true
+          done
+
+          # Create analysis task
+          ISSUE_URL=$(gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "🔍 Breakability Analysis — $TIMESTAMP ($PR_COUNT PRs)" \
+            --body "## Breakability Analysis Task
+
+          **Run:** $TIMESTAMP
+          **PRs analyzed:** $PR_COUNT
+          **Results branch:** \`breakability-results\`
+
+          ### Instructions
+
+          You are the \`breakability-analyst\` agent. Execute the following:
+
+          1. Fetch build results: \`git fetch origin breakability-results && git show origin/breakability-results:build-results.json > /tmp/build-results.json\`
+          2. Read the full analysis instructions from \`.github/breakability-prompt.md\`
+          3. Follow Section 7 (Execution) of that file exactly:
+             - Read build-results.json
+             - Create ONE merge plan Issue
+             - Post structured comments on EVERY PR (100% coverage)
+             - Verify counts
+
+          ### Key Rules
+          - NEVER close, merge, or modify any PR
+          - NEVER override build verdicts
+          - Copy \`verification_label\` from JSON verbatim
+          - 100% PR comment coverage is mandatory
+          - Use the comment formats from Section 4 of breakability-prompt.md" \
+            --assignee "copilot" \
+            --label "breakability-analysis")
+
+          echo "✅ Analysis task created: $ISSUE_URL"

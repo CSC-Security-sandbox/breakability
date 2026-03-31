@@ -1,0 +1,196 @@
+name: 'Breakability Analysis'
+description: 'Automated dependency upgrade risk assessment for monorepos. Builds every Dependabot PR, compares against main, posts structured comments with verdicts.'
+author: 'NetApp Security Engineering'
+
+branding:
+  icon: 'shield'
+  color: 'green'
+
+inputs:
+  github-token:
+    description: 'GitHub token with pull-requests:write and issues:write permissions'
+    required: true
+    default: ${{ github.token }}
+  pr-filter:
+    description: 'Comma-separated PR numbers to analyze (empty = all open Dependabot PRs)'
+    required: false
+    default: ''
+  batch-count:
+    description: 'Number of parallel analysis batches'
+    required: false
+    default: '1'
+  skip-agent:
+    description: 'Skip Copilot agent analysis (deterministic only — posts fallback comments)'
+    required: false
+    default: 'false'
+  node-version:
+    description: 'Node.js version for npm builds'
+    required: false
+    default: '20'
+  go-version:
+    description: 'Go version for Go module builds'
+    required: false
+    default: '1.22'
+  python-version:
+    description: 'Python version for pip builds'
+    required: false
+    default: '3.12'
+  config-path:
+    description: 'Path to breakability-config.yml in the consuming repo (for private registries, infra patterns)'
+    required: false
+    default: '.github/breakability-config.yml'
+
+outputs:
+  results-json:
+    description: 'Path to the merged build-results.json file'
+    value: /tmp/build-results.json
+  pr-count:
+    description: 'Number of PRs analyzed'
+    value: ${{ steps.analyze.outputs.pr_count }}
+  safe-count:
+    description: 'Number of SAFE PRs'
+    value: ${{ steps.analyze.outputs.safe_count }}
+  fail-count:
+    description: 'Number of BUILD_FAILS PRs'
+    value: ${{ steps.analyze.outputs.fail_count }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ inputs.go-version }}
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Run deterministic analysis
+      id: analyze
+      shell: bash
+      run: |
+        # Copy scripts from the action directory to a temp location
+        ACTION_DIR="${{ github.action_path }}"
+        cp "$ACTION_DIR/scripts/build-check.sh" /tmp/_bc_build_check.sh
+        cp "$ACTION_DIR/scripts/merge-results.sh" /tmp/_bc_merge_results.sh
+        cp "$ACTION_DIR/scripts/post-fallback-comments.sh" /tmp/_bc_post_fallback.sh
+        cp "$ACTION_DIR/breakability-prompt.md" /tmp/_bc_prompt.md
+        chmod +x /tmp/_bc_build_check.sh /tmp/_bc_merge_results.sh /tmp/_bc_post_fallback.sh
+
+        # Copy config from consuming repo if it exists
+        if [[ -f "${{ inputs.config-path }}" ]]; then
+          cp "${{ inputs.config-path }}" /tmp/_bc_config.yml
+          export BREAKABILITY_CONFIG="/tmp/_bc_config.yml"
+        fi
+
+        # Run the deterministic pipeline
+        bash /tmp/_bc_build_check.sh
+
+        # Count results
+        if [[ -f /tmp/build-results.json ]]; then
+          PR_COUNT=$(python3 -c "import json; d=json.load(open('/tmp/build-results.json')); print(len(d.get('prs',{})))" 2>/dev/null || echo "0")
+          SAFE_COUNT=$(python3 -c "import json; d=json.load(open('/tmp/build-results.json')); print(sum(1 for p in d.get('prs',{}).values() if p.get('build',{}).get('verdict')=='pass'))" 2>/dev/null || echo "0")
+          FAIL_COUNT=$(python3 -c "import json; d=json.load(open('/tmp/build-results.json')); print(sum(1 for p in d.get('prs',{}).values() if p.get('build',{}).get('verdict')=='fail'))" 2>/dev/null || echo "0")
+          echo "pr_count=$PR_COUNT" >> "$GITHUB_OUTPUT"
+          echo "safe_count=$SAFE_COUNT" >> "$GITHUB_OUTPUT"
+          echo "fail_count=$FAIL_COUNT" >> "$GITHUB_OUTPUT"
+        fi
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        PR_FILTER: ${{ inputs.pr-filter }}
+        BATCH_ID: '1'
+        REPO_ROOT: ${{ github.workspace }}
+
+    - name: Post fallback comments
+      if: always()
+      shell: bash
+      run: bash /tmp/_bc_post_fallback.sh
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+
+    - name: Commit results for Copilot agent
+      if: ${{ inputs.skip-agent != 'true' }}
+      shell: bash
+      run: |
+        RESULTS_BRANCH="breakability-results"
+
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+        git checkout --orphan "$RESULTS_BRANCH" 2>/dev/null || git checkout "$RESULTS_BRANCH" 2>/dev/null || true
+        git reset --hard HEAD 2>/dev/null || true
+
+        cp /tmp/build-results.json ./build-results.json
+        if ls /tmp/pr-*.diff 1>/dev/null 2>&1; then
+          tar czf ./pr-diffs.tar.gz -C /tmp/ $(ls /tmp/pr-*.diff | xargs -I{} basename {})
+        fi
+
+        git add build-results.json pr-diffs.tar.gz 2>/dev/null || git add build-results.json
+        git commit -m "Breakability results $(date -u +%Y-%m-%dT%H:%M:%SZ)" --allow-empty
+        git push origin "$RESULTS_BRANCH" --force
+
+        git checkout "${{ github.ref_name }}" 2>/dev/null || git checkout main
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+
+    - name: Trigger Copilot agent via Issue
+      if: ${{ inputs.skip-agent != 'true' }}
+      shell: bash
+      run: |
+        TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
+        PR_COUNT="${{ steps.analyze.outputs.pr_count }}"
+
+        # Close old analysis issues
+        OLD_ISSUES=$(gh issue list --repo "$GITHUB_REPOSITORY" \
+          --label "breakability-analysis" --state open \
+          --json number --jq '.[].number' 2>/dev/null || true)
+        for ISSUE_NUM in $OLD_ISSUES; do
+          gh issue close "$ISSUE_NUM" --repo "$GITHUB_REPOSITORY" \
+            --comment "Superseded by new analysis run at $TIMESTAMP" 2>/dev/null || true
+        done
+
+        # Create analysis task
+        ISSUE_URL=$(gh issue create \
+          --repo "$GITHUB_REPOSITORY" \
+          --title "🔍 Breakability Analysis — $TIMESTAMP ($PR_COUNT PRs)" \
+          --body "## Breakability Analysis Task
+
+**Run:** $TIMESTAMP
+**PRs analyzed:** $PR_COUNT
+**Results branch:** \`breakability-results\`
+
+### Instructions
+
+You are the \`breakability-analyst\` agent. Execute the following:
+
+1. Fetch build results: \`git fetch origin breakability-results && git show origin/breakability-results:build-results.json > /tmp/build-results.json\`
+2. Read the full analysis instructions from \`.github/breakability-prompt.md\`
+3. Follow Section 7 (Execution) of that file exactly:
+   - Read build-results.json
+   - Create ONE merge plan Issue
+   - Post structured comments on EVERY PR (100% coverage)
+   - Verify counts
+
+### Key Rules
+- NEVER close, merge, or modify any PR
+- NEVER override build verdicts
+- Copy \`verification_label\` from JSON verbatim
+- 100% PR comment coverage is mandatory
+- Use the comment formats from Section 4 of breakability-prompt.md" \
+          --assignee "copilot" \
+          --label "breakability-analysis")
+
+        echo "✅ Analysis task created: $ISSUE_URL"
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
