@@ -104,6 +104,7 @@ jobs:
           BATCH_ID=1
           BATCH_PRS=""
           COUNT=0
+          FIRST=true
 
           while IFS= read -r pr; do
             [[ -z "$pr" ]] && continue
@@ -111,7 +112,12 @@ jobs:
             BATCH_PRS="${BATCH_PRS}${BATCH_PRS:+,}${pr}"
 
             if [[ "$COUNT" -ge "$BATCH_SIZE" ]]; then
-              BATCHES="${BATCHES}${BATCH_ID:+,}{\"id\":$BATCH_ID,\"prs\":\"$BATCH_PRS\"}"
+              if [[ "$FIRST" == "true" ]]; then
+                FIRST=false
+              else
+                BATCHES="${BATCHES},"
+              fi
+              BATCHES="${BATCHES}{\"id\":$BATCH_ID,\"prs\":\"$BATCH_PRS\"}"
               BATCH_ID=$((BATCH_ID + 1))
               BATCH_PRS=""
               COUNT=0
@@ -119,12 +125,24 @@ jobs:
           done <<< "$PR_NUMS"
 
           if [[ -n "$BATCH_PRS" ]]; then
-            BATCHES="${BATCHES}${BATCH_ID:+,}{\"id\":$BATCH_ID,\"prs\":\"$BATCH_PRS\"}"
+            if [[ "$FIRST" == "true" ]]; then
+              FIRST=false
+            else
+              BATCHES="${BATCHES},"
+            fi
+            BATCHES="${BATCHES}{\"id\":$BATCH_ID,\"prs\":\"$BATCH_PRS\"}"
           fi
           BATCHES="${BATCHES}]"
 
-          echo "matrix={\"batch\":$BATCHES}" >> "$GITHUB_OUTPUT"
+          MATRIX_JSON="{\"batch\":$BATCHES}"
+          # Validate JSON before setting output (invalid JSON silently breaks fromJson)
+          echo "$MATRIX_JSON" | python3 -c "import sys,json; json.loads(sys.stdin.read())" 2>/dev/null || {
+            echo "::error::Generated invalid matrix JSON: $MATRIX_JSON"
+            exit 1
+          }
+          echo "matrix=$MATRIX_JSON" >> "$GITHUB_OUTPUT"
           echo "Discovered $TOTAL PRs split into $(echo $BATCHES | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))' 2>/dev/null || echo $BATCH_COUNT) batches"
+          echo "Matrix JSON: $MATRIX_JSON"
 
   analyze:
     name: "Batch ${{ matrix.batch.id }}"
