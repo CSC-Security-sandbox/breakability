@@ -1,0 +1,48 @@
+name: 'Breakability Check'
+description: 'Analyzes Dependabot PRs for dependency upgrade risk with verified API compatibility'
+inputs:
+  github-token:
+    description: 'GitHub token for posting comments and labels'
+    required: true
+    default: ${{ github.token }}
+  ecosystem:
+    description: 'Package ecosystem (auto-detect, node, go, python)'
+    default: 'auto-detect'
+  exclude-packages:
+    description: 'Comma-separated packages to skip'
+    default: ''
+  comment-threshold:
+    description: 'Only post comments at or above this level (low, medium, high, critical)'
+    default: 'low'
+  ai-review:
+    description: 'Enable AI behavioral analysis (Stage 6.5)'
+    default: 'false'
+  ai-proxy-url:
+    description: 'LLM proxy endpoint URL (OpenAI-compatible)'
+    default: 'https://llm-proxy-api.ai.openeng.netapp.com'
+  ai-proxy-key:
+    description: 'API key for LLM proxy'
+    default: ''
+  ai-model:
+    description: 'LLM model name'
+    default: 'gpt-4.1-mini'
+  exploitability-check:
+    description: 'Enable CVE exploitability assessment via AI'
+    default: 'false'
+  pr-number:
+    description: 'PR number to analyze (for batch/scheduled mode)'
+    default: '0'
+outputs:
+  score:
+    description: 'Numeric breakability score (highest across all packages)'
+  classification:
+    description: 'LOW, MEDIUM, HIGH, CRITICAL, or INCONCLUSIVE'
+  verification-rate:
+    description: 'Fraction of imports verified (e.g., 4/6)'
+  package-count:
+    description: 'Number of packages analyzed'
+  results:
+    description: 'Full JSON results array'
+runs:
+  using: 'node20'
+  main: 'index.js'
