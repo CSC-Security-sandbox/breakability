@@ -1,0 +1,138 @@
+{
+  "_comment": "Smoke-test fixture for release_notes_evidence.py. Each case has a pr_record and expected_class.",
+  "cases": [
+    {
+      "id": "clean_bugfix_bullets",
+      "description": "Bugfix-only bullets — no behavioral signal → NO_RELEVANT_CHANGE",
+      "expected_class": "no_relevant_change",
+      "pr_record": {
+        "package": "example-lib",
+        "ecosystem": "npm",
+        "from": "1.4.0",
+        "to": "1.4.1",
+        "deterministic": {
+          "changelogSignal": {
+            "bullets": [
+              "bug fix: handle null pointer in config loader",
+              "fixes #412: incorrect error message on timeout"
+            ]
+          },
+          "changelogText": "This release contains bug fixes only. No API changes."
+        }
+      }
+    },
+    {
+      "id": "explicit_breaking_change",
+      "description": "Changelog declares explicit breaking change → BREAKING_CHANGE",
+      "expected_class": "breaking_change",
+      "pr_record": {
+        "package": "acme-client",
+        "ecosystem": "go",
+        "from": "2.0.0",
+        "to": "3.0.0",
+        "deterministic": {
+          "changelogSignal": {
+            "bullets": [
+              "BREAKING CHANGE: removed deprecated Connect() function",
+              "migration required: use NewClient().Connect() instead"
+            ]
+          },
+          "changelogText": "Major version bump. Breaking change: Connect() removed. Migration guide available."
+        }
+      }
+    },
+    {
+      "id": "behavioral_possible_change",
+      "description": "Function now returns an error — behavioral, possible break → POSSIBLE_CHANGE",
+      "expected_class": "possible_change",
+      "pr_record": {
+        "package": "requests",
+        "ecosystem": "python",
+        "from": "2.26.0",
+        "to": "2.27.0",
+        "deterministic": {
+          "changelogSignal": {
+            "bullets": [
+              "now returns an error on HTTP 429 instead of silently retrying",
+              "default timeout behaviour changed for streamed responses"
+            ]
+          },
+          "changelogText": "Retry logic now returns an error for rate-limited responses."
+        }
+      }
+    },
+    {
+      "id": "no_changelog_available",
+      "description": "No changelog text at all → UNAVAILABLE",
+      "expected_class": "unavailable",
+      "pr_record": {
+        "package": "internal-util",
+        "ecosystem": "go",
+        "from": "0.1.0",
+        "to": "0.2.0",
+        "deterministic": {}
+      }
+    },
+    {
+      "id": "release_notes_field_clean",
+      "description": "release_notes field with documentation-only content → NO_RELEVANT_CHANGE",
+      "expected_class": "no_relevant_change",
+      "pr_record": {
+        "package": "my-sdk",
+        "ecosystem": "npm",
+        "from": "3.1.0",
+        "to": "3.1.1",
+        "release_notes": "Documentation update: fixed typo in README. No functional change.",
+        "deterministic": {}
+      }
+    },
+    {
+      "id": "release_notes_field_breaking",
+      "description": "release_notes field declares incompatible change → BREAKING_CHANGE",
+      "expected_class": "breaking_change",
+      "pr_record": {
+        "package": "core-api",
+        "ecosystem": "python",
+        "from": "4.0.0",
+        "to": "5.0.0",
+        "release_notes": {
+          "body": "This is a backward incompatible release. Migration guide: https://docs.example.com/migrate"
+        },
+        "deterministic": {}
+      }
+    },
+    {
+      "id": "thin_version_only",
+      "description": "Only a bare version string as changelog — too thin → UNAVAILABLE",
+      "expected_class": "unavailable",
+      "pr_record": {
+        "package": "tiny-pkg",
+        "ecosystem": "npm",
+        "from": "0.0.1",
+        "to": "0.0.2",
+        "deterministic": {
+          "changelogText": "v0.0.2"
+        }
+      }
+    },
+    {
+      "id": "removed_function_possible",
+      "description": "Function removed — possible break even without explicit 'breaking' keyword",
+      "expected_class": "possible_change",
+      "pr_record": {
+        "package": "db-driver",
+        "ecosystem": "go",
+        "from": "1.3.0",
+        "to": "1.4.0",
+        "deterministic": {
+          "changelogSignal": {
+            "bullets": [
+              "removed the QueryRaw method which was deprecated in 1.2.0",
+              "bug fix: connection pool leak under high load"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

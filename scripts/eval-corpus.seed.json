@@ -1,0 +1,59 @@
+{
+  "metadata": {
+    "snapshot": "merge-plan-122",
+    "description": "Frozen evaluation corpus for breakability CI policy validation",
+    "note": "These cases represent known breakability ground truth from the live merge plan #122. All PR numbers refer to this snapshot."
+  },
+  "cases": [
+    {
+      "pr_id": "18",
+      "ecosystem": "go",
+      "package": "github.com/example/storage/api",
+      "from_version": "1.2.0",
+      "to_version": "2.0.0",
+      "expected_label": "true_fix",
+      "expected_evidence_class": "api_break",
+      "notes": "Breaking API change: function signature altered. Build fails, test suite catches it."
+    },
+    {
+      "pr_id": "2",
+      "ecosystem": "npm",
+      "package": "lodash",
+      "from_version": "4.17.20",
+      "to_version": "4.17.21",
+      "expected_label": "true_review",
+      "expected_evidence_class": "supply_chain",
+      "notes": "Supply-chain signal: author changed, requires human verification even though patch version."
+    },
+    {
+      "pr_id": "8",
+      "ecosystem": "python",
+      "package": "requests",
+      "from_version": "2.26.0",
+      "to_version": "2.27.0",
+      "expected_label": "true_review",
+      "expected_evidence_class": "behavioral_change",
+      "notes": "Conservative: behavioral changes in retry logic not fully covered by probes. Requires review."
+    },
+    {
+      "pr_id": "28",
+      "ecosystem": "go",
+      "package": "github.com/security/crypto",
+      "from_version": "1.0.0",
+      "to_version": "1.0.1",
+      "expected_label": "true_safe",
+      "expected_evidence_class": "none",
+      "notes": "CVE patch: test suite passes, no interface changes, minimal delta."
+    },
+    {
+      "pr_id": "16",
+      "ecosystem": "npm",
+      "package": "@types/node",
+      "from_version": "17.0.0",
+      "to_version": "18.0.0",
+      "expected_label": "true_review",
+      "expected_evidence_class": "test_coverage",
+      "notes": "Test suite exists but not verified clean in sandbox. Requires human review to confirm."
+    }
+  ]
+}

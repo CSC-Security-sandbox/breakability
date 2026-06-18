@@ -1,0 +1,66 @@
+apiVersion: skaffold/v4beta12
+kind: Config
+build:
+  local:
+    push: false
+  artifacts:
+    - image: base
+      context: .
+      docker:
+        dockerfile: common/Dockerfile
+---
+apiVersion: skaffold/v4beta12
+kind: Config
+build:
+  local:
+    push: true
+  artifacts:
+    - image: ghcr.io/vcp-vsa-control-plane/google-proxy
+      context: .
+      docker:
+        dockerfile: google-proxy/Dockerfile
+        buildArgs:
+          GHVSA_PAT: "{{.GHVSA_PAT}}"
+      requires:
+        - image: base
+          alias: BASE
+    - image: ghcr.io/vcp-vsa-control-plane/core
+      context: .
+      docker:
+        dockerfile: core/Dockerfile
+        buildArgs:
+          GHVSA_PAT: "{{.GHVSA_PAT}}"
+      requires:
+        - image: base
+          alias: BASE
+    - image: ghcr.io/vcp-vsa-control-plane/vcp-worker
+      context: .
+      docker:
+        dockerfile: worker/Dockerfile
+        buildArgs:
+          GHVSA_PAT: "{{.GHVSA_PAT}}"
+      requires:
+        - image: base
+          alias: BASE
+manifests:
+  rawYaml:
+    - google-proxy/kubernetes/*
+    - core/kubernetes/*
+    - worker/kubernetes/*
+portForward:
+  - resourceType: deployment
+    resourceName: google-proxy
+    port: 8080
+    localPort: 9000
+  - resourceType: deployment
+    resourceName: core-service
+    port: 8080
+    localPort: 9001
+  - resourceType: deployment
+    resourceName: vcp-worker
+    port: 8080
+    localPort: 9002
+profiles:
+  - name: gcb
+    build:
+      googleCloudBuild: {}

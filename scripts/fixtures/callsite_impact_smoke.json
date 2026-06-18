@@ -1,0 +1,175 @@
+{
+  "_comment": "Smoke fixture for callsite_impact.py. Four representative PRs covering all four impact verdicts.",
+
+  "build_results": {
+    "prs": {
+      "101": {
+        "ecosystem": "go",
+        "declared_break_reachability": {
+          "checked": true,
+          "reachability_kind": "not_imported",
+          "prod_reachable": false
+        }
+      },
+      "102": {
+        "ecosystem": "go",
+        "declared_break_reachability": {
+          "checked": true,
+          "reachability_kind": "import",
+          "prod_reachable": true,
+          "surface_evidence": [
+            {
+              "file": "internal/storage/client.go",
+              "line": 87,
+              "symbol": "NewClient",
+              "is_test": false,
+              "named": true
+            }
+          ]
+        }
+      },
+      "103": {
+        "ecosystem": "go",
+        "declared_break_reachability": {
+          "checked": true,
+          "reachability_kind": "import",
+          "prod_reachable": true,
+          "surface_evidence": [
+            {
+              "file": "internal/queue/producer.go",
+              "line": 34,
+              "symbol": "Publish",
+              "is_test": false,
+              "named": true
+            }
+          ]
+        }
+      },
+      "104": {
+        "ecosystem": "go",
+        "declared_break_reachability": {
+          "checked": false
+        }
+      }
+    }
+  },
+
+  "release_note_evidence": {
+    "101": {
+      "has_breaking_change": true,
+      "affected_symbols": ["NewClient", "WithTimeout"],
+      "claims": [
+        {
+          "breaking": true,
+          "symbols": ["NewClient", "WithTimeout"],
+          "description": "Constructor signature changed; second argument removed."
+        }
+      ]
+    },
+    "102": {
+      "has_breaking_change": true,
+      "affected_symbols": ["NewClient"],
+      "claims": [
+        {
+          "breaking": true,
+          "symbols": ["NewClient"],
+          "description": "NewClient now requires context as first argument."
+        }
+      ]
+    },
+    "103": {
+      "has_breaking_change": true,
+      "affected_symbols": ["NewClient"],
+      "claims": [
+        {
+          "breaking": true,
+          "symbols": ["NewClient"],
+          "description": "NewClient signature changed."
+        }
+      ]
+    },
+    "104": {
+      "has_breaking_change": true,
+      "affected_symbols": ["Connect"],
+      "claims": [
+        {
+          "breaking": true,
+          "symbols": ["Connect"],
+          "description": "Connect now returns an error tuple."
+        }
+      ]
+    }
+  },
+
+  "reachability_evidence": {
+    "101": {
+      "verdict": "ABSENT",
+      "confidence": "high",
+      "callsites": [],
+      "import_sites": [],
+      "dynamic_hazards": [],
+      "absent_reason": "deterministic_layer_confirmed_not_imported",
+      "uncertain_reason": null,
+      "searched_symbols": ["NewClient", "WithTimeout"],
+      "checked": true,
+      "sources_used": []
+    },
+    "102": {
+      "verdict": "PRESENT",
+      "confidence": "high",
+      "callsites": [
+        {
+          "file": "internal/storage/client.go",
+          "line": 87,
+          "symbol": "NewClient",
+          "is_test": false
+        }
+      ],
+      "import_sites": [],
+      "dynamic_hazards": [],
+      "absent_reason": null,
+      "uncertain_reason": null,
+      "searched_symbols": ["NewClient"],
+      "checked": true,
+      "sources_used": ["declared_break_reachability.surface_evidence"]
+    },
+    "103": {
+      "verdict": "PRESENT",
+      "confidence": "high",
+      "callsites": [
+        {
+          "file": "internal/queue/producer.go",
+          "line": 34,
+          "symbol": "Publish",
+          "is_test": false
+        }
+      ],
+      "import_sites": [],
+      "dynamic_hazards": [],
+      "absent_reason": null,
+      "uncertain_reason": null,
+      "searched_symbols": ["NewClient"],
+      "checked": true,
+      "sources_used": ["declared_break_reachability.surface_evidence"]
+    },
+    "104": {
+      "verdict": "UNCERTAIN",
+      "confidence": "low",
+      "callsites": [],
+      "import_sites": [],
+      "dynamic_hazards": [],
+      "absent_reason": null,
+      "uncertain_reason": "no_production_import_evidence_unchecked",
+      "searched_symbols": ["Connect"],
+      "checked": false,
+      "sources_used": []
+    }
+  },
+
+  "expected": {
+    "101": "NOT_REACHED",
+    "102": "REACHED_RELEVANT",
+    "103": "REACHED_UNKNOWN",
+    "104": "UNCERTAIN"
+  }
+}
