@@ -89,13 +89,22 @@ def format_verdict_header(pr: Dict[str, Any]) -> str:
     }
     emoji, label, breakability = verdict_map.get(verdict, ("⚠️", "REVIEW", "Medium"))
     
+    # Generate headline based on verdict
+    headlines = {
+        "SAFE": "This upgrade is safe to merge.",
+        "REVIEW": "Review required for this upgrade.",
+        "BUILD_FAILS": "Build fails with this upgrade.",
+        "BLOCKED": "Critical issues block this upgrade."
+    }
+    headline = headlines.get(verdict, "Review required for this upgrade.")
+    
     return f"""## {emoji} Breakability Analysis — {label} ({bump.title()}, Reachable, Behavioral Changes)
 
 **Package:** `{pkg}` {from_ver} → {to_ver}  
 **Bump Type:** {bump} · **Dep Type:** {dep_type} · **Priority:** {priority}  
 **Verdict:** {emoji} **{label}** · **Confidence:** {confidence.upper()}
 
-**Headline:** {pr.get('verdict_v2', {}).get('reason', 'Review required for this upgrade.')}
+**Headline:** {headline}
 
 **Recommendation:** {_get_recommendation(pr)}
 
@@ -1131,17 +1140,21 @@ def _count_warning_signals(signals: List) -> str:
     return f"{warnings}/{total}"
 
 def _get_recommendation(pr: Dict) -> str:
-    verdict = pr.get("verdict_v2", {}).get("verdict", "REVIEW")
+    verdict_norm = _normalize_verdict(pr)
+    verdict = verdict_norm["verdict"]
+    
     if verdict == "SAFE":
         return "Safe to merge. Build passes and no breaking changes detected."
     elif verdict == "BUILD_FAILS":
         return "Fix build errors before merging."
     else:
-        pkg = pr.get("package")
-        det = pr.get("deterministic", {})
-        files = det.get("import_files", [])
-        file_ref = files[0] if files else "affected code"
-        return f"Review the changelog and verify callsites at `{file_ref}` are compatible, then merge."
+        reach_norm = _normalize_reachability(pr)
+        if reach_norm["reached"]:
+            files = reach_norm["import_files"]
+            file_ref = files[0] if files else "affected code"
+            return f"Review the changelog and verify callsites at `{file_ref}` are compatible, then merge."
+        else:
+            return "Review the changelog for any notable changes, then merge."
 
 def _get_build_confidence(build: Dict) -> str:
     verdict = build.get("verdict", "unknown")
