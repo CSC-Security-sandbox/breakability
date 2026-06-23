@@ -118,14 +118,16 @@ def format_build_analysis(pr: Dict[str, Any]) -> str:
 
 def format_probe_section(pr: Dict[str, Any]) -> str:
     """Format behavioral probe section with SHA256 and reproduction."""
-    probe = pr.get("deterministic", {}).get("probe", {})
+    # Try behavioral_grade first (differential-probe.py output), then fallback to deterministic.probe
+    probe = pr.get("behavioral_grade") or pr.get("deterministic", {}).get("probe", {})
     
     if not probe:
         return "### 🔬 Behavioral Probe\n**Status:** ⬜ **NOT RUN**\n\n---\n"
     
-    old_sha = probe.get("old_sha256", "N/A")[:16]
-    new_sha = probe.get("new_sha256", "N/A")[:16]
-    same = old_sha == new_sha
+    # Handle both behavioral_grade and deterministic.probe formats
+    old_sha = probe.get("old_sha256", "N/A")[:16] if "old_sha256" in probe else "N/A"
+    new_sha = probe.get("new_sha256", "N/A")[:16] if "new_sha256" in probe else "N/A"
+    same = old_sha == new_sha or probe.get("same_behavior", False)
     
     status_emoji = "✅" if same else "⚠️"
     status_text = "SAME" if same else "DIFFERENT"
@@ -258,19 +260,35 @@ def _format_reachability_signal(pr: Dict) -> str:
     return f"⚠️ **REACHED** ({len(files)} files)"
 
 def _format_probe_signal(pr: Dict) -> str:
-    probe = pr.get("deterministic", {}).get("probe", {})
+    # Try behavioral_grade first, then deterministic.probe
+    probe = pr.get("behavioral_grade") or pr.get("deterministic", {}).get("probe", {})
     if not probe:
         return "⬜ NOT RUN"
+    
+    # Handle both formats
+    if "same_behavior" in probe:
+        return "✅ SAME" if probe.get("same_behavior") else "⚠️ **DIFFERENT**"
+    
     old_sha = probe.get("old_sha256", "")[:16]
     new_sha = probe.get("new_sha256", "")[:16]
-    if old_sha == new_sha:
+    if old_sha and new_sha and old_sha == new_sha:
         return "✅ SAME"
     return "⚠️ **DIFFERENT**"
 
 def _format_ai_signal(pr: Dict) -> str:
-    ai = pr.get("ai_verdict", {})
+    # Try ai_adjudication first, then ai_verdict for backward compat
+    ai = pr.get("ai_adjudication") or pr.get("ai_verdict", {})
     if not ai:
         return "⬜ NOT-APPLICABLE"
+    
+    # Handle both formats
+    if "applied" in ai:
+        applied = ai.get("applied", "")
+        if applied == "downgrade_to_safe":
+            return "✅ SAFE"
+        elif applied == "needs_change":
+            return "⚠️ REVIEW"
+    
     return ai.get("verdict", "REVIEW")
 
 def _get_evidence_summary(pr: Dict, layer: str) -> str:
