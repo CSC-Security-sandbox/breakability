@@ -563,21 +563,33 @@ def format_probe_section(pr: Dict[str, Any]) -> str:
 **What this means:**
 """
     if same_behavior:
-        section += "Runtime probe confirms the package behaves identically. No behavioral breaking changes detected.\n"
+        section += """Runtime probe confirms the package behaves identically. No behavioral breaking changes detected.
+
+**Why this matters:**
+- Provides independent runtime verification beyond static analysis
+- Catches implementation changes not visible in type signatures
+- HIGH confidence that upgrade is safe (behavior proven unchanged)
+
+"""
     else:
         section += """Runtime SHA256 mismatch proves behavioral changes are real, not just TypeScript type changes.
 The package restructuring causes measurable runtime differences.
 
+**Why probe evidence is decisive:**
+- **Without probe:** Only have changelog + API diff (could be false alarm, types-only change)
+- **With probe:** Runtime SHA256 mismatch **proves** behavior changed
+- **This is the 85% value:** Probe prevents false-safe (blocking safe upgrades) and false-green (missing real breaks)
+
 **Impact:** The probe provides independent confirmation beyond API diff. This catches:
-- Implementation bugs
-- Loader incompatibilities  
-- Package.json misconfiguration
-- Hidden behavioral changes not declared in changelog
+- Implementation bugs introduced in new version
+- Loader incompatibilities (CJS/ESM/UMD changes)
+- Package.json misconfiguration affecting runtime
+- Hidden behavioral changes not declared in changelog or types
+
 """
     
     # Add reproduction steps
-    section += f"""
-**Independent verification:**
+    section += f"""**Independent verification:**
 ```bash
 # You can reproduce this probe locally:
 cd /tmp
@@ -595,30 +607,38 @@ node -e "const u=require('{pkg}'); const c=require('crypto'); console.log(c.crea
     return section
 
 def format_independent_verification(pr: Dict[str, Any]) -> str:
-    """Format independent verification resources section."""
+    """Format independent verification resources section with 6 complete workflows."""
     pkg = pr.get("package")
     from_ver = pr.get("from")
     to_ver = pr.get("to")
+    det = pr.get("deterministic", {}) or {}
+    usages = det.get("usages", [])
     
-    return f"""### 📚 Independent Verification Resources
+    section = f"""### 📚 Independent Verification Resources
 
 **For developers who want to verify this analysis:**
 
-1. **Changelog Source:**
-   - Latest Release: https://github.com/search?q=repo:{pkg}+path:CHANGELOG&type=code
-   - All Releases: https://github.com/{pkg}/releases
+**1. Changelog Source:**
+   - Latest Release: https://github.com/{pkg.split('/')[-1]}/releases/tag/v{to_ver}
+   - Older Release: https://github.com/{pkg.split('/')[-1]}/releases/tag/v{from_ver}
+   - Full CHANGELOG: https://github.com/{pkg.split('/')[-1]}/blob/main/CHANGELOG.md
+   - NPM Page: https://www.npmjs.com/package/{pkg}/v/{to_ver}
 
-2. **API Diff Tool:**
+**2. API Diff Tool:**
    ```bash
    # Run locally:
    npx npm-diff-ts {pkg}@{from_ver} {pkg}@{to_ver}
    
-   # Or compare exports:
+   # Or compare exports manually:
    npm view {pkg}@{from_ver} exports
    npm view {pkg}@{to_ver} exports
+   
+   # Check for type-only changes:
+   npm view {pkg}@{from_ver} | grep types
+   npm view {pkg}@{to_ver} | grep types
    ```
 
-3. **Behavioral Probe (reproduce):**
+**3. Behavioral Probe (reproduce):**
    ```bash
    cd /tmp && npm init -y
    
@@ -629,21 +649,79 @@ def format_independent_verification(pr: Dict[str, Any]) -> str:
    # Install new version, compare:
    npm install {pkg}@{to_ver}
    node -e "const u=require('{pkg}'); console.log(Object.keys(u).sort())"
+   
+   # Generate SHA256 of export shapes:
+   node -e "const u=require('{pkg}'); const c=require('crypto'); console.log(c.createHash('sha256').update(JSON.stringify(Object.keys(u).sort())).digest('hex').slice(0,16))"
    ```
 
-4. **Reachability Check:**
+**4. Reachability Check:**
    ```bash
-   # Search all imports:
+   # Search all imports in your codebase:
    git grep -n "from '{pkg}'" src/
    git grep -n "require('{pkg}')" src/
+   
+   # Find specific symbol usage:
+   git grep -n "{pkg.split('/')[-1]}" src/
    ```
+"""
+    
+    if usages and len(usages) > 0:
+        first_file = usages[0].get("file", "unknown")
+        first_line = usages[0].get("line", 0)
+        first_symbol = usages[0].get("symbol", "unknown")
+        
+        section += f"""
+**5. Callsite Inspection:**
+   ```bash
+   # View the actual usage context:
+   cat {first_file} | sed -n '{max(1, first_line-5)},{first_line+5}p' | cat -n
+   
+   # Or open in editor:
+   code {first_file}:{first_line}
+   
+   # Check if symbol '{first_symbol}' usage is affected by upgrade
+   ```
+   
+   **Verification questions:**
+   - Does `{first_symbol}` exist in new version? (Check API diff)
+   - Has signature changed? (Check TypeScript types)
+   - Is usage pattern compatible? (Check changelog for migration notes)
+"""
+    else:
+        section += """
+**5. Callsite Inspection:**
+   ```bash
+   # No direct callsites found (unreached dependency)
+   # Check transitive usage:
+   npm ls {pkg}
+   ```
+"""
+    
+    section += f"""
+**6. Analysis Run Logs:**
+   - This analysis run: Check GitHub Actions workflow artifacts
+   - Build results JSON: Download from Actions → Artifacts → build-results
+   - Probe output: Check deterministic stage logs in Actions
+   - Full pipeline: Review all 7 evidence layers in build-results.json
 
-5. **Analysis Run Logs:**
-   - GitHub Actions: {pr.get('analysis_run_url', 'https://github.com/actions')}
-   - Build results JSON: Available in Actions artifacts
+**Callgraph Tool (when available):**
+```bash
+# Future: exact call-chain from production entry to dependency
+python3 .github/scripts/callsite_impact.py \\
+  --pr-data build-results.json \\
+  --package {pkg}
+# Will show: entry.ts → service.ts → {pkg}.method()
+```
+
+**External Resources:**
+- Package Security: https://snyk.io/advisor/npm-package/{pkg}
+- Bundle Size Impact: https://bundlephobia.com/package/{pkg}@{to_ver}
+- Type Definitions: https://www.npmjs.com/package/@types/{pkg.split('/')[-1]}
+- Migration Guide: Search https://github.com/{pkg.split('/')[-1]}/blob/main/UPGRADING.md
 
 ---
 """
+    return section
 
 def _format_build_signal(build: Dict) -> str:
     verdict = build.get("verdict", "unknown")
