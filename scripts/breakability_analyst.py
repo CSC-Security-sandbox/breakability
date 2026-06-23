@@ -238,7 +238,7 @@ def format_changelog_analysis(pr: Dict[str, Any]) -> str:
     return section
 
 def format_reachability_analysis(pr: Dict[str, Any]) -> str:
-    """Format reachability analysis section with callsites."""
+    """Format reachability analysis section with callsite detail."""
     det = pr.get("deterministic", {})
     reachable = det.get("reachable", False)
     import_files = det.get("import_files", [])
@@ -258,6 +258,7 @@ def format_reachability_analysis(pr: Dict[str, Any]) -> str:
     
     pkg = pr.get("package", "unknown")
     
+    # Enhanced section with callsite detail
     section = f"""### 🔍 Reachability Analysis
 **Status:** ⚠️ **REACHED** | **Import scan:** {len(import_files)} file(s) import this package
 
@@ -269,8 +270,16 @@ def format_reachability_analysis(pr: Dict[str, Any]) -> str:
 ```
 """
     
+    # Add file:line detail for each import
     for file in import_files[:10]:  # First 10 files
         section += f"{file}\n"
+        # Add callsite detail if available
+        callsites = det.get("callsites", {}).get(file, [])
+        if callsites:
+            for cs in callsites[:3]:  # First 3 callsites per file
+                line = cs.get("line", "?")
+                symbol = cs.get("symbol", "?")
+                section += f"  Line {line}: {symbol}\n"
     
     if len(import_files) > 10:
         section += f"... and {len(import_files) - 10} more files\n"
@@ -280,11 +289,23 @@ def format_reachability_analysis(pr: Dict[str, Any]) -> str:
 **Callsite Impact:**
 - Package is actively used in production code
 - Breaking changes could affect {len(import_files)} file(s)
-- Manual review recommended to verify compatibility
+- **Recommendation:** Review all callsites to verify compatibility
 
-**Confidence:** **HIGH** — Import scan confirms usage.
+"""
+    
+    # Add callgraph analysis if available
+    api_changes = det.get("api_changes") or 0
+    if api_changes > 0:
+        section += f"""**Breaking Change Risk:**
+- API changes detected: {api_changes} exports modified
+- Each import site should be verified against new signatures
+- Risk level: {"HIGH" if api_changes > 5 else "MEDIUM"}
 
-**Recommendation:** Review all callsites to ensure compatibility with new version.
+"""
+    
+    section += f"""**Confidence:** **HIGH** — Import scan confirms usage.
+
+**Next Steps:** Review the specific symbols called at each import site to ensure compatibility with the new version.
 
 ---
 """
@@ -333,7 +354,7 @@ The AI arbiter engages for break-reachable cases where signals conflict and auto
     return section
 
 def format_policy_decision(pr: Dict[str, Any]) -> str:
-    """Format policy decision section with precedence explanation."""
+    """Format policy decision section with clear precedence hierarchy."""
     verdict_v2 = pr.get("verdict_v2", {})
     verdict = verdict_v2.get("verdict", "REVIEW")
     confidence = verdict_v2.get("confidence", "MEDIUM")
@@ -341,39 +362,77 @@ def format_policy_decision(pr: Dict[str, Any]) -> str:
     section = f"""### 🧮 Policy Decision
 **How the verdict was reached:**
 
-The final verdict follows a strict precedence hierarchy:
+The final verdict follows a **strict precedence hierarchy** (fail-safe design):
 
-1. **Build Failures:** Automatic BLOCKED if build completely fails
-2. **Behavioral Probe:** If runtime behavior differs → REVIEW (high confidence)
-3. **Reachability + Breaking:** If reached AND (API breaking OR changelog breaking) → REVIEW
-4. **AI Arbiter:** Can downgrade REVIEW → SAFE if signals conflict and low-risk
-5. **Default:** SAFE if no warning signals
+```
+Precedence Order (highest to lowest):
+1. Build Failures → BLOCKED (nothing works = immediate block)
+2. Security/CVE → BLOCKED (safety-critical, never auto-merge)
+3. Behavioral Probe DIFFERENT → REVIEW (runtime changes = human verify)
+4. Reached + Breaking API/Changelog → REVIEW (impact confirmed)
+5. AI Arbiter Downgrade → SAFE (low-risk after analysis)
+6. Default (no warnings) → SAFE (appears safe to merge)
+```
 
-**This PR's Path:**
+**This PR's Decision Path:**
 """
     
-    # Reconstruct decision path
+    # Reconstruct decision path with precedence labels
+    steps = []
+    final_reason = None
+    
     build = pr.get("build", {})
     if build.get("verdict") == "fail":
-        section += "- ❌ Build fails → **BLOCKED**\n"
+        steps.append("❌ **[P1: Build]** Build completely fails → **BLOCKED**")
+        final_reason = "Build failure blocks merge (precedence #1)"
     elif build.get("verdict") == "pre_existing":
-        section += "- ⚠️ Build has pre-existing failures (not caused by upgrade)\n"
+        steps.append("⚠️ **[P1: Build]** Pre-existing failures (not caused by this upgrade)")
     else:
-        section += "- ✅ Build passes\n"
+        steps.append("✅ **[P1: Build]** Build passes")
     
+    # Check security/CVE (precedence #2)
+    cve = pr.get("deterministic", {}).get("cve")
+    if cve and cve.get("found"):
+        steps.append("🔴 **[P2: Security]** CVE detected → **BLOCKED**")
+        final_reason = "Security advisory blocks merge (precedence #2)"
+    
+    # Check behavioral probe (precedence #3)
     probe = pr.get("behavioral_grade") or pr.get("deterministic", {}).get("probe", {})
     if probe.get("same_behavior") == False or probe.get("different"):
-        section += "- ⚠️ Behavioral probe detects runtime changes → **REVIEW**\n"
+        steps.append("⚠️ **[P3: Probe]** Runtime behavior changed → **REVIEW**")
+        if not final_reason:
+            final_reason = "Behavioral changes require review (precedence #3)"
     
+    # Check reachability + breaking (precedence #4)
     det = pr.get("deterministic", {})
     if det.get("reachable") and ((det.get("api_changes") or 0) > 0 or det.get("changelogSignal") == "breaking"):
-        section += "- ⚠️ Package is reachable + breaking changes → **REVIEW**\n"
+        steps.append("⚠️ **[P4: Breaking]** Reached + API/changelog breaking → **REVIEW**")
+        if not final_reason:
+            final_reason = "Breaking changes in reached code (precedence #4)"
     
+    # Check AI arbiter (precedence #5)
     ai = pr.get("ai_adjudication")
     if ai and ai.get("applied") == "downgrade_to_safe":
-        section += "- ✅ AI arbiter downgrades to **SAFE** (low risk)\n"
+        steps.append("✅ **[P5: AI]** AI arbiter analyzed and downgraded to **SAFE**")
+        if not final_reason:
+            final_reason = "AI confirmed low risk after analysis (precedence #5)"
     
-    section += f"\n**Final Verdict:** **{verdict}** (Confidence: {confidence})\n\n---\n"
+    # Default case (precedence #6)
+    if not final_reason:
+        final_reason = "No warning signals detected (precedence #6 default)"
+    
+    for step in steps:
+        section += f"{step}\n"
+    
+    section += f"""
+**Final Verdict:** **{verdict}** (Confidence: {confidence})
+
+**Why {verdict}?** {final_reason}
+
+**Precedence Applied:** The highest-precedence rule that matched determined the verdict. Lower-precedence rules were not consulted (fail-safe cascade).
+
+---
+"""
     
     return section
 
