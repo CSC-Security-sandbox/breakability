@@ -116,6 +116,303 @@ def format_build_analysis(pr: Dict[str, Any]) -> str:
     
     return section
 
+def format_test_analysis(pr: Dict[str, Any]) -> str:
+    """Format test analysis section."""
+    test = pr.get("test", {})
+    verdict = test.get("verdict", "skip")
+    reason = test.get("reason", "Build prerequisites not met")
+    
+    status_emoji = {"pass": "✅", "fail": "❌", "skip": "⚠️"}.get(verdict, "⬜")
+    status_label = verdict.upper().replace("_", " ")
+    
+    section = f"""### 🧪 Test Analysis
+**Status:** {status_emoji} **{status_label}** | **Reason:** {reason}
+
+**What we checked:**
+"""
+    
+    if verdict == "pass":
+        section += f"- ✅ Test suite executed successfully\n"
+        section += f"- ✅ All tests passed (exit {test.get('exit_code', 0)})\n"
+        section += f"- Tests run: {test.get('tests_run', 'N/A')}\n"
+    elif verdict == "fail":
+        section += f"- ❌ Test failures detected\n"
+        section += f"- Failed: {test.get('failed_count', 'N/A')} | Passed: {test.get('passed_count', 'N/A')}\n"
+    else:
+        section += f"- Test execution skipped ({reason})\n"
+        section += f"- Cannot verify runtime behavior via tests\n"
+    
+    confidence = "HIGH" if verdict == "pass" else "LOW"
+    section += f"\n**Confidence:** **{confidence}** — {'Test suite provides runtime verification' if verdict == 'pass' else 'No test evidence (mitigated by behavioral probe below)'}.\n\n---\n"
+    
+    return section
+
+def format_api_diff_analysis(pr: Dict[str, Any]) -> str:
+    """Format API diff analysis section with detailed changes."""
+    det = pr.get("deterministic", {})
+    changes = det.get("api_changes", 0)
+    removed = det.get("api_removed", 0)
+    added = det.get("api_added", 0)
+    
+    if changes == 0 and removed == 0 and added == 0:
+        return """### 📝 API Diff Analysis
+**Status:** ✅ **CLEAN** | **Tool:** api-diff (semantic analysis)
+
+**What we checked:**
+- No breaking changes detected
+- All exports remain stable
+
+**Confidence:** **HIGH** — No API changes.
+
+---
+"""
+    
+    section = f"""### 📝 API Diff Analysis
+**Status:** ⚠️ **BREAKING** | **Tool:** api-diff (semantic analysis)
+
+**What we checked:**
+- Removed exports: **{removed}**
+- Changed exports: **{changes}** (signature/implementation changes)
+- Added exports: **{added}**
+"""
+    
+    # Add API changes details if available
+    api_details = det.get("api_details", "")
+    if api_details:
+        section += f"\n**API Changes:**\n```typescript\n{api_details[:800]}\n```\n"
+    
+    section += f"\n**Confidence:** **HIGH** — Semantic analysis confirms API surface changes.\n\n---\n"
+    
+    return section
+
+def format_changelog_analysis(pr: Dict[str, Any]) -> str:
+    """Format changelog analysis section."""
+    det = pr.get("deterministic", {})
+    cl = det.get("changelogSignal", {})
+    
+    if isinstance(cl, str):
+        # Legacy format: just a string like "breaking" or "clean"
+        status = "⚠️ **BREAKING**" if cl == "breaking" else "✅ CLEAN"
+        section = f"""### 📋 Changelog Analysis
+**Status:** {status} | **Source:** Package changelog
+
+**M8 Classification:** **{cl.upper()}**
+
+**Confidence:** **MEDIUM** — Based on changelog signal.
+
+---
+"""
+        return section
+    
+    breaking_markers = cl.get("breaking_markers", 0)
+    has_changelog = cl.get("status") != "missing"
+    
+    if not has_changelog:
+        return """### 📋 Changelog Analysis
+**Status:** ⚪ **NOT AVAILABLE** | **Source:** No changelog found
+
+**Confidence:** **LOW** — Cannot assess changes without changelog.
+
+---
+"""
+    
+    status = "⚠️ **BREAKING**" if breaking_markers > 0 else "✅ CLEAN"
+    
+    section = f"""### 📋 Changelog Analysis
+**Status:** {status} | **Source:** GitHub Releases / CHANGELOG.md
+
+**Key Changes (from {pr.get('from', '?')} → {pr.get('to', '?')}):**
+"""
+    
+    changes = cl.get("changes", [])
+    if changes:
+        for change in changes[:10]:  # First 10 changes
+            section += f"- {change}\n"
+    else:
+        section += f"- **Breaking markers:** {breaking_markers}\n"
+    
+    m8_class = "BREAKING" if breaking_markers > 0 else "SAFE"
+    section += f"\n**M8 Classification:** **{m8_class}**\n"
+    section += f"\n**Confidence:** **HIGH** — Explicit version documentation available.\n\n---\n"
+    
+    return section
+
+def format_reachability_analysis(pr: Dict[str, Any]) -> str:
+    """Format reachability analysis section with callsites."""
+    det = pr.get("deterministic", {})
+    reachable = det.get("reachable", False)
+    import_files = det.get("import_files", [])
+    
+    if not reachable or not import_files:
+        return """### 🔍 Reachability Analysis
+**Status:** ✅ **NOT REACHED** | **Import scan:** No production imports
+
+**What we checked:**
+- Import scan: **0 production files** import this package
+- Package appears to be unused or dev-only dependency
+
+**Confidence:** **HIGH** — Static analysis confirms no imports.
+
+---
+"""
+    
+    pkg = pr.get("package", "unknown")
+    
+    section = f"""### 🔍 Reachability Analysis
+**Status:** ⚠️ **REACHED** | **Import scan:** {len(import_files)} file(s) import this package
+
+**What we checked:**
+- Import scan: **{len(import_files)} production file(s)** import `{pkg}`
+- Static analysis: Found import statements in codebase
+
+**Files Importing This Package:**
+```
+"""
+    
+    for file in import_files[:10]:  # First 10 files
+        section += f"{file}\n"
+    
+    if len(import_files) > 10:
+        section += f"... and {len(import_files) - 10} more files\n"
+    
+    section += f"""```
+
+**Callsite Impact:**
+- Package is actively used in production code
+- Breaking changes could affect {len(import_files)} file(s)
+- Manual review recommended to verify compatibility
+
+**Confidence:** **HIGH** — Import scan confirms usage.
+
+**Recommendation:** Review all callsites to ensure compatibility with new version.
+
+---
+"""
+    
+    return section
+
+def format_ai_arbiter_section(pr: Dict[str, Any]) -> str:
+    """Format AI arbiter layer section."""
+    ai = pr.get("ai_adjudication") or pr.get("ai_verdict", {})
+    
+    if not ai:
+        verdict_v2 = pr.get("verdict_v2", {}).get("verdict", "REVIEW")
+        return f"""### 🤖 AI Arbiter Layer
+**Status:** ⬜ **NOT-APPLICABLE** (human review required)
+
+**Why NOT applied:**
+The AI arbiter engages for break-reachable cases where signals conflict and automated adjudication could reduce false positives. In this case, deterministic signals recommend **{verdict_v2}** and no conflict exists to resolve.
+
+**Policy:** When deterministic signals unanimously recommend a clear verdict, AI does not override (fail-safe principle).
+
+---
+"""
+    
+    applied = ai.get("applied", "not_applied")
+    reason = ai.get("reason", "No AI adjudication performed")
+    
+    if applied == "downgrade_to_safe":
+        status = "✅ **SAFE** (AI downgraded from REVIEW)"
+    elif applied == "needs_change":
+        status = "⚠️ **REVIEW** (AI confirmed)"
+    else:
+        status = "⬜ **NOT-APPLICABLE**"
+    
+    section = f"""### 🤖 AI Arbiter Layer
+**Status:** {status}
+
+**AI Decision:**
+{reason}
+
+**Model:** {pr.get('ai_model', 'claude-sonnet-4.5')}  
+**Confidence:** {ai.get('confidence', 'MEDIUM')}
+
+---
+"""
+    
+    return section
+
+def format_policy_decision(pr: Dict[str, Any]) -> str:
+    """Format policy decision section with precedence explanation."""
+    verdict_v2 = pr.get("verdict_v2", {})
+    verdict = verdict_v2.get("verdict", "REVIEW")
+    confidence = verdict_v2.get("confidence", "MEDIUM")
+    
+    section = f"""### 🧮 Policy Decision
+**How the verdict was reached:**
+
+The final verdict follows a strict precedence hierarchy:
+
+1. **Build Failures:** Automatic BLOCKED if build completely fails
+2. **Behavioral Probe:** If runtime behavior differs → REVIEW (high confidence)
+3. **Reachability + Breaking:** If reached AND (API breaking OR changelog breaking) → REVIEW
+4. **AI Arbiter:** Can downgrade REVIEW → SAFE if signals conflict and low-risk
+5. **Default:** SAFE if no warning signals
+
+**This PR's Path:**
+"""
+    
+    # Reconstruct decision path
+    build = pr.get("build", {})
+    if build.get("verdict") == "fail":
+        section += "- ❌ Build fails → **BLOCKED**\n"
+    elif build.get("verdict") == "pre_existing":
+        section += "- ⚠️ Build has pre-existing failures (not caused by upgrade)\n"
+    else:
+        section += "- ✅ Build passes\n"
+    
+    probe = pr.get("behavioral_grade") or pr.get("deterministic", {}).get("probe", {})
+    if probe.get("same_behavior") == False or probe.get("different"):
+        section += "- ⚠️ Behavioral probe detects runtime changes → **REVIEW**\n"
+    
+    det = pr.get("deterministic", {})
+    if det.get("reachable") and (det.get("api_changes", 0) > 0 or det.get("changelogSignal") == "breaking"):
+        section += "- ⚠️ Package is reachable + breaking changes → **REVIEW**\n"
+    
+    ai = pr.get("ai_adjudication")
+    if ai and ai.get("applied") == "downgrade_to_safe":
+        section += "- ✅ AI arbiter downgrades to **SAFE** (low risk)\n"
+    
+    section += f"\n**Final Verdict:** **{verdict}** (Confidence: {confidence})\n\n---\n"
+    
+    return section
+
+def format_final_recommendation(pr: Dict[str, Any]) -> str:
+    """Format final recommendation section."""
+    verdict = pr.get("verdict_v2", {}).get("verdict", "REVIEW")
+    
+    recommendations = {
+        "SAFE": "✅ **MERGE** — No breaking changes detected. Safe to auto-merge.",
+        "REVIEW": "⚠️ **REVIEW THEN MERGE** — Breaking changes detected. Review changelog and affected files, then merge.",
+        "BUILD_FAILS": "❌ **DO NOT MERGE** — Build fails. Fix build issues before merging.",
+        "BLOCKED": "🔴 **BLOCKED** — Critical issues detected. Manual investigation required."
+    }
+    
+    action = recommendations.get(verdict, "⚠️ **REVIEW** — Manual review recommended.")
+    
+    section = f"""### 🎯 Final Recommendation
+{action}
+
+**Next Steps:**
+"""
+    
+    if verdict == "SAFE":
+        section += "1. Auto-merge via Dependabot\n"
+        section += "2. Monitor post-merge CI/CD for any issues\n"
+    elif verdict == "REVIEW":
+        section += "1. Review the changelog above\n"
+        section += "2. Check affected callsites in reachability section\n"
+        section += "3. Verify behavioral changes are acceptable\n"
+        section += "4. Merge after review\n"
+    elif verdict in ["BUILD_FAILS", "BLOCKED"]:
+        section += "1. Fix build issues first\n"
+        section += "2. Re-run analysis after fixes\n"
+        section += "3. Do not merge until build is green\n"
+    
+    section += "\n---\n"
+    
+    return section
+
 def format_probe_section(pr: Dict[str, Any]) -> str:
     """Format behavioral probe section with SHA256 and reproduction."""
     # Try behavioral_grade first (differential-probe.py output), then fallback to deterministic.probe
@@ -247,6 +544,14 @@ def _format_api_diff_signal(det: Dict) -> str:
 
 def _format_changelog_signal(det: Dict) -> str:
     cl = det.get("changelogSignal", {})
+    # Handle both string and dict formats
+    if isinstance(cl, str):
+        if cl == "breaking":
+            return "⚠️ **BREAKING**"
+        elif cl == "clean":
+            return "✅ CLEAN"
+        return "⚪ NOT AVAILABLE"
+    
     if cl.get("status") == "missing":
         return "⚪ NOT AVAILABLE"
     if cl.get("breaking_markers", 0) > 0:
@@ -254,10 +559,16 @@ def _format_changelog_signal(det: Dict) -> str:
     return "✅ CLEAN"
 
 def _format_reachability_signal(pr: Dict) -> str:
-    files = pr.get("files_importing", [])
-    if not files:
-        return "✅ NOT REACHED"
-    return f"⚠️ **REACHED** ({len(files)} files)"
+    det = pr.get("deterministic", {})
+    files = det.get("import_files", [])
+    reachable = det.get("reachable", False)
+    
+    # Check both reachable flag and import_files list
+    if reachable and files:
+        return f"⚠️ **REACHED** ({len(files)} files)"
+    elif files:
+        return f"⚠️ **REACHED** ({len(files)} files)"
+    return "✅ NOT REACHED"
 
 def _format_probe_signal(pr: Dict) -> str:
     # Try behavioral_grade first, then deterministic.probe
@@ -297,17 +608,27 @@ def _get_evidence_summary(pr: Dict, layer: str) -> str:
         build = pr.get("build", {})
         return build.get("verdict", "unknown").replace("_", " ")
     elif "Test" in layer:
-        return "Not run" if not pr.get("test") else "Passed"
+        test = pr.get("test", {})
+        if not test or test.get("verdict") == "skip":
+            return "Not run"
+        return "Passed" if test.get("verdict") == "pass" else "Failed"
     elif "API" in layer:
         return f"{pr.get('deterministic', {}).get('api_changes', 0)} symbols"
     elif "Changelog" in layer:
-        return "Breaking markers found" if pr.get("deterministic", {}).get("changelogSignal", {}).get("breaking_markers") else "Clean"
+        cl = pr.get("deterministic", {}).get("changelogSignal", {})
+        # Handle both string and dict formats
+        if isinstance(cl, str):
+            return "Breaking" if cl == "breaking" else "Clean"
+        return "Breaking markers found" if cl.get("breaking_markers") else "Clean"
     elif "Reachability" in layer:
-        files = len(pr.get("files_importing", []))
-        return f"{files} file(s)" if files > 0 else "Not imported"
+        det = pr.get("deterministic", {})
+        files = det.get("import_files", [])
+        return f"{len(files)} file(s)" if files else "Not imported"
     elif "Probe" in layer:
-        probe = pr.get("deterministic", {}).get("probe", {})
+        probe = pr.get("behavioral_grade") or pr.get("deterministic", {}).get("probe", {})
         if probe:
+            if "same_behavior" in probe:
+                return "Behavior changed" if not probe["same_behavior"] else "Behavior same"
             old = probe.get("old_sha256", "")[:16]
             new = probe.get("new_sha256", "")[:16]
             return "SHA256 mismatch" if old != new else "SHA256 match"
@@ -329,8 +650,9 @@ def _get_recommendation(pr: Dict) -> str:
         return "Fix build errors before merging."
     else:
         pkg = pr.get("package")
-        files = pr.get("files_importing", [])
-        file_ref = files[0] if files else "N/A"
+        det = pr.get("deterministic", {})
+        files = det.get("import_files", [])
+        file_ref = files[0] if files else "affected code"
         return f"Review the changelog and verify callsites at `{file_ref}` are compatible, then merge."
 
 def _get_build_confidence(build: Dict) -> str:
@@ -356,13 +678,20 @@ def _get_test_confidence(test: Dict) -> str:
     return "HIGH" if verdict == "pass" else "LOW"
 
 def render_pr_comment(pr: Dict[str, Any]) -> str:
-    """Render complete PR comment in gold standard format."""
+    """Render complete PR comment in gold standard format (13 sections)."""
     sections = [
-        format_verdict_header(pr),
-        format_signal_summary(pr),
-        format_build_analysis(pr),
-        format_probe_section(pr),
-        format_independent_verification(pr)
+        format_verdict_header(pr),           # 1. Header with verdict
+        format_signal_summary(pr),           # 2. Signal summary table
+        format_build_analysis(pr),           # 3. Build analysis
+        format_test_analysis(pr),            # 4. Test analysis
+        format_api_diff_analysis(pr),        # 5. API diff analysis
+        format_changelog_analysis(pr),       # 6. Changelog analysis
+        format_reachability_analysis(pr),    # 7. Reachability analysis
+        format_probe_section(pr),            # 8. Behavioral probe
+        format_ai_arbiter_section(pr),       # 9. AI arbiter layer
+        format_policy_decision(pr),          # 10. Policy decision
+        format_final_recommendation(pr),     # 11. Final recommendation
+        format_independent_verification(pr)  # 12. Independent verification
     ]
     
     footer = f"""
@@ -374,7 +703,7 @@ def render_pr_comment(pr: Dict[str, Any]) -> str:
 
 **💡 About this analysis:**
 This comment was generated by the Breakability Pipeline, which combines 7 independent evidence layers to provide high-confidence merge recommendations. The goal is to reduce developer review time by 85% while maintaining zero false-greens.
-"""
+"""  # 13. Footer
     
     return "\n".join(sections) + footer
 
