@@ -423,22 +423,21 @@ Precedence Order (highest to lowest):
             applied_line = "Line 2"
     
     # Check behavioral probe (precedence #3)
-    probe = pr.get("behavioral_grade") or pr.get("deterministic", {}).get("probe", {})
-    same_behavior = probe.get("same_behavior")
-    if same_behavior is False:  # Explicit False check (None is "not run")
+    probe_norm = _normalize_probe(pr)
+    if probe_norm["state"] == "DIFFERENT":
         steps.append("⚠️ **[P3: Probe]** Runtime behavior changed → **REVIEW**")
         if not applied_rule:
             applied_rule = "Behavioral changes require review (probe DIFFERENT + reached)"
             applied_line = "Line 3"
-    elif same_behavior is True:
+    elif probe_norm["state"] == "SAME":
         steps.append("✅ **[P3: Probe]** Runtime behavior unchanged")
     else:
         steps.append("⚪ **[P3: Probe]** Not executed")
     
     # Check reachability + breaking (precedence #4)
-    det = pr.get("deterministic", {})
-    changelog_status = det.get("changelogSignal", {}).get("status", "missing")
-    if det.get("reachable") and ((det.get("api_changes") or 0) > 0 or changelog_status == "breaking"):
+    det = pr.get("deterministic", {}) or {}
+    changelog_norm = _normalize_changelog(det)
+    if det.get("reachable") and ((det.get("api_changes") or 0) > 0 or changelog_norm["is_breaking"]):
         steps.append("⚠️ **[P4: Breaking]** Reached + API/changelog breaking → **REVIEW**")
         if not applied_rule:
             applied_rule = "Breaking changes in reached code"
@@ -723,14 +722,164 @@ python3 .github/scripts/callsite_impact.py \\
 """
     return section
 
+# ============================================================================
+# SCHEMA NORMALIZERS - Single source of truth for data interpretation
+# ============================================================================
+
+def _normalize_changelog(det: Dict) -> Dict[str, Any]:
+    """Normalize changelog signal to unified format.
+    
+    Handles:
+    - String format: "breaking" / "clean" / "missing"
+    - Dict with status: {"status": "breaking", "bullets": [...]}
+    - Dict bullets-only: {"bullets": ["BREAKING: ..."]}
+    - Null / missing
+    
+    Returns: {status: str, bullets: list, is_breaking: bool, available: bool}
+    """
+    cl = det.get("changelogSignal")
+    
+    # Null or missing
+    if not cl:
+        return {"status": "missing", "bullets": [], "is_breaking": False, "available": False}
+    
+    # String format (legacy)
+    if isinstance(cl, str):
+        return {
+            "status": cl,
+            "bullets": [],
+            "is_breaking": cl == "breaking",
+            "available": cl != "missing"
+        }
+    
+    # Dict format
+    if not isinstance(cl, dict):
+        return {"status": "missing", "bullets": [], "is_breaking": False, "available": False}
+    
+    status = cl.get("status", "unknown")
+    bullets = cl.get("bullets", [])
+    
+    # Check bullets for BREAKING patterns (case-insensitive)
+    has_breaking_in_bullets = any(
+        "BREAKING" in str(bullet).upper() or "BREAK" in str(bullet).upper() 
+        for bullet in bullets
+    )
+    
+    # Determine if breaking: status OR bullets content
+    is_breaking = status == "breaking" or has_breaking_in_bullets
+    
+    # Available if status != missing OR bullets exist
+    available = status != "missing" or len(bullets) > 0
+    
+    return {
+        "status": status,
+        "bullets": bullets,
+        "is_breaking": is_breaking,
+        "available": available
+    }
+
+def _normalize_test(test: Dict) -> Dict[str, Any]:
+    """Normalize test result to unified format.
+    
+    Handles:
+    - New schema: test.ran, test.exit, test.main_test_exit
+    - Legacy schema: test.verdict, test.exit_code
+    - Missing/null
+    
+    Returns: {verdict: str, exit_code: int, ran: bool, reason: str}
+    """
+    if not test:
+        return {"verdict": "skip", "exit_code": -1, "ran": False, "reason": "No test data"}
+    
+    # Check for new schema first
+    if "ran" in test:
+        ran = test.get("ran", False)
+        exit_code = test.get("exit")
+        if exit_code is None:
+            exit_code = test.get("main_test_exit", -1)
+        
+        if not ran:
+            verdict = "skip"
+            reason = test.get("reason", "Tests not executed")
+        elif exit_code == 0:
+            verdict = "pass"
+            reason = "All tests passed"
+        elif exit_code is None:
+            verdict = "skip"
+            reason = "Test execution status unknown"
+        else:
+            verdict = "fail"
+            reason = f"Tests failed with exit code {exit_code}"
+        
+        return {"verdict": verdict, "exit_code": exit_code, "ran": ran, "reason": reason}
+    
+    # Legacy schema fallback
+    verdict = test.get("verdict", "skip")
+    exit_code = test.get("exit_code", -1)
+    reason = test.get("reason", "Test execution status")
+    ran = verdict == "pass" or verdict == "fail"
+    
+    return {"verdict": verdict, "exit_code": exit_code, "ran": ran, "reason": reason}
+
+def _normalize_probe(pr: Dict) -> Dict[str, Any]:
+    """Normalize behavioral probe to unified format.
+    
+    Handles:
+    - same_behavior: True/False/None
+    - Legacy different: True/False
+    - Missing/null probe data
+    - Both behavioral_grade and deterministic.probe
+    
+    Returns: {state: str, same_behavior: bool|None, evidence: dict}
+    """
+    probe = pr.get("behavioral_grade") or pr.get("deterministic", {}).get("probe", {})
+    
+    if not probe:
+        return {"state": "NOT_RUN", "same_behavior": None, "evidence": {}}
+    
+    # Check same_behavior field (primary)
+    same_behavior = probe.get("same_behavior")
+    
+    # Check legacy different field
+    if same_behavior is None and "different" in probe:
+        different = probe.get("different")
+        if different is True:
+            same_behavior = False
+        elif different is False:
+            same_behavior = True
+    
+    # Determine state
+    if same_behavior is True:
+        state = "SAME"
+    elif same_behavior is False:
+        state = "DIFFERENT"
+    else:
+        # Check SHA equality as last resort
+        old_sha = probe.get("old_sha256", "")[:16]
+        new_sha = probe.get("new_sha256", "")[:16]
+        if old_sha and new_sha:
+            if old_sha == new_sha:
+                state = "SAME"
+                same_behavior = True
+            else:
+                state = "DIFFERENT"
+                same_behavior = False
+        else:
+            state = "NOT_RUN"
+    
+    return {
+        "state": state,
+        "same_behavior": same_behavior,
+        "evidence": probe
+    }
+
 def _format_build_signal(build: Dict) -> str:
     verdict = build.get("verdict", "unknown")
     return {"pass": "✅ PASS", "fail": "❌ FAIL", "pre_existing": "⚠️ PRE-EXISTING"}.get(verdict, "⬜ UNKNOWN")
 
 def _format_test_signal(test: Dict) -> str:
-    if not test:
-        return "⬜ SKIPPED"
-    verdict = test.get("verdict", "skip")
+    normalized = _normalize_test(test)
+    verdict = normalized["verdict"]
     return {"pass": "✅ PASS", "fail": "❌ FAIL", "skip": "⬜ SKIPPED"}.get(verdict, "⬜ UNKNOWN")
 
 def _format_api_diff_signal(det: Dict) -> str:
@@ -740,18 +889,10 @@ def _format_api_diff_signal(det: Dict) -> str:
     return f"⚠️ **BREAKING** ({changes} changes)"
 
 def _format_changelog_signal(det: Dict) -> str:
-    cl = det.get("changelogSignal", {})
-    # Handle both string and dict formats
-    if isinstance(cl, str):
-        if cl == "breaking":
-            return "⚠️ **BREAKING**"
-        elif cl == "clean":
-            return "✅ CLEAN"
+    normalized = _normalize_changelog(det)
+    if not normalized["available"]:
         return "⚪ NOT AVAILABLE"
-    
-    if cl.get("status") == "missing":
-        return "⚪ NOT AVAILABLE"
-    if cl.get("breaking_markers", 0) > 0:
+    if normalized["is_breaking"]:
         return "⚠️ **BREAKING**"
     return "✅ CLEAN"
 
@@ -768,20 +909,15 @@ def _format_reachability_signal(pr: Dict) -> str:
     return "✅ NOT REACHED"
 
 def _format_probe_signal(pr: Dict) -> str:
-    # Try behavioral_grade first, then deterministic.probe
-    probe = pr.get("behavioral_grade") or pr.get("deterministic", {}).get("probe", {})
-    if not probe:
-        return "⬜ NOT RUN"
+    normalized = _normalize_probe(pr)
+    state = normalized["state"]
     
-    # Handle both formats
-    if "same_behavior" in probe:
-        return "✅ SAME" if probe.get("same_behavior") else "⚠️ **DIFFERENT**"
-    
-    old_sha = probe.get("old_sha256", "")[:16]
-    new_sha = probe.get("new_sha256", "")[:16]
-    if old_sha and new_sha and old_sha == new_sha:
+    if state == "SAME":
         return "✅ SAME"
-    return "⚠️ **DIFFERENT**"
+    elif state == "DIFFERENT":
+        return "⚠️ **DIFFERENT**"
+    else:
+        return "⬜ NOT RUN"
 
 def _format_ai_signal(pr: Dict) -> str:
     # Try ai_adjudication first, then ai_verdict for backward compat
@@ -805,30 +941,30 @@ def _get_evidence_summary(pr: Dict, layer: str) -> str:
         build = pr.get("build", {})
         return build.get("verdict", "unknown").replace("_", " ")
     elif "Test" in layer:
-        test = pr.get("test", {})
-        if not test or test.get("verdict") == "skip":
+        test_norm = _normalize_test(pr.get("test", {}))
+        if test_norm["verdict"] == "skip":
             return "Not run"
-        return "Passed" if test.get("verdict") == "pass" else "Failed"
+        return "Passed" if test_norm["verdict"] == "pass" else f"Failed (exit {test_norm['exit_code']})"
     elif "API" in layer:
         return f"{(pr.get('deterministic', {}).get('api_changes') or 0)} symbols"
     elif "Changelog" in layer:
-        cl = pr.get("deterministic", {}).get("changelogSignal", {})
-        # Handle both string and dict formats
-        if isinstance(cl, str):
-            return "Breaking" if cl == "breaking" else "Clean"
-        return "Breaking markers found" if cl.get("breaking_markers") else "Clean"
+        det = pr.get("deterministic", {}) or {}
+        cl_norm = _normalize_changelog(det)
+        if cl_norm["is_breaking"]:
+            return "Breaking"
+        elif cl_norm["available"]:
+            return "Clean"
+        return "Not available"
     elif "Reachability" in layer:
-        det = pr.get("deterministic", {})
+        det = pr.get("deterministic", {}) or {}
         files = det.get("import_files", [])
         return f"{len(files)} file(s)" if files else "Not imported"
     elif "Probe" in layer:
-        probe = pr.get("behavioral_grade") or pr.get("deterministic", {}).get("probe", {})
-        if probe:
-            if "same_behavior" in probe:
-                return "Behavior changed" if not probe["same_behavior"] else "Behavior same"
-            old = probe.get("old_sha256", "")[:16]
-            new = probe.get("new_sha256", "")[:16]
-            return "SHA256 mismatch" if old != new else "SHA256 match"
+        probe_norm = _normalize_probe(pr)
+        if probe_norm["state"] == "SAME":
+            return "Behavior same"
+        elif probe_norm["state"] == "DIFFERENT":
+            return "Behavior changed"
         return "Not run"
     elif "AI" in layer:
         return "Human review required"
