@@ -492,8 +492,8 @@ def format_probe_section(pr: Dict[str, Any]) -> str:
     from_ver = pr.get("from")
     to_ver = pr.get("to")
     
-    section = f"""### 🔬 Behavioral Probe
-**Status:** {status_emoji} **{status_text}** | **Confidence:** HIGH
+    section = f"""### 🔬 Behavioral Probe ⭐
+**Status:** {status_emoji} **{status_text}** | **Method:** npm runtime-shape diff | **Grade:** HIGH
 
 **Runtime Verification:**
 - Old version SHA256: `{old_sha}`
@@ -796,3 +796,143 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Phase 3: Helper functions for actionability
+
+def _guess_compatibility(pr: Dict) -> str:
+    """Guess compatibility based on usage patterns."""
+    bump = pr.get("bump", "unknown")
+    api_changes = pr.get("deterministic", {}).get("api_changes", 0)
+    
+    if bump == "patch" and api_changes == 0:
+        return "HIGH (patch with no API changes usually safe)"
+    elif bump == "minor":
+        return "MEDIUM (minor should be backward compatible)"
+    elif api_changes > 10:
+        return "LOW (many API changes, verify carefully)"
+    return "MEDIUM (review recommended)"
+
+def _estimate_review_time(pr: Dict) -> str:
+    """Estimate developer review time."""
+    files = pr.get("deterministic", {}).get("import_files", [])
+    api_changes = pr.get("deterministic", {}).get("api_changes", 0)
+    
+    if len(files) <= 1 and api_changes <= 5:
+        return "5-10 minutes (single callsite, straightforward API)"
+    elif len(files) <= 3 and api_changes <= 20:
+        return "15-30 minutes (few callsites, moderate changes)"
+    else:
+        return "30-60 minutes (multiple callsites or complex changes)"
+
+def _calculate_evidence_strength(pr: Dict) -> str:
+    """Calculate overall evidence strength."""
+    layers = _count_evidence_layers(pr)
+    
+    if layers >= 5:
+        return "HIGH"
+    elif layers >= 3:
+        return "MEDIUM-HIGH"
+    elif layers >= 2:
+        return "MEDIUM"
+    return "LOW"
+
+def _count_evidence_layers(pr: Dict) -> int:
+    """Count how many independent evidence layers provided data."""
+    count = 0
+    
+    if pr.get("build", {}).get("verdict"):
+        count += 1
+    if pr.get("test", {}).get("verdict") not in [None, "skip"]:
+        count += 1
+    if pr.get("deterministic", {}).get("api_changes", 0) > 0:
+        count += 1
+    if pr.get("deterministic", {}).get("changelogSignal"):
+        count += 1
+    if pr.get("deterministic", {}).get("import_files"):
+        count += 1
+    if pr.get("behavioral_grade") or pr.get("deterministic", {}).get("probe"):
+        count += 1
+    if pr.get("ai_adjudication"):
+        count += 1
+    
+    return count
+
+def _get_matched_rule(pr: Dict) -> str:
+    """Explain which precedence rule matched."""
+    verdict = pr.get("verdict_v2", {}).get("verdict", "REVIEW")
+    
+    build = pr.get("build", {})
+    if build.get("verdict") == "fail":
+        return "Line 1 (Build Failures → BLOCKED)"
+    
+    cve = pr.get("deterministic", {}).get("cve")
+    if cve and cve.get("found"):
+        return "Line 2 (Security/CVE → BLOCKED)"
+    
+    probe = pr.get("behavioral_grade") or pr.get("deterministic", {}).get("probe", {})
+    if probe.get("same_behavior") == False or probe.get("different"):
+        return "Line 3 (Probe DIFFERENT → REVIEW)"
+    
+    det = pr.get("deterministic", {})
+    if det.get("reachable") and ((det.get("api_changes") or 0) > 0 or det.get("changelogSignal") == "breaking"):
+        return "Line 4 (Reached + Breaking → REVIEW)"
+    
+    ai = pr.get("ai_adjudication")
+    if ai and ai.get("applied") == "downgrade_to_safe":
+        return "Line 5 (AI Downgrade → SAFE)"
+    
+    return "Line 6 (Default → SAFE)"
+
+def _explain_confidence(conf: str, layer: str, pr: Dict) -> str:
+    """Explain why confidence is at this level."""
+    if layer == "build":
+        if conf == "HIGH":
+            return "(full build + tests pass)"
+        elif conf == "MEDIUM":
+            return "(dep resolution only, no tests)"
+        return "(no evidence)"
+    elif layer == "test":
+        if conf == "HIGH":
+            return "(all tests pass)"
+        elif conf == "LOW":
+            return "(tests skipped)"
+        return "(no tests)"
+    elif layer == "probe":
+        if conf == "HIGH":
+            return "(independent runtime verification)"
+        return "(not run)"
+    return ""
+
+def _assess_breaking_risk(pr: Dict) -> str:
+    """Assess breaking change risk."""
+    api_changes = pr.get("deterministic", {}).get("api_changes", 0)
+    files = pr.get("deterministic", {}).get("import_files", [])
+    
+    if api_changes > 10 and len(files) > 3:
+        return "**HIGH** (many API changes + multiple callsites)"
+    elif api_changes > 5 or len(files) > 1:
+        return "**MEDIUM** (some changes + few callsites)"
+    elif len(files) == 1:
+        return "**LOW** (single callsite, easy to verify)"
+    return "**NONE** (not reached or no API changes)"
+
+def _assess_regression_risk(pr: Dict) -> str:
+    """Assess regression risk."""
+    probe = pr.get("behavioral_grade") or pr.get("deterministic", {}).get("probe", {})
+    test = pr.get("test", {})
+    
+    if probe and not probe.get("same_behavior", True):
+        return "**MEDIUM** (probe confirms behavior changed)"
+    elif test.get("verdict") == "pass":
+        return "**LOW** (tests pass, behavior verified)"
+    return "**MEDIUM** (insufficient testing, unknown behavior)"
+
+def _assess_security_risk(pr: Dict) -> str:
+    """Assess security risk."""
+    cve = pr.get("deterministic", {}).get("cve")
+    
+    if cve and cve.get("found"):
+        severity = cve.get("severity", "UNKNOWN").upper()
+        return f"**{severity}** (CVE detected, see security section)"
+    return "**NONE** (no CVEs, but stay current for future patches)"
+
