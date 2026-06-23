@@ -293,26 +293,47 @@ jobs:
           agent --version
           echo "✅ Cursor agent CLI ready"
 
-      - name: Run AI adjudication layer (per-PR analysis)
+      - name: Generate AI verdicts for REVIEW PRs
         if: ${{ inputs.skip_agent != true }}
-        id: agent
+        id: ai_generate
         run: |
-          echo "════════════ AI ADJUDICATION ════════════"
+          echo "════════════ AI VERDICT GENERATION ════════════"
           if ! command -v agent &>/dev/null; then
             echo "::error::Cursor agent CLI not available - AI layer REQUIRED (no fallback)"
             exit 1
           fi
           
-          # Run reconcile_adjudication which calls Cursor per REVIEW PR
-          chmod +x .github/scripts/reconcile_adjudication.py
-          python3 .github/scripts/reconcile_adjudication.py /tmp/build-results.json --write
+          # Generate AI verdicts using Cursor agent with Sonnet 4.5
+          chmod +x .github/scripts/generate_ai_verdicts.py
+          python3 .github/scripts/generate_ai_verdicts.py /tmp/build-results.json \
+            --output /tmp/ai_verdicts.json \
+            --model claude-sonnet-4.5
           
-          echo "✅ AI adjudication complete"
+          echo "✅ AI verdicts generated"
         env:
-          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          BRK_AGENT_MODE: live
+          BRK_AGENT_MODEL: claude-sonnet-4.5
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         timeout-minutes: 60
+      
+      - name: Reconcile AI verdicts with deterministic signals
+        if: ${{ inputs.skip_agent != true }}
+        id: agent
+        run: |
+          echo "════════════ AI RECONCILIATION ════════════"
+          
+          # Reconcile AI verdicts with deterministic evidence
+          chmod +x .github/scripts/reconcile_adjudication.py
+          python3 .github/scripts/reconcile_adjudication.py /tmp/build-results.json \
+            --verdicts /tmp/ai_verdicts.json \
+            --write
+          
+          echo "✅ AI reconciliation complete"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        timeout-minutes: 10
 
       # ── Rich Comment Renderer ──────────────────────────────────────
       - name: Generate rich PR comments using analyst
