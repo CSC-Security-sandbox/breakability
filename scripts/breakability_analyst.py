@@ -400,10 +400,15 @@ Precedence Order (highest to lowest):
     
     # Reconstruct decision path with precedence labels
     steps = []
+    applied_rule = None
+    applied_line = None
     
     build = pr.get("build", {})
     if build.get("verdict") == "fail":
         steps.append("❌ **[P1: Build]** Build completely fails → **BLOCKED**")
+        if not applied_rule:
+            applied_rule = "Build failure blocks merge"
+            applied_line = "Line 1"
     elif build.get("verdict") == "pre_existing":
         steps.append("⚠️ **[P1: Build]** Pre-existing failures (not caused by this upgrade)")
     else:
@@ -413,12 +418,18 @@ Precedence Order (highest to lowest):
     cve = pr.get("deterministic", {}).get("cve")
     if cve and cve.get("found"):
         steps.append("🔴 **[P2: Security]** CVE detected → **BLOCKED**")
+        if not applied_rule:
+            applied_rule = "Security advisory blocks merge"
+            applied_line = "Line 2"
     
     # Check behavioral probe (precedence #3)
     probe = pr.get("behavioral_grade") or pr.get("deterministic", {}).get("probe", {})
     same_behavior = probe.get("same_behavior")
     if same_behavior is False:  # Explicit False check (None is "not run")
         steps.append("⚠️ **[P3: Probe]** Runtime behavior changed → **REVIEW**")
+        if not applied_rule:
+            applied_rule = "Behavioral changes require review (probe DIFFERENT + reached)"
+            applied_line = "Line 3"
     elif same_behavior is True:
         steps.append("✅ **[P3: Probe]** Runtime behavior unchanged")
     else:
@@ -429,19 +440,45 @@ Precedence Order (highest to lowest):
     changelog_status = det.get("changelogSignal", {}).get("status", "missing")
     if det.get("reachable") and ((det.get("api_changes") or 0) > 0 or changelog_status == "breaking"):
         steps.append("⚠️ **[P4: Breaking]** Reached + API/changelog breaking → **REVIEW**")
+        if not applied_rule:
+            applied_rule = "Breaking changes in reached code"
+            applied_line = "Line 4"
     
     # Check AI arbiter (precedence #5)
     ai = pr.get("ai_adjudication")
     if ai and ai.get("applied") == "downgrade_to_safe":
         steps.append("✅ **[P5: AI]** AI arbiter analyzed and downgraded to **SAFE**")
+        if not applied_rule:
+            applied_rule = "AI confirmed low risk after analysis"
+            applied_line = "Line 5"
+    
+    # Default (precedence #6)
+    if not applied_rule:
+        applied_rule = "No warning signals detected (default safe)"
+        applied_line = "Line 6"
     
     for step in steps:
         section += f"{step}\n"
     
+    # Risk assessment
+    risk_level = _assess_overall_risk(pr)
+    zero_false_green = _check_zero_false_green(pr)
+    
     section += f"""
+**Applied rule:** {applied_line} ({applied_rule})
+
 **Final Verdict:** **{verdict}** (Confidence: {confidence})
 
 **Why {verdict}?** {canonical_reason}
+
+**Risk Assessment:**
+- Breaking change risk: **{risk_level}**
+- Zero-false-green guarantee: {'✅ Multiple warning signals, fail-safe to REVIEW' if zero_false_green else '⚠️ Limited evidence, conservative REVIEW'}
+
+**Confidence Calculation:**
+- Build confidence: {_assess_build_confidence(pr)}
+- Probe confidence: {_assess_probe_confidence(pr)}
+- Signal agreement: {_calculate_signal_agreement(pr)}
 
 **Precedence Applied:** The highest-precedence rule that matched determined the verdict. Lower-precedence rules were not consulted (fail-safe cascade).
 
@@ -816,6 +853,94 @@ def main():
             f.write(comment)
         
         print(f"✅ Rendered PR #{pr_num} comment to {output_file}")
+
+def _assess_overall_risk(pr: Dict[str, Any]) -> str:
+    """Assess overall breaking change risk level."""
+    det = pr.get("deterministic", {})
+    api_changes = det.get("api_changes", 0)
+    changelog_status = det.get("changelogSignal", {}).get("status", "missing")
+    reachable = det.get("reachable", False)
+    probe = pr.get("behavioral_grade") or pr.get("deterministic", {}).get("probe", {})
+    same_behavior = probe.get("same_behavior")
+    
+    # High risk: reached + breaking + different behavior
+    if reachable and changelog_status == "breaking" and same_behavior is False:
+        return "HIGH (breaking + reached + behavior changed)"
+    
+    # Medium risk: reached + breaking OR different behavior alone
+    if (reachable and (api_changes > 0 or changelog_status == "breaking")) or same_behavior is False:
+        return "MEDIUM (some warning signals)"
+    
+    # Low risk: not reached or all signals clean
+    return "LOW (clean signals or unreached)"
+
+def _check_zero_false_green(pr: Dict[str, Any]) -> bool:
+    """Check if multiple warning signals confirm REVIEW verdict (not just one)."""
+    warning_count = 0
+    
+    build = pr.get("build", {})
+    if build.get("verdict") == "fail":
+        warning_count += 1
+    
+    probe = pr.get("behavioral_grade") or pr.get("deterministic", {}).get("probe", {})
+    if probe.get("same_behavior") is False:
+        warning_count += 1
+    
+    det = pr.get("deterministic", {})
+    if det.get("reachable") and (det.get("api_changes", 0) > 0 or det.get("changelogSignal", {}).get("status") == "breaking"):
+        warning_count += 1
+    
+    return warning_count >= 2
+
+def _assess_build_confidence(pr: Dict[str, Any]) -> str:
+    """Assess build verification confidence."""
+    build = pr.get("build", {})
+    verdict = build.get("verdict", "skip")
+    verification = build.get("verification_level", "L0")
+    
+    if verdict == "pass" and verification in ["L2_tests_pass", "L3_e2e"]:
+        return "**HIGH** (tests passed)"
+    elif verdict == "pass":
+        return "**MEDIUM** (build only, no tests)"
+    elif verdict == "pre_existing":
+        return "**LOW** (pre-existing failures)"
+    else:
+        return "**LOW** (build issues)"
+
+def _assess_probe_confidence(pr: Dict[str, Any]) -> str:
+    """Assess behavioral probe confidence."""
+    probe = pr.get("behavioral_grade") or pr.get("deterministic", {}).get("probe", {})
+    same_behavior = probe.get("same_behavior")
+    
+    if same_behavior is True:
+        return "**HIGH** (runtime verified unchanged)"
+    elif same_behavior is False:
+        return "**HIGH** (runtime verified changed)"
+    else:
+        return "**N/A** (probe not run)"
+
+def _calculate_signal_agreement(pr: Dict[str, Any]) -> str:
+    """Calculate how many signals warn vs pass."""
+    det = pr.get("deterministic", {}) or {}
+    build = pr.get("build", {}) or {}
+    test = pr.get("test", {}) or {}
+    probe_bg = pr.get("behavioral_grade", {}) or {}
+    probe_det = det.get("probe", {}) or {}
+    changelog = det.get("changelogSignal", {}) or {}
+    
+    signals = {
+        "build": build.get("verdict", "skip") != "pass",
+        "test": test.get("ran", False) and test.get("exit", -1) != 0,
+        "api": (det.get("api_changes") or 0) > 0,
+        "changelog": changelog.get("status") == "breaking",
+        "probe": probe_bg.get("same_behavior") is False or probe_det.get("same_behavior") is False,
+        "reachable": det.get("reachable", False)
+    }
+    
+    warn_count = sum(1 for v in signals.values() if v)
+    total_count = len(signals)
+    
+    return f"**{warn_count}/{total_count} signals warn** → {'REVIEW' if warn_count > 0 else 'SAFE'}"
 
 if __name__ == "__main__":
     main()
