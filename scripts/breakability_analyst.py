@@ -119,8 +119,24 @@ def format_build_analysis(pr: Dict[str, Any]) -> str:
 def format_test_analysis(pr: Dict[str, Any]) -> str:
     """Format test analysis section."""
     test = pr.get("test", {})
-    verdict = test.get("verdict", "skip")
-    reason = test.get("reason", "Build prerequisites not met")
+    
+    # Normalize test data - pipeline produces test.ran/exit/main_test_exit
+    ran = test.get("ran", False)
+    exit_code = test.get("exit", test.get("main_test_exit", -1))
+    
+    # Determine verdict from actual schema
+    if not ran:
+        verdict = "skip"
+        reason = test.get("reason", "Tests not executed (build requirements not met)")
+    elif exit_code == 0:
+        verdict = "pass"
+        reason = "All tests passed"
+    elif exit_code is None:
+        verdict = "skip"
+        reason = "Test execution status unknown"
+    else:
+        verdict = "fail"
+        reason = f"Tests failed with exit code {exit_code}"
     
     status_emoji = {"pass": "✅", "fail": "❌", "skip": "⚠️"}.get(verdict, "⬜")
     status_label = verdict.upper().replace("_", " ")
@@ -133,11 +149,11 @@ def format_test_analysis(pr: Dict[str, Any]) -> str:
     
     if verdict == "pass":
         section += f"- ✅ Test suite executed successfully\n"
-        section += f"- ✅ All tests passed (exit {test.get('exit_code', 0)})\n"
-        section += f"- Tests run: {test.get('tests_run', 'N/A')}\n"
+        section += f"- ✅ All tests passed (exit {exit_code})\n"
+        section += f"- Tests ran: {test.get('ran', 'N/A')}\n"
     elif verdict == "fail":
-        section += f"- ❌ Test failures detected\n"
-        section += f"- Failed: {test.get('failed_count', 'N/A')} | Passed: {test.get('passed_count', 'N/A')}\n"
+        section += f"- ❌ Test failures detected (exit {exit_code})\n"
+        section += f"- Check build logs for failure details\n"
     else:
         section += f"- Test execution skipped ({reason})\n"
         section += f"- Cannot verify runtime behavior via tests\n"
@@ -190,8 +206,9 @@ def format_changelog_analysis(pr: Dict[str, Any]) -> str:
     det = pr.get("deterministic", {})
     cl = det.get("changelogSignal", {})
     
+    # Real schema: cl.status = "clean"/"breaking"/"missing", cl.bullets = []
     if isinstance(cl, str):
-        # Legacy format: just a string like "breaking" or "clean"
+        # Legacy format fallback: just a string like "breaking" or "clean"
         status = "⚠️ **BREAKING**" if cl == "breaking" else "✅ CLEAN"
         section = f"""### 📋 Changelog Analysis
 **Status:** {status} | **Source:** Package changelog
@@ -204,10 +221,10 @@ def format_changelog_analysis(pr: Dict[str, Any]) -> str:
 """
         return section
     
-    breaking_markers = cl.get("breaking_markers", 0)
-    has_changelog = cl.get("status") != "missing"
+    changelog_status = cl.get("status", "missing")
+    bullets = cl.get("bullets", [])
     
-    if not has_changelog:
+    if changelog_status == "missing":
         return """### 📋 Changelog Analysis
 **Status:** ⚪ **NOT AVAILABLE** | **Source:** No changelog found
 
@@ -216,7 +233,11 @@ def format_changelog_analysis(pr: Dict[str, Any]) -> str:
 ---
 """
     
-    status = "⚠️ **BREAKING**" if breaking_markers > 0 else "✅ CLEAN"
+    # Check bullets for BREAKING markers (case-insensitive)
+    has_breaking = any("BREAKING" in str(bullet).upper() or "BREAK" in str(bullet).upper() for bullet in bullets)
+    is_breaking = changelog_status == "breaking" or has_breaking
+    
+    status = "⚠️ **BREAKING**" if is_breaking else "✅ CLEAN"
     
     section = f"""### 📋 Changelog Analysis
 **Status:** {status} | **Source:** GitHub Releases / CHANGELOG.md
@@ -224,14 +245,13 @@ def format_changelog_analysis(pr: Dict[str, Any]) -> str:
 **Key Changes (from {pr.get('from', '?')} → {pr.get('to', '?')}):**
 """
     
-    changes = cl.get("changes", [])
-    if changes:
-        for change in changes[:10]:  # First 10 changes
-            section += f"- {change}\n"
+    if bullets:
+        for bullet in bullets[:10]:  # First 10 changes
+            section += f"- {bullet}\n"
     else:
-        section += f"- **Breaking markers:** {breaking_markers}\n"
+        section += f"- Changelog status: {changelog_status}\n"
     
-    m8_class = "BREAKING" if breaking_markers > 0 else "SAFE"
+    m8_class = "BREAKING" if is_breaking else "SAFE"
     section += f"\n**M8 Classification:** **{m8_class}**\n"
     section += f"\n**Confidence:** **HIGH** — Explicit version documentation available.\n\n---\n"
     
@@ -358,6 +378,7 @@ def format_policy_decision(pr: Dict[str, Any]) -> str:
     verdict_v2 = pr.get("verdict_v2", {})
     verdict = verdict_v2.get("verdict", "REVIEW")
     confidence = verdict_v2.get("confidence", "MEDIUM")
+    canonical_reason = verdict_v2.get("reason", "Review required for this upgrade.")
     
     section = f"""### 🧮 Policy Decision
 **How the verdict was reached:**
@@ -379,12 +400,10 @@ Precedence Order (highest to lowest):
     
     # Reconstruct decision path with precedence labels
     steps = []
-    final_reason = None
     
     build = pr.get("build", {})
     if build.get("verdict") == "fail":
         steps.append("❌ **[P1: Build]** Build completely fails → **BLOCKED**")
-        final_reason = "Build failure blocks merge (precedence #1)"
     elif build.get("verdict") == "pre_existing":
         steps.append("⚠️ **[P1: Build]** Pre-existing failures (not caused by this upgrade)")
     else:
@@ -394,32 +413,27 @@ Precedence Order (highest to lowest):
     cve = pr.get("deterministic", {}).get("cve")
     if cve and cve.get("found"):
         steps.append("🔴 **[P2: Security]** CVE detected → **BLOCKED**")
-        final_reason = "Security advisory blocks merge (precedence #2)"
     
     # Check behavioral probe (precedence #3)
     probe = pr.get("behavioral_grade") or pr.get("deterministic", {}).get("probe", {})
-    if probe.get("same_behavior") == False or probe.get("different"):
+    same_behavior = probe.get("same_behavior")
+    if same_behavior is False:  # Explicit False check (None is "not run")
         steps.append("⚠️ **[P3: Probe]** Runtime behavior changed → **REVIEW**")
-        if not final_reason:
-            final_reason = "Behavioral changes require review (precedence #3)"
+    elif same_behavior is True:
+        steps.append("✅ **[P3: Probe]** Runtime behavior unchanged")
+    else:
+        steps.append("⚪ **[P3: Probe]** Not executed")
     
     # Check reachability + breaking (precedence #4)
     det = pr.get("deterministic", {})
-    if det.get("reachable") and ((det.get("api_changes") or 0) > 0 or det.get("changelogSignal") == "breaking"):
+    changelog_status = det.get("changelogSignal", {}).get("status", "missing")
+    if det.get("reachable") and ((det.get("api_changes") or 0) > 0 or changelog_status == "breaking"):
         steps.append("⚠️ **[P4: Breaking]** Reached + API/changelog breaking → **REVIEW**")
-        if not final_reason:
-            final_reason = "Breaking changes in reached code (precedence #4)"
     
     # Check AI arbiter (precedence #5)
     ai = pr.get("ai_adjudication")
     if ai and ai.get("applied") == "downgrade_to_safe":
         steps.append("✅ **[P5: AI]** AI arbiter analyzed and downgraded to **SAFE**")
-        if not final_reason:
-            final_reason = "AI confirmed low risk after analysis (precedence #5)"
-    
-    # Default case (precedence #6)
-    if not final_reason:
-        final_reason = "No warning signals detected (precedence #6 default)"
     
     for step in steps:
         section += f"{step}\n"
@@ -427,7 +441,7 @@ Precedence Order (highest to lowest):
     section += f"""
 **Final Verdict:** **{verdict}** (Confidence: {confidence})
 
-**Why {verdict}?** {final_reason}
+**Why {verdict}?** {canonical_reason}
 
 **Precedence Applied:** The highest-precedence rule that matched determined the verdict. Lower-precedence rules were not consulted (fail-safe cascade).
 
@@ -483,10 +497,19 @@ def format_probe_section(pr: Dict[str, Any]) -> str:
     # Handle both behavioral_grade and deterministic.probe formats
     old_sha = probe.get("old_sha256", "N/A")[:16] if "old_sha256" in probe else "N/A"
     new_sha = probe.get("new_sha256", "N/A")[:16] if "new_sha256" in probe else "N/A"
-    same = old_sha == new_sha or probe.get("same_behavior", False)
     
-    status_emoji = "✅" if same else "⚠️"
-    status_text = "SAME" if same else "DIFFERENT"
+    # Explicit three-state logic: SAME/DIFFERENT/NOT_RUN
+    # None means probe unavailable (not executed or data missing)
+    same_behavior = probe.get("same_behavior")
+    if same_behavior is None:
+        # Probe was not run or data unavailable
+        if old_sha == "N/A" and new_sha == "N/A":
+            return "### 🔬 Behavioral Probe\n**Status:** ⬜ **NOT RUN** — No probe data available\n\n---\n"
+        # SHAs present but same_behavior=None, infer from SHA equality
+        same_behavior = (old_sha == new_sha)
+    
+    status_emoji = "✅" if same_behavior else "⚠️"
+    status_text = "SAME" if same_behavior else "DIFFERENT"
     
     pkg = pr.get("package")
     from_ver = pr.get("from")
@@ -498,11 +521,11 @@ def format_probe_section(pr: Dict[str, Any]) -> str:
 **Runtime Verification:**
 - Old version SHA256: `{old_sha}`
 - New version SHA256: `{new_sha}`
-- Export shape: **{'UNCHANGED' if same else 'CHANGED'}**
+- Export shape: **{'UNCHANGED' if same_behavior else 'CHANGED'}**
 
 **What this means:**
 """
-    if same:
+    if same_behavior:
         section += "Runtime probe confirms the package behaves identically. No behavioral breaking changes detected.\n"
     else:
         section += """Runtime SHA256 mismatch proves behavioral changes are real, not just TypeScript type changes.
