@@ -542,12 +542,15 @@ Precedence Order (highest to lowest):
 
 def format_final_recommendation(pr: Dict[str, Any]) -> str:
     """Format final recommendation section with specific callsite verification."""
-    verdict = pr.get("verdict_v2", {}).get("verdict", "REVIEW")
-    det = pr.get("deterministic", {}) or {}
-    usages = det.get("usages", [])
-    pkg = pr.get("package", "unknown")
+    verdict_norm = _normalize_verdict(pr)
+    verdict = verdict_norm["verdict"]
+    
+    reach_norm = _normalize_reachability(pr)
+    usages = reach_norm["usages"]
+    
     probe_norm = _normalize_probe(pr)
-    changelog_norm = _normalize_changelog(det)
+    det = pr.get("deterministic", {}) or {}
+    changelog_norm = _normalize_changelog(det.get("changelogSignal") or {})
     
     recommendations = {
         "SAFE": "✅ **MERGE** — No breaking changes detected. Safe to auto-merge.",
@@ -1015,6 +1018,15 @@ def _normalize_probe(pr: Dict) -> Dict[str, Any]:
         "same_behavior": same_behavior,
         "evidence": probe
     }
+
+def _normalize_reachability(pr: Dict) -> Dict[str, Any]:
+    """Normalize reachability from deterministic.usages or reachability key."""
+    det = pr.get("deterministic", {})
+    reach = pr.get("reachability", {})
+    usages = det.get("usages", []) or reach.get("usages", [])
+    import_files = det.get("files_importing", []) or reach.get("import_files", [])
+    reached = len(usages) > 0 or len(import_files) > 0
+    return {"usages": usages, "import_files": import_files, "reached": reached}
 
 def _format_build_signal(build: Dict) -> str:
     verdict = build.get("verdict", "unknown")
