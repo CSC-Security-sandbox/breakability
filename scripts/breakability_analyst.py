@@ -487,12 +487,17 @@ Precedence Order (highest to lowest):
     return section
 
 def format_final_recommendation(pr: Dict[str, Any]) -> str:
-    """Format final recommendation section."""
+    """Format final recommendation section with specific callsite verification."""
     verdict = pr.get("verdict_v2", {}).get("verdict", "REVIEW")
+    det = pr.get("deterministic", {}) or {}
+    usages = det.get("usages", [])
+    pkg = pr.get("package", "unknown")
+    probe_norm = _normalize_probe(pr)
+    changelog_norm = _normalize_changelog(det)
     
     recommendations = {
         "SAFE": "✅ **MERGE** — No breaking changes detected. Safe to auto-merge.",
-        "REVIEW": "⚠️ **REVIEW THEN MERGE** — Breaking changes detected. Review changelog and affected files, then merge.",
+        "REVIEW": "⚠️ **REVIEW THEN MERGE**",
         "BUILD_FAILS": "❌ **DO NOT MERGE** — Build fails. Fix build issues before merging.",
         "BLOCKED": "🔴 **BLOCKED** — Critical issues detected. Manual investigation required."
     }
@@ -502,23 +507,88 @@ def format_final_recommendation(pr: Dict[str, Any]) -> str:
     section = f"""### 🎯 Final Recommendation
 {action}
 
-**Next Steps:**
 """
     
     if verdict == "SAFE":
-        section += "1. Auto-merge via Dependabot\n"
-        section += "2. Monitor post-merge CI/CD for any issues\n"
+        section += """**Next Steps:**
+1. Auto-merge via Dependabot
+2. Monitor post-merge CI/CD for any issues
+
+"""
     elif verdict == "REVIEW":
-        section += "1. Review the changelog above\n"
-        section += "2. Check affected callsites in reachability section\n"
-        section += "3. Verify behavioral changes are acceptable\n"
-        section += "4. Merge after review\n"
-    elif verdict in ["BUILD_FAILS", "BLOCKED"]:
-        section += "1. Fix build issues first\n"
-        section += "2. Re-run analysis after fixes\n"
-        section += "3. Do not merge until build is green\n"
+        # Add specific callsite verification if reached
+        if usages and len(usages) > 0:
+            first_usage = usages[0]
+            file_path = first_usage.get("file", "unknown")
+            line_num = first_usage.get("line", "?")
+            symbol = first_usage.get("symbol", "unknown")
+            usage_type = first_usage.get("usageType", "UNKNOWN")
+            
+            section += f"""**What to review:**
+
+1. **Verify callsite compatibility:**
+   - **File:** `{file_path}:{line_num}`
+   - **Symbol:** `{symbol}` ({usage_type})
+   - **Question:** Is this usage pattern still compatible with the new version?
+   - **Expected:** {'YES (basic usage)' if usage_type == 'DIRECT_CALL' else 'Verify usage pattern'}
+
+"""
+            
+            # Add probe-specific questions if probe ran
+            if probe_norm["state"] == "DIFFERENT":
+                section += f"""2. **Check runtime behavior:**
+   - **Probe result:** SHA256 mismatch detected
+   - **Question:** Does the behavioral change affect `{symbol}` usage?
+   - **Expected:** Review probe output and compare export shapes
+
+"""
+            
+            # Add changelog-specific questions if breaking
+            if changelog_norm["is_breaking"]:
+                section += f"""3. **Review breaking changes:**
+   - **Changelog:** Breaking changes declared
+   - **Question:** Are the breaking changes relevant to our usage?
+   - **Expected:** Check changelog bullets for `{symbol}` or related APIs
+
+"""
+            
+            # Usage count context
+            total_usages = len(usages)
+            if total_usages > 1:
+                section += f"""4. **Check all {total_usages} callsites:**
+   - **Impact:** Multiple files import this package
+   - **Action:** Review all callsites listed in Reachability section above
+
+"""
+            
+            section += f"""**Why this needs review:**
+- {'⚠️ Probe confirms behavioral change (not false alarm)' if probe_norm['state'] == 'DIFFERENT' else ''}
+- {'⚠️ Changelog declares breaking changes' if changelog_norm['is_breaking'] else ''}
+- {'✅ Single callsite (low blast radius)' if total_usages == 1 else f'⚠️ {total_usages} callsites (verify each)'}
+
+**Estimated review time:** {'5-10 minutes (single callsite)' if total_usages == 1 else f'{5 + total_usages * 3}-{10 + total_usages * 5} minutes ({total_usages} callsites)'}
+
+"""
+        else:
+            # Unreached - simpler review
+            section += """**What to review:**
+1. Review the changelog for any breaking changes
+2. Package is not directly imported (transitive dependency)
+3. Consider updating if security fixes are included
+
+**Estimated review time:** 2-5 minutes (unreached, low risk)
+
+"""
     
-    section += "\n---\n"
+    elif verdict in ["BUILD_FAILS", "BLOCKED"]:
+        section += """**Next Steps:**
+1. Fix build issues first
+2. Re-run analysis after fixes
+3. Do not merge until build is green
+
+"""
+    
+    section += "---\n"
     
     return section
 
