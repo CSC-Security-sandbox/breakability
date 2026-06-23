@@ -58,7 +58,7 @@ def format_signal_summary(pr: Dict[str, Any]) -> str:
     signals = [
         ("🔧 Build", _format_build_signal(build), _get_build_confidence(build)),
         ("🧪 Test", _format_test_signal(test), _get_test_confidence(test)),
-        ("📝 API Diff", _format_api_diff_signal(det), "HIGH" if det.get("api_changes", 0) > 0 else "N/A"),
+        ("📝 API Diff", _format_api_diff_signal(det), "HIGH" if (det.get("api_changes") or 0) > 0 else "N/A"),
         ("📋 Changelog", _format_changelog_signal(det), "HIGH" if det.get("changelogSignal") else "LOW"),
         ("🔍 Reachability", _format_reachability_signal(pr), "HIGH"),
         ("🔬 Behavioral Probe", _format_probe_signal(pr), "HIGH"),
@@ -150,9 +150,9 @@ def format_test_analysis(pr: Dict[str, Any]) -> str:
 def format_api_diff_analysis(pr: Dict[str, Any]) -> str:
     """Format API diff analysis section with detailed changes."""
     det = pr.get("deterministic", {})
-    changes = det.get("api_changes", 0)
-    removed = det.get("api_removed", 0)
-    added = det.get("api_added", 0)
+    changes = det.get("api_changes") or 0
+    removed = det.get("api_removed") or 0
+    added = det.get("api_added") or 0
     
     if changes == 0 and removed == 0 and added == 0:
         return """### 📝 API Diff Analysis
@@ -366,7 +366,7 @@ The final verdict follows a strict precedence hierarchy:
         section += "- ⚠️ Behavioral probe detects runtime changes → **REVIEW**\n"
     
     det = pr.get("deterministic", {})
-    if det.get("reachable") and (det.get("api_changes", 0) > 0 or det.get("changelogSignal") == "breaking"):
+    if det.get("reachable") and ((det.get("api_changes") or 0) > 0 or det.get("changelogSignal") == "breaking"):
         section += "- ⚠️ Package is reachable + breaking changes → **REVIEW**\n"
     
     ai = pr.get("ai_adjudication")
@@ -537,7 +537,7 @@ def _format_test_signal(test: Dict) -> str:
     return {"pass": "✅ PASS", "fail": "❌ FAIL", "skip": "⬜ SKIPPED"}.get(verdict, "⬜ UNKNOWN")
 
 def _format_api_diff_signal(det: Dict) -> str:
-    changes = det.get("api_changes", 0)
+    changes = det.get("api_changes") or 0
     if changes == 0:
         return "✅ CLEAN"
     return f"⚠️ **BREAKING** ({changes} changes)"
@@ -613,7 +613,7 @@ def _get_evidence_summary(pr: Dict, layer: str) -> str:
             return "Not run"
         return "Passed" if test.get("verdict") == "pass" else "Failed"
     elif "API" in layer:
-        return f"{pr.get('deterministic', {}).get('api_changes', 0)} symbols"
+        return f"{(pr.get('deterministic', {}).get('api_changes') or 0)} symbols"
     elif "Changelog" in layer:
         cl = pr.get("deterministic", {}).get("changelogSignal", {})
         # Handle both string and dict formats
