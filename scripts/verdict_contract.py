@@ -308,3 +308,45 @@ def assert_stage_did_work(stage: str, input_count: int, processed_count: int,
 
 def stage_report(stage: str, input_count: int, processed_count: int) -> str:
     return f"[{stage}] input_prs={input_count} processed_prs={processed_count}"
+
+
+# ── CLI entrypoint ────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import sys
+    import json
+    
+    if len(sys.argv) < 2:
+        print("Usage: verdict_contract.py <build-results.json> [--write]", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Enriches build-results.json with authoritative verdicts.", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Options:", file=sys.stderr)
+        print("  --write    Write enriched data back to input file (default: print to stdout)", file=sys.stderr)
+        sys.exit(1)
+    
+    results_file = sys.argv[1]
+    write_back = "--write" in sys.argv
+    
+    with open(results_file) as f:
+        data = json.load(f)
+    
+    # Process all PRs
+    results = data.get("results", [])
+    if not results:
+        results = [v for k, v in data.get("prs", {}).items()]
+    
+    processed = 0
+    for pr in results:
+        verdict = authoritative_verdict(pr)
+        pr["verdict_v2"] = verdict
+        processed += 1
+    
+    # Write back or print
+    if write_back:
+        with open(results_file, "w") as f:
+            json.dump(data, f, indent=2)
+        print(f"✅ Enriched {processed} PRs with authoritative verdicts → {results_file}", file=sys.stderr)
+    else:
+        json.dump(data, sys.stdout, indent=2)
+    
+    sys.exit(0)

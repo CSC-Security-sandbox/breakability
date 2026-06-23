@@ -1,0 +1,334 @@
+name: Breakability Agent (Hybrid)
+
+on:
+  # schedule:
+  #   # Weekdays at 6 AM UTC — disabled to save CI costs
+  #   - cron: '0 6 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      pr_filter:
+        description: 'Comma-separated PR numbers to analyze (empty = all)'
+        required: false
+        default: ''
+      skip_agent:
+        description: 'Skip agent step (deterministic only)'
+        required: false
+        default: 'false'
+        type: boolean
+      batch_count:
+        description: 'Number of parallel batches (1 = sequential, 4 = default)'
+        required: false
+        default: '4'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '4'
+          - '6'
+
+concurrency:
+  group: breakability-agent
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+env:
+  NODE_VERSION: '20'
+  GO_VERSION: '1.22'
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════
+  # Job 1: Discover PRs and split into batches
+  # ═══════════════════════════════════════════════════════════════════
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.split.outputs.matrix }}
+      pr_count: ${{ steps.split.outputs.pr_count }}
+    steps:
+      - name: Discover and split PRs into batches
+        id: split
+        run: |
+          BATCH_COUNT="${{ inputs.batch_count || '4' }}"
+          PR_FILTER="${{ inputs.pr_filter }}"
+
+          # Fetch all open Dependabot PRs
+          PR_NUMS=$(gh pr list --repo "$GITHUB_REPOSITORY" \
+            --label "dependencies" --state open \
+            --json number --jq '.[].number' --limit 500 | sort -n)
+
+          # Apply filter if set
+          if [[ -n "$PR_FILTER" ]]; then
+            ALLOWED=$(echo "$PR_FILTER" | tr ',' '\n' | tr -d ' ')
+            PR_NUMS=$(comm -12 <(echo "$PR_NUMS" | sort) <(echo "$ALLOWED" | sort))
+          fi
+
+          TOTAL=$(echo "$PR_NUMS" | grep -c . || echo 0)
+          echo "Total PRs to analyze: $TOTAL"
+          echo "pr_count=$TOTAL" >> "$GITHUB_OUTPUT"
+
+          # For very small runs, use 1 batch
+          if [[ "$TOTAL" -le 5 ]]; then
+            BATCH_COUNT=1
+          fi
+
+          # Split into batches
+          mapfile -t ALL_PRS < <(echo "$PR_NUMS")
+          PER_BATCH=$(( (TOTAL + BATCH_COUNT - 1) / BATCH_COUNT ))
+
+          MATRIX_JSON='{"include":['
+          FIRST=true
+          for (( b=0; b<BATCH_COUNT; b++ )); do
+            START=$(( b * PER_BATCH ))
+            BATCH_PRS=""
+            for (( j=START; j<START+PER_BATCH && j<TOTAL; j++ )); do
+              [[ -n "$BATCH_PRS" ]] && BATCH_PRS="$BATCH_PRS,"
+              BATCH_PRS="$BATCH_PRS${ALL_PRS[$j]}"
+            done
+            [[ -z "$BATCH_PRS" ]] && continue
+            [[ "$FIRST" == "true" ]] && FIRST=false || MATRIX_JSON="$MATRIX_JSON,"
+            MATRIX_JSON="$MATRIX_JSON{\"batch_id\":\"$((b+1))\",\"pr_filter\":\"$BATCH_PRS\"}"
+            echo "  Batch $((b+1)): $BATCH_PRS"
+          done
+          MATRIX_JSON="$MATRIX_JSON]}"
+
+          echo "Matrix: $MATRIX_JSON"
+          echo "matrix=$MATRIX_JSON" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Job 2: Deterministic analysis (parallel matrix)
+  # ═══════════════════════════════════════════════════════════════════
+  deterministic:
+    needs: discover
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+      fail-fast: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Setup Maven
+        run: |
+          if ! command -v mvn &>/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq maven > /dev/null 2>&1 || echo "Maven install skipped"
+          fi
+
+      - name: Run deterministic analysis (batch ${{ matrix.batch_id }})
+        run: |
+          chmod +x .github/scripts/build-check.sh
+          bash .github/scripts/build-check.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLI_PATH: .github/actions/breakability-check/index.js
+          PR_FILTER: ${{ matrix.pr_filter }}
+          BATCH_ID: ${{ matrix.batch_id }}
+          REPO_ROOT: ${{ github.workspace }}
+          # ── Private Registry Auth (see docs/PRIVATE_REGISTRIES.md) ──
+          # Add your registry auth tokens as GitHub secrets, then
+          # pass them here with the same env var names used in
+          # .github/breakability-config.yml → private_registries[].auth_token_env
+          # Example:
+          #   AZURE_ARTIFACTS_TOKEN: ${{ secrets.AZURE_ARTIFACTS_TOKEN }}
+          #   GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
+          #   ACR_NPM_TOKEN: ${{ secrets.ACR_NPM_TOKEN }}
+
+      - name: Upload batch results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: batch-${{ matrix.batch_id }}
+          path: |
+            /tmp/build-results-${{ matrix.batch_id }}.json
+            /tmp/pr-*.diff
+            /tmp/_bc_workspace_graph.json
+            /tmp/_bc_peer_groups.json
+          retention-days: 30
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Job 3: Merge results + Agent analysis (single run)
+  # ═══════════════════════════════════════════════════════════════════
+  merge-and-analyze:
+    needs: [discover, deterministic]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    if: always() && needs.discover.result == 'success'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Download all batch artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/batch-results
+          pattern: batch-*
+
+      - name: List downloaded artifacts
+        run: |
+          echo "=== Downloaded artifacts ==="
+          find /tmp/batch-results -type f | sort | head -60
+          echo "=== Batch result files ==="
+          ls -la /tmp/batch-results/batch-*/build-results-*.json 2>/dev/null || echo "No batch files found"
+
+      - name: Merge results
+        run: |
+          chmod +x .github/scripts/merge-results.sh
+          bash .github/scripts/merge-results.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload merged results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-results
+          path: |
+            /tmp/build-results.json
+            /tmp/pr-*.diff
+          retention-days: 30
+
+      - name: Show build results summary
+        if: always()
+        run: |
+          echo "=== Build Results Summary ==="
+          python3 -c "
+          import json
+          with open('/tmp/build-results.json') as f:
+              data = json.load(f)
+          prs = data.get('prs', {})
+          print(f'PRs analyzed: {len(prs)}')
+          methods = {}
+          levels = {}
+          for num, pr in sorted(prs.items(), key=lambda x: int(x[0])):
+              verdict = pr.get('build', {}).get('verdict', '?')
+              vl = pr.get('verification_label', '?')
+              m = pr.get('build', {}).get('install_method', '?')
+              methods[m] = methods.get(m, 0) + 1
+              levels[vl] = levels.get(vl, 0) + 1
+              emoji = {'pass': '✅', 'fail': '❌', 'skip': '⏭️', 'pre_existing': '⚠️', 'error': '💥'}.get(verdict, '❓')
+              print(f'  PR #{num}: {pr[\"package\"]} {pr[\"from\"]}→{pr[\"to\"]} | {emoji} {verdict} | {vl} | {m}')
+          print()
+          print('Install methods:', dict(sorted(methods.items(), key=lambda x:-x[1])))
+          print('Verification levels:', dict(sorted(levels.items(), key=lambda x:-x[1])))
+          cross = data.get('cross_pr_deps', [])
+          if cross:
+              print(f'Cross-PR deps: {len(cross)}')
+          " || echo "Failed to parse build-results.json"
+
+      # ── Verdict Contract ───────────────────────────────────────────
+      - name: Generate authoritative verdicts
+        run: |
+          echo "════════════ VERDICT CONTRACT ════════════"
+          python3 .github/scripts/verdict_contract.py /tmp/build-results.json --write
+          echo "✅ verdict_v2 populated for all PRs"
+
+      # ── Behavioral Probe ───────────────────────────────────────────
+      - name: Run behavioral probe (runtime verification)
+        continue-on-error: true
+        run: |
+          echo "════════════ BEHAVIORAL PROBE ════════════"
+          chmod +x .github/scripts/differential-probe.py
+          python3 .github/scripts/differential-probe.py
+          echo "✅ Probe data enriched"
+        env:
+          DP_RESULTS: /tmp/build-results.json
+          DP_DETERMINISTIC_ONLY: "true"
+          DP_MAX_PRS: "20"
+        timeout-minutes: 15
+
+      # ── Agent Analysis ─────────────────────────────────────────────
+      - name: Install Cursor Agent CLI
+        if: ${{ inputs.skip_agent != true }}
+        run: |
+          echo "Installing Cursor agent CLI..."
+          curl -fsS https://cursor.com/install | bash
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Verify agent CLI (REQUIRED)
+        if: ${{ inputs.skip_agent != true }}
+        run: |
+          if ! command -v agent &>/dev/null; then
+            echo "::error::Cursor agent CLI not found after installation"
+            exit 1
+          fi
+          agent --version
+          echo "✅ Cursor agent CLI ready"
+
+      - name: Run AI adjudication layer (per-PR analysis)
+        if: ${{ inputs.skip_agent != true }}
+        id: agent
+        run: |
+          echo "════════════ AI ADJUDICATION ════════════"
+          if ! command -v agent &>/dev/null; then
+            echo "::error::Cursor agent CLI not available - AI layer REQUIRED (no fallback)"
+            exit 1
+          fi
+          
+          # Run reconcile_adjudication which calls Cursor per REVIEW PR
+          chmod +x .github/scripts/reconcile_adjudication.py
+          python3 .github/scripts/reconcile_adjudication.py /tmp/build-results.json --write
+          
+          echo "✅ AI adjudication complete"
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        timeout-minutes: 60
+
+      # ── Rich Comment Renderer ──────────────────────────────────────
+      - name: Generate rich PR comments using analyst
+        if: always()
+        run: |
+          chmod +x .github/scripts/breakability_analyst.py
+          python3 .github/scripts/breakability_analyst.py /tmp/build-results.json
+          
+          # Post rendered comments to PRs
+          for comment_file in /tmp/pr-*-comment.md; do
+            if [ -f "$comment_file" ]; then
+              pr_num=$(basename "$comment_file" | sed 's/pr-\([0-9]*\)-comment.md/\1/')
+              echo "📤 Posting comment to PR #$pr_num"
+              gh pr comment "$pr_num" --body-file "$comment_file" || echo "⚠️ Failed to post to PR #$pr_num"
+            fi
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

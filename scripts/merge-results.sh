@@ -151,10 +151,19 @@ if expected_count > 0 and total_prs < expected_count:
 if incomplete_batches:
     merged["metadata"]["incomplete_batches"] = incomplete_batches
 
+# V9.9: COMPATIBILITY SHIM — Convert .prs{} → .results[] for backward compatibility
+# Downstream scripts (verdict_contract.py, independent_adjudicate.sh, comment posting)
+# still expect .results[] array format from pre-V9.8 versions
+merged["results"] = [
+    {"pr_num": int(k), **v}
+    for k, v in sorted(merged.get("prs", {}).items(), key=lambda x: int(x[0]))
+]
+
 with open("/tmp/build-results.json", "w") as f:
     json.dump(merged, f, indent=2)
 
 print(f"  Total merged PRs: {total_prs}")
+print(f"  Added .results[] compatibility shim with {len(merged['results'])} PRs")
 MERGEEOF
 
 # ── Step 2: Collect PR diffs into /tmp/ ───────────────────────────────────────
