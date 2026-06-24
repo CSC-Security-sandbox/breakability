@@ -1150,7 +1150,7 @@ def _get_recommendation(pr: Dict) -> str:
     verdict_norm = _normalize_verdict(pr)
     verdict = verdict_norm["verdict"]
     
-    # Iteration 8.6: Debug logging to diagnose PR #67 issue
+    # Iteration 8.6/8.8: Debug logging to diagnose PR #67 issue
     pr_num = pr.get("number", "unknown")
     pkg = pr.get("package", "unknown")
     
@@ -1163,25 +1163,26 @@ def _get_recommendation(pr: Dict) -> str:
         reach_norm = _normalize_reachability(pr)
         reached = reach_norm["reached"]
         files = reach_norm["import_files"]
+        usages = reach_norm["usages"]
         
-        # DEBUG: Log values
+        # DEBUG: Log ALL values - iteration 8.8 enhancement
         import sys
-        print(f"[DEBUG-8.6] PR#{pr_num} ({pkg}): verdict={verdict}, reached={reached}, files_len={len(files) if files else 0}", file=sys.stderr)
+        print(f"[DEBUG-8.8] PR#{pr_num} ({pkg}): verdict={verdict}, reached={reached}, usages_len={len(usages) if usages else 0}, files_len={len(files) if files else 0}", file=sys.stderr)
         
         if not reached:
             # Not reached - review changelog only, no callsite mention
-            print(f"[DEBUG-8.6] PR#{pr_num}: Taking NOT-REACHED branch", file=sys.stderr)
+            print(f"[DEBUG-8.8] PR#{pr_num}: Taking NOT-REACHED branch", file=sys.stderr)
             return "Review the changelog for any notable changes, then merge."
         
         # Reached - check if we have file paths
-        print(f"[DEBUG-8.6] PR#{pr_num}: Taking REACHED branch, checking files", file=sys.stderr)
+        print(f"[DEBUG-8.8] PR#{pr_num}: Taking REACHED branch, checking files", file=sys.stderr)
         if files and len(files) > 0:
             file_ref = files[0] if len(files) == 1 else f"{files[0]} and {len(files)-1} other file{'s' if len(files) > 2 else ''}"
-            print(f"[DEBUG-8.6] PR#{pr_num}: Has files, showing callsites", file=sys.stderr)
+            print(f"[DEBUG-8.8] PR#{pr_num}: Has files, showing callsites", file=sys.stderr)
             return f"Review the changelog and verify callsites in `{file_ref}` are compatible, then merge."
         else:
             # Reached but no file data
-            print(f"[DEBUG-8.6] PR#{pr_num}: No files, generic callsite text", file=sys.stderr)
+            print(f"[DEBUG-8.8] PR#{pr_num}: No files but reached=True (usages_len={len(usages) if usages else 0}), generic callsite text", file=sys.stderr)
             return "Review the changelog and verify affected callsites are compatible, then merge."
 
 def _get_build_confidence(build: Dict) -> str:
