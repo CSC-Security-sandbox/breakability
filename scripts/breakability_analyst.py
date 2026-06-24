@@ -1148,11 +1148,15 @@ def _get_recommendation(pr: Dict) -> str:
     elif verdict == "BUILD_FAILS":
         return "Fix build errors before merging."
     else:
+        # REVIEW verdict
         reach_norm = _normalize_reachability(pr)
         if reach_norm["reached"]:
             files = reach_norm["import_files"]
-            file_ref = files[0] if files else "affected code"
-            return f"Review the changelog and verify callsites at `{file_ref}` are compatible, then merge."
+            if files and len(files) > 0:
+                file_ref = files[0] if len(files) == 1 else f"{files[0]} and {len(files)-1} other file{'s' if len(files) > 2 else ''}"
+                return f"Review the changelog and verify callsites in `{file_ref}` are compatible, then merge."
+            else:
+                return "Review the changelog and verify affected callsites are compatible, then merge."
         else:
             return "Review the changelog for any notable changes, then merge."
 
