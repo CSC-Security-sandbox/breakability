@@ -1150,15 +1150,18 @@ def _get_recommendation(pr: Dict) -> str:
     else:
         # REVIEW verdict
         reach_norm = _normalize_reachability(pr)
-        if reach_norm["reached"]:
-            files = reach_norm["import_files"]
-            if files and len(files) > 0:
-                file_ref = files[0] if len(files) == 1 else f"{files[0]} and {len(files)-1} other file{'s' if len(files) > 2 else ''}"
-                return f"Review the changelog and verify callsites in `{file_ref}` are compatible, then merge."
-            else:
-                return "Review the changelog and verify affected callsites are compatible, then merge."
-        else:
+        if not reach_norm["reached"]:
+            # Not reached - review changelog only, no callsite mention
             return "Review the changelog for any notable changes, then merge."
+        
+        # Reached - check if we have file paths
+        files = reach_norm["import_files"]
+        if files and len(files) > 0:
+            file_ref = files[0] if len(files) == 1 else f"{files[0]} and {len(files)-1} other file{'s' if len(files) > 2 else ''}"
+            return f"Review the changelog and verify callsites in `{file_ref}` are compatible, then merge."
+        else:
+            # Reached but no file data
+            return "Review the changelog and verify affected callsites are compatible, then merge."
 
 def _get_build_confidence(build: Dict) -> str:
     verdict = build.get("verdict", "unknown")
