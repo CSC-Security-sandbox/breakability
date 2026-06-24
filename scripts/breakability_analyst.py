@@ -1029,11 +1029,18 @@ def _normalize_probe(pr: Dict) -> Dict[str, Any]:
     }
 
 def _normalize_reachability(pr: Dict) -> Dict[str, Any]:
-    """Normalize reachability from deterministic.usages or reachability key."""
+    """Normalize reachability from deterministic layer only.
+    
+    Iteration 8.7: Fixed bug where empty deterministic arrays [] were treated as falsy
+    by Python's `or` operator, causing fallback to policy_lowering reachability data
+    which has different schema (import_sites vs files_importing).
+    
+    Now uses deterministic data ONLY - no fallback to avoid schema mismatch.
+    """
     det = pr.get("deterministic", {})
-    reach = pr.get("reachability", {})
-    usages = det.get("usages", []) or reach.get("usages", [])
-    import_files = det.get("files_importing", []) or reach.get("import_files", [])
+    # Use deterministic data only - no OR fallback to avoid empty list [] being falsy
+    usages = det.get("usages") if det.get("usages") is not None else []
+    import_files = det.get("files_importing") if det.get("files_importing") is not None else []
     reached = len(usages) > 0 or len(import_files) > 0
     return {"usages": usages, "import_files": import_files, "reached": reached}
 
