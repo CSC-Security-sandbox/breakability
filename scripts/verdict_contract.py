@@ -145,10 +145,25 @@ def _policy_decision(pr: Mapping[str, Any]) -> dict:
 
 def _hard_fix_floor(pr: Mapping[str, Any]) -> bool:
     """States that MUST be FIX/BLOCKED and can never be downgraded (false-green floor):
-    a build that does not compile, or a policy decision that introduced a security finding.
+    a build that does not compile, new build errors introduced, test failures,
+    or a policy decision that introduced a security finding.
     """
-    if (pr.get("build") or {}).get("verdict") == "fail":
+    build_verdict = (pr.get("build") or {}).get("verdict", "")
+    if build_verdict in ("fail", "pre_existing_plus_new"):
         return True
+    test = pr.get("test") or {}
+    test_ran = test.get("ran", False)
+    test_exit = test.get("exit")
+    if test_exit is None:
+        test_exit = test.get("main_test_exit")
+    if test_ran and test_exit is not None and test_exit != 0:
+        output = test.get("output_tail", "") or ""
+        if "no test specified" not in output and "Error: no test specified" not in output:
+            return True
+    if test.get("verdict") == "fail":
+        output = test.get("output_tail", "") or ""
+        if "no test specified" not in output and "Error: no test specified" not in output:
+            return True
     rc = str(_policy_decision(pr).get("reason_code") or "")
     return rc.startswith("build:") or rc == "security:introduced"
 
@@ -158,6 +173,28 @@ def _valid_v2(pr: Mapping[str, Any]) -> Optional[dict]:
     if isinstance(v2, Mapping) and v2.get("verdict") in VALID_BUCKETS:
         return dict(v2)
     return None
+
+
+def _probe_escalation(pr: Mapping[str, Any], result: dict) -> dict:
+    """Post-determination check: if behavioral probe found DIFFERENT behavior,
+    a SAFE verdict must be escalated to REVIEW. A SAFE verdict on a PR where
+    the probe shows changed runtime exports is a false green."""
+    if result.get("verdict") != BUCKET_SAFE:
+        return result
+    bg = pr.get("behavioral_grade")
+    if not isinstance(bg, Mapping):
+        return result
+    if bg.get("same_behavior") is False or bg.get("behavior_changed") is True:
+        result = dict(result)
+        result["verdict"] = BUCKET_REVIEW
+        result["severity"] = max(result.get("severity", "medium"),
+                                 "medium", key=lambda s: _SEVERITY_RANK.get(s, 1))
+        result["source"] = result.get("source", "") + "+probe_escalation"
+        result["reason"] = (result.get("reason", "") +
+                            "; behavioral probe detected changed runtime behavior").lstrip("; ")
+        result["breakability_grade"] = assign_breakability_grade(pr, BUCKET_REVIEW)
+        return result
+    return result
 
 
 def assign_breakability_grade(pr: Mapping[str, Any], verdict_bucket: str, signals: Optional[Mapping] = None) -> str:
@@ -224,16 +261,48 @@ def authoritative_verdict(pr: Mapping[str, Any]) -> dict:
     """
     if _hard_fix_floor(pr):
         dec = _policy_decision(pr)
+        build_verdict = (pr.get("build") or {}).get("verdict", "")
+        test = pr.get("test") or {}
+        test_ran = test.get("ran", False)
+        test_exit = test.get("exit")
+        if test_exit is None:
+            test_exit = test.get("main_test_exit")
+        reasons = []
+        if build_verdict in ("fail", "pre_existing_plus_new"):
+            reasons.append("build failed on the candidate version" if build_verdict == "fail"
+                           else "new build errors introduced by this upgrade")
+        if test_ran and test_exit is not None and test_exit != 0:
+            output = test.get("output_tail", "") or ""
+            if "no test specified" not in output and "Error: no test specified" not in output:
+                reasons.append(f"tests failed (exit {test_exit})")
+        if test.get("verdict") == "fail" and not reasons:
+            output = test.get("output_tail", "") or ""
+            if "no test specified" not in output and "Error: no test specified" not in output:
+                reasons.append("tests failed")
+        computed_reason = "; ".join(reasons)
+        reason = computed_reason or dec.get("display_reason") or dec.get("reason_code") or "build failed on the candidate version"
         result = {
             "verdict": BUCKET_BLOCKED,
             "severity": "high",
             "confidence": "L4",
             "priority": "P0",
-            "reason": dec.get("display_reason") or dec.get("reason_code") or "build failed on the candidate version",
+            "reason": reason,
             "source": "hard_fix_floor",
         }
         result["breakability_grade"] = assign_breakability_grade(pr, BUCKET_BLOCKED)
         return result
+
+    if str(pr.get("ecosystem", "")).strip().lower() == "actions":
+        build_v = (pr.get("build") or {}).get("verdict", "")
+        if build_v in ("pass", "pre_existing", ""):
+            result = {
+                "verdict": BUCKET_SAFE, "severity": "none", "confidence": "L3",
+                "priority": "P3",
+                "reason": "CI action dependency — no production runtime impact",
+                "source": "actions_fast_path",
+                "breakability_grade": GRADE_SAFE,
+            }
+            return result
 
     adj = pr.get("ai_adjudication")
     if isinstance(adj, Mapping):
@@ -245,7 +314,7 @@ def authoritative_verdict(pr: Mapping[str, Any]) -> dict:
                 "reason": ev, "source": "ai:downgrade_to_safe",
             }
             result["breakability_grade"] = GRADE_SAFE
-            return result
+            return _probe_escalation(pr, result)
         if applied == "needs_change":
             result = {
                 "verdict": BUCKET_REVIEW, "severity": "medium", "confidence": "L3", "priority": "P2",
@@ -258,13 +327,38 @@ def authoritative_verdict(pr: Mapping[str, Any]) -> dict:
     if v2 is not None:
         v2.setdefault("source", "verdict_v2")
         v2.setdefault("breakability_grade", assign_breakability_grade(pr, v2.get("verdict", BUCKET_REVIEW)))
-        return v2
+        return _probe_escalation(pr, v2)
 
     mapped = map_policy_decision(_policy_decision(pr))
     if mapped is not None:
         mapped["source"] = "policy_lowering"
         mapped["breakability_grade"] = assign_breakability_grade(pr, mapped.get("verdict", BUCKET_REVIEW))
-        return mapped
+        return _probe_escalation(pr, mapped)
+
+    # Fallback: use deterministic.merge_risk.tag when no typed verdict exists
+    det = pr.get("deterministic") or {}
+    mr = det.get("merge_risk") or det.get("verdict") or det.get("classification")
+    if isinstance(mr, Mapping):
+        tag = mr.get("tag", "")
+    elif isinstance(mr, str):
+        tag = mr
+    else:
+        tag = ""
+    _TAG_TO_BUCKET = {"Low": BUCKET_SAFE, "Medium": BUCKET_REVIEW,
+                      "High": BUCKET_REVIEW, "BuildFails": BUCKET_BLOCKED,
+                      "Blocked": BUCKET_BLOCKED}
+    if tag in _TAG_TO_BUCKET:
+        bucket = _TAG_TO_BUCKET[tag]
+        sev = {"Low": "low", "Medium": "medium", "High": "high"}.get(tag, "medium")
+        result = {
+            "verdict": bucket, "severity": sev,
+            "confidence": det.get("confidence") or "L2",
+            "priority": "P3" if bucket == BUCKET_SAFE else "P2",
+            "reason": (mr.get("reason") if isinstance(mr, Mapping) else "") or tag,
+            "source": "deterministic_merge_risk",
+        }
+        result["breakability_grade"] = assign_breakability_grade(pr, bucket)
+        return _probe_escalation(pr, result)
 
     result = {
         "verdict": BUCKET_REVIEW, "severity": "medium", "confidence": "L2", "priority": "P2",

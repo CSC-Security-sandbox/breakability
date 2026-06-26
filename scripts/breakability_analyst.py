@@ -120,6 +120,10 @@ def _normalize_probe(pr: Dict) -> Dict[str, Any]:
     if not probe:
         return {"state": "NOT_RUN", "same_behavior": None, "evidence": {}}
 
+    build_verdict = (pr.get("build") or {}).get("verdict", "")
+    if build_verdict in ("fail", "pre_existing_plus_new"):
+        return {"state": "PROBE_FAILED", "same_behavior": None, "evidence": probe}
+
     same_behavior = probe.get("same_behavior")
 
     if same_behavior is None:
@@ -167,10 +171,18 @@ def _normalize_reachability(pr: Dict) -> Dict[str, Any]:
     usages = det.get("usages")
     if not isinstance(usages, list):
         usages = []
-    import_files = det.get("files_importing")
+    import_files = pr.get("files_importing")
     if not isinstance(import_files, list):
-        import_files = []
-    reached = len(usages) > 0
+        import_files = det.get("files_importing")
+        if not isinstance(import_files, list):
+            import_files = []
+    reached = len(import_files) > 0 or len(usages) > 0
+    pkg = pr.get("package", "")
+    if not reached and pkg.startswith("@types/"):
+        dep_type = pr.get("dep_type", "")
+        if dep_type in ("production", "dependency", "dependencies"):
+            reached = True
+            import_files = ["(ambient type declarations — all TypeScript files)"]
     return {"usages": usages, "import_files": import_files, "reached": reached}
 
 
@@ -202,18 +214,28 @@ def _merge_risk_tag(pr: Dict[str, Any]) -> str:
         warning_count += 1
         signals.append("changelog breaking")
 
+    evidence_layers = _count_evidence_layers(pr)
+    ecosystem = pr.get("ecosystem", "")
+
     if warning_count >= 3:
         risk = "High"
-        conf = "L4"
+        conf = "RC-High"
     elif warning_count >= 1:
         risk = "Medium"
-        conf = "L3"
+        conf = "RC-Med"
     else:
         risk = "Low"
-        conf = "L2"
+        conf = "RC-Low"
 
-    evidence = " + ".join(signals) if signals else "all signals clean"
-    return f"**Merge Risk:** {risk} (Evidence: {evidence} · Confidence: {conf})"
+    if signals:
+        evidence_str = " + ".join(signals)
+    elif evidence_layers <= 1 and ecosystem != "actions":
+        evidence_str = "limited evidence gathered"
+    elif ecosystem == "actions":
+        evidence_str = "CI-only action — no runtime impact"
+    else:
+        evidence_str = "all signals clean"
+    return f"**Merge Risk:** {risk} (Evidence: {evidence_str} · Confidence: {conf})"
 
 
 def _get_recommendation(pr: Dict) -> str:
@@ -227,12 +249,18 @@ def _get_recommendation(pr: Dict) -> str:
     files = reach_norm["import_files"]
     det = pr.get("deterministic", {})
     changelog_norm = _normalize_changelog(det)
+    test_norm = _normalize_test(pr.get("test", {}))
 
     if verdict in ("BUILD_FAILS", "BLOCKED"):
         build = pr.get("build", {})
         if build.get("verdict") == "pre_existing":
             return "Build has pre-existing failures (not caused by this upgrade). Review build infra separately."
+        if test_norm["verdict"] == "fail":
+            return "Fix build and test failures before merging."
         return "Fix build errors before merging."
+
+    if test_norm["verdict"] == "fail":
+        return f"Tests fail (exit {test_norm['exit_code']}). Investigate test failures before merging."
 
     if verdict == "SAFE":
         if dep_type in ("dev", "devDependency", "devDependencies"):
@@ -241,6 +269,8 @@ def _get_recommendation(pr: Dict) -> str:
             return "Safe to merge — not imported by production code."
         if probe["state"] == "SAME":
             return "Safe to merge — behavioral probe confirms identical runtime behavior."
+        if changelog_norm["is_breaking"]:
+            return "Changelog lists breaking changes. Review callsites, then merge."
         return "Safe to merge. Build passes and no breaking changes detected."
 
     parts = []
@@ -271,13 +301,14 @@ def _count_evidence_layers(pr: Dict) -> int:
     count = 0
     if pr.get("build", {}).get("verdict"):
         count += 1
-    if pr.get("test", {}).get("verdict") not in [None, "skip"]:
+    test_norm = _normalize_test(pr.get("test", {}))
+    if test_norm["verdict"] not in [None, "skip"]:
         count += 1
-    if pr.get("deterministic", {}).get("api_changes", 0) > 0:
+    if (pr.get("deterministic", {}).get("api_changes") or 0) > 0:
         count += 1
     if pr.get("deterministic", {}).get("changelogSignal"):
         count += 1
-    if pr.get("deterministic", {}).get("import_files"):
+    if pr.get("files_importing") or pr.get("deterministic", {}).get("files_importing"):
         count += 1
     if pr.get("behavioral_grade") or pr.get("deterministic", {}).get("probe"):
         count += 1
@@ -301,12 +332,19 @@ def _synthesize_explanation(pr: Dict) -> str:
     changelog_norm = _normalize_changelog(det)
     dep_type = pr.get("dep_type", "dependency")
 
+    test_norm = _normalize_test(pr.get("test", {}))
+
     if build.get("verdict") == "pass":
         parts.append("Build passes with all dependencies resolving.")
     elif build.get("verdict") == "fail":
         parts.append("Build fails — fix build errors before merging.")
     elif build.get("verdict") == "pre_existing":
         parts.append("Build has pre-existing failures not caused by this upgrade.")
+    elif build.get("verdict") == "pre_existing_plus_new":
+        parts.append("Build has new errors introduced by this upgrade on top of pre-existing failures.")
+
+    if test_norm["verdict"] == "fail":
+        parts.append(f"Tests fail (exit {test_norm['exit_code']}) — investigate before merging.")
 
     if verdict == "SAFE":
         if dep_type in ("dev", "devDependency", "devDependencies"):
@@ -316,7 +354,10 @@ def _synthesize_explanation(pr: Dict) -> str:
         elif probe["state"] == "SAME":
             parts.append("Behavioral probe confirms runtime exports are identical.")
         else:
-            parts.append("No breaking changes detected.")
+            if changelog_norm["is_breaking"]:
+                parts.append("Breaking changes listed but assessed safe at current usage.")
+            else:
+                parts.append("No breaking changes detected.")
         if changelog_norm["is_breaking"] and changelog_norm["bullets"]:
             bullet = changelog_norm["bullets"][0]
             if len(bullet) > 100:
@@ -339,10 +380,16 @@ def _synthesize_explanation(pr: Dict) -> str:
     elif verdict in ("BUILD_FAILS", "BLOCKED"):
         parts.append("Resolve build issues before this upgrade can proceed.")
 
+    build_output = build.get("output_tail", "") or build.get("stdout", "")
+    import re
+    vuln_match = re.search(r'(\d+)\s+(high|critical)\s+severity\s+vulnerabilit', build_output, re.IGNORECASE)
+    if vuln_match:
+        parts.append(f"⚠️ npm audit: {vuln_match.group(0)}ies found.")
+
     return " ".join(parts) if parts else "Review required for this upgrade."
 
 
-def _render_compact(pr: Dict) -> str:
+def _render_compact(pr: Dict, cross_deps: Optional[List[Dict]] = None) -> str:
     """Render a compact PR comment (~40 lines)."""
     from datetime import date
 
@@ -355,6 +402,10 @@ def _render_compact(pr: Dict) -> str:
     dep_type = pr.get("dep_type", "dependency")
 
     emoji = {"SAFE": "✅", "REVIEW": "🟠", "BUILD_FAILS": "❌", "BLOCKED": "🔴"}.get(verdict, "⚠️")
+    verification_level = pr.get("verification_level", -1)
+    vlevel_labels = {0: "L0 Unresolved", 1: "L1 Dep-resolved", 2: "L2 Type-checked",
+                     3: "L3 Symbols-verified", 4: "L4 Tests-pass", 5: "L5 Fully-verified"}
+    vlevel_str = vlevel_labels.get(verification_level, "")
     merge_risk = _merge_risk_tag(pr)
 
     build = pr.get("build", {})
@@ -374,17 +425,24 @@ def _render_compact(pr: Dict) -> str:
     changelog_norm = _normalize_changelog(det)
     api_changes = det.get("api_changes") or 0
 
+    is_ambient = any("ambient" in str(f).lower() for f in reach["import_files"])
     reach_file_count = len(reach["import_files"]) or len(set(u.get("file", "") for u in reach["usages"]))
-    reach_text = f"{reach_file_count} files" if reach["reached"] else "not reached"
+    if is_ambient:
+        reach_text = "all TS files (ambient)"
+    elif reach["reached"]:
+        reach_text = f"{reach_file_count} files"
+    else:
+        reach_text = "not reached"
     cl_icon = "⚠️" if changelog_norm["is_breaking"] else "✅" if changelog_norm["available"] else "⬜"
     cl_text = "breaking" if changelog_norm["is_breaking"] else "clean" if changelog_norm["available"] else "n/a"
 
     explanation = _synthesize_explanation(pr)
     recommendation = _get_recommendation(pr)
 
+    vlevel_badge = f" · Verification: {vlevel_str}" if vlevel_str else ""
     lines = [
         f"## {emoji} {verdict} — `{pkg}` {from_ver} → {to_ver} · {dep_type} · {bump}",
-        merge_risk,
+        merge_risk + vlevel_badge,
         "",
         f"**Build:** {build_icon} {build_v} · **Tests:** {test_icon} {test_norm['verdict']}{test_suffix} · **Probe:** {probe_icon} {probe_state_display}",
         f"**Reachability:** {reach_text} · **Changelog:** {cl_icon} {cl_text} · **API Diff:** {api_changes} changes",
@@ -397,7 +455,14 @@ def _render_compact(pr: Dict) -> str:
     ]
 
     cl_detail = changelog_norm["bullets"][0][:80] if changelog_norm["bullets"] else changelog_norm["status"]
-    probe_detail = "behavior unchanged" if probe["state"] == "SAME" else "behavior changed" if probe["state"] == "DIFFERENT" else "—"
+    probe_ev = probe["evidence"]
+    if probe["state"] == "DIFFERENT":
+        probe_detail = probe_ev.get("changed_behavior", "") or probe_ev.get("rationale", "") or "behavior changed"
+        probe_detail = probe_detail[:120]
+    elif probe["state"] == "SAME":
+        probe_detail = "behavior unchanged"
+    else:
+        probe_detail = "—"
     test_detail = test_norm["reason"] if test_norm["verdict"] != "pass" else f"exit {test_norm['exit_code']}"
 
     lines += [
@@ -429,6 +494,45 @@ def _render_compact(pr: Dict) -> str:
             "",
         ]
 
+    test_data = pr.get("test", {})
+    test_output = (test_data.get("output_tail") or test_data.get("stdout") or test_data.get("output") or "").strip()
+    if test_norm["verdict"] == "fail" and test_output:
+        lines += [
+            "<details><summary>🧪 Test output</summary>",
+            "",
+            "```",
+            test_output[:500],
+            "```",
+            "",
+            "</details>",
+            "",
+        ]
+
+    if probe["state"] == "DIFFERENT":
+        old_out = probe_ev.get("observed_from", "") or probe_ev.get("old_output", "")
+        new_out = probe_ev.get("observed_to", "") or probe_ev.get("new_output", "")
+        changed_summary = probe_ev.get("changed_behavior", "") or probe_ev.get("summary", "") or probe_ev.get("rationale", "")
+        old_hash = probe_ev.get("old_hash", "")
+        new_hash = probe_ev.get("new_hash", "")
+        if not old_out and not new_out and old_hash and new_hash:
+            old_out = f"hash:{old_hash[:12]}"
+            new_out = f"hash:{new_hash[:12]}"
+        if old_out or new_out or changed_summary:
+            lines.append("<details><summary>🔬 Probe diff — what changed</summary>")
+            lines.append("")
+            if changed_summary:
+                lines.append(f"**Change:** {changed_summary[:300]}")
+                lines.append("")
+            if old_out:
+                lines.append(f"**Before:** `{old_out[:200]}`")
+            if new_out:
+                lines.append(f"**After:** `{new_out[:200]}`")
+            evidence_text = probe_ev.get("evidence", "")
+            if evidence_text:
+                lines.append("")
+                lines.append(f"**Evidence:** {evidence_text[:300]}")
+            lines += ["", "</details>", ""]
+
     import_list = reach["import_files"]
     if not import_list and reach["usages"]:
         import_list = sorted(set(u.get("file", "") for u in reach["usages"] if u.get("file")))
@@ -448,6 +552,52 @@ def _render_compact(pr: Dict) -> str:
             lines.append(f"- {b}")
         lines += ["", "</details>", ""]
 
+    fixes_cves = pr.get("fixes_cves") or []
+    cve_details = pr.get("cve_details") or []
+    all_cves = []
+    seen_cve_ids = set()
+    for cve in fixes_cves:
+        cid = cve.get("cve_id") or ""
+        if cid and cid not in seen_cve_ids:
+            seen_cve_ids.add(cid)
+            sev = cve.get("severity", "unknown")
+            score = cve.get("cvss_score", "")
+            url = cve.get("advisory_url", "")
+            patched = cve.get("first_patched_version", "")
+            all_cves.append({"id": cid, "severity": sev, "score": score, "url": url, "patched": patched, "fixes": True})
+    for cve in cve_details:
+        cid = cve.get("cve_id") or cve.get("ghsa_id") or ""
+        if cid and cid not in seen_cve_ids:
+            seen_cve_ids.add(cid)
+            sev = cve.get("severity", "unknown")
+            score = cve.get("cvss_score", "")
+            url = cve.get("advisory_url", "")
+            all_cves.append({"id": cid, "severity": sev, "score": score, "url": url, "patched": "", "fixes": False})
+    if all_cves:
+        sev_icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🔵"}.get
+        lines.append("### Security Advisories")
+        lines.append("")
+        for cve in all_cves:
+            icon = sev_icon(cve["severity"], "⚪")
+            score_str = f" · CVSS {cve['score']}" if cve["score"] else ""
+            link = f" · [advisory]({cve['url']})" if cve["url"] else ""
+            fix_str = " — **fixed by this PR**" if cve["fixes"] else ""
+            patched_str = f" (patched in {cve['patched']})" if cve["patched"] else ""
+            lines.append(f"- {icon} **{cve['id']}** ({cve['severity']}{score_str}){patched_str}{fix_str}{link}")
+        lines.append("")
+
+    pr_num = str(pr.get("pr_num", ""))
+    if cross_deps:
+        related = [d for d in cross_deps
+                   if str(d.get("pr_a")) == pr_num or str(d.get("pr_b")) == pr_num]
+        if related:
+            lines.append("### Coupled PRs")
+            lines.append("")
+            for dep in related:
+                other = dep["pr_b"] if str(dep["pr_a"]) == pr_num else dep["pr_a"]
+                lines.append(f"- PR #{other}: {dep.get('reason', '')} — {dep.get('merge_order', '')}")
+            lines.append("")
+
     lines += [
         "---",
         f"🔬 Deterministic + Probe · 📅 {date.today().isoformat()}",
@@ -456,9 +606,9 @@ def _render_compact(pr: Dict) -> str:
     return "\n".join(lines)
 
 
-def render_pr_comment(pr: Dict[str, Any]) -> str:
+def render_pr_comment(pr: Dict[str, Any], cross_deps: Optional[List[Dict]] = None) -> str:
     """Render compact PR comment (~40 lines)."""
-    return _render_compact(pr)
+    return _render_compact(pr, cross_deps=cross_deps)
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -477,17 +627,19 @@ def main():
     prs_dict = data.get("prs", {})
     results_array = data.get("results", [])
 
-    if prs_dict:
+    if results_array:
+        results = results_array
+    elif prs_dict:
         results = []
         for pr_num_str, pr_data in prs_dict.items():
             if isinstance(pr_data, dict):
                 pr_data.setdefault("pr_num", pr_num_str)
                 results.append(pr_data)
-    elif results_array:
-        results = results_array
     else:
         print("No results found in build-results.json (checked 'prs' dict and 'results' array)", file=sys.stderr)
         sys.exit(1)
+
+    cross_deps = data.get("cross_pr_deps") or []
 
     if args.pr:
         results = [pr for pr in results if str(pr.get("pr_num")) == args.pr]
@@ -500,7 +652,7 @@ def main():
         if not pr_num:
             continue
 
-        comment = render_pr_comment(pr)
+        comment = render_pr_comment(pr, cross_deps=cross_deps)
 
         if args.stdout:
             print(comment)
