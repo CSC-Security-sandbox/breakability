@@ -74,7 +74,7 @@ jobs:
       pr_list: ${{ steps.gen.outputs.pr_list }}
       total: ${{ steps.gen.outputs.total }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Discover Dependabot PRs
         id: gen
@@ -153,19 +153,19 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ inputs.node_version }}
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: ${{ inputs.go_version }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ inputs.python_version }}
 
@@ -192,7 +192,7 @@ jobs:
           bash .breakability/scripts/build-check.sh
 
       - name: Upload batch results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: breakability-batch-${{ matrix.batch.id }}
           path: /tmp/build-results-${{ matrix.batch.id }}.json
@@ -205,7 +205,7 @@ jobs:
     if: always() && needs.discover.outputs.total > 0
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
 
@@ -222,7 +222,7 @@ jobs:
           echo "Downloaded breakability scripts"
 
       - name: Download all batch results
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: breakability-batch-*
           path: /tmp/batch-results/
