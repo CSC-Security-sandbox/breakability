@@ -7,7 +7,7 @@ to analyze if breaking changes are genuinely breaking or safe to downgrade.
 Output: ai_verdicts.json with per-PR verdicts for reconcile_adjudication.py
 
 Usage:
-  generate_ai_verdicts.py <build-results.json> --output ai_verdicts.json [--model claude-sonnet-4.5]
+  generate_ai_verdicts.py <build-results.json> --output ai_verdicts.json [--model claude-4.5-sonnet]
 """
 import argparse
 import json
@@ -15,23 +15,9 @@ import sys
 import os
 
 # Import AI backend for Cursor CLI calls
-try:
-    from ai_backend import ask, resolve_model
-except ImportError:
-    # Fallback if not in path
-    import subprocess
-    def ask(namespace, prompt, model=None, key=None, **kwargs):
-        """Fallback: call Cursor agent directly."""
-        model = model or "claude-sonnet-4.5"
-        try:
-            result = subprocess.run(
-                ["agent", "-p", "--force", "--model", model, prompt],
-                capture_output=True, text=True, timeout=300
-            )
-            return result.stdout.strip() if result.returncode == 0 else ""
-        except Exception as e:
-            print(f"⚠️ AI call failed: {e}", file=sys.stderr)
-            return ""
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from ai_backend import Backend
 
 
 def build_adjudication_prompt(pr):
@@ -119,52 +105,62 @@ def parse_ai_response(response):
     }
 
 
-def generate_verdicts(build_results, model="claude-sonnet-4.5"):
+def generate_verdicts(build_results, model="claude-4.5-sonnet"):
     """Generate AI verdicts for all REVIEW PRs."""
+    pr_items = []
     results = build_results.get("results", [])
-    prs = build_results.get("prs", {})
-    
+    prs_dict = build_results.get("prs", {})
+
+    if results:
+        for pr in results:
+            pr_num = str(pr.get("pr", pr.get("pr_num", "")))
+            if pr_num:
+                pr_items.append((pr_num, pr))
+    elif prs_dict:
+        for pr_num, pr_data in prs_dict.items():
+            if isinstance(pr_data, dict):
+                pr_data.setdefault("pr_num", pr_num)
+                pr_items.append((str(pr_num), pr_data))
+
+    backend = Backend.from_env(model=model)
     verdicts = {}
     review_count = 0
-    
-    # Process PRs from results list
-    for pr in results:
-        pr_num = pr.get("pr")
-        verdict = pr.get("verdict_v2", {}).get("verdict", "REVIEW")
-        
+
+    for pr_num, pr in pr_items:
+        v2 = pr.get("verdict_v2", {})
+        verdict = v2.get("verdict", "REVIEW") if isinstance(v2, dict) else "REVIEW"
+
         if verdict != "REVIEW":
             print(f"PR#{pr_num}: Skipping (verdict={verdict})", file=sys.stderr)
             continue
-        
+
         review_count += 1
-        print(f"PR#{pr_num}: Calling AI arbiter (model={model})...", file=sys.stderr)
-        
+        print(f"PR#{pr_num}: Calling AI arbiter (model={backend.model})...", file=sys.stderr)
+
         prompt = build_adjudication_prompt(pr)
-        response = ask(
+        response = backend.invoke(
+            prompt,
             namespace="ai-arbiter",
-            prompt=prompt,
-            model=model,
             key=f"pr-{pr_num}",
-            timeout=180
         )
-        
+
         if not response:
             print(f"PR#{pr_num}: AI call failed, keeping REVIEW", file=sys.stderr)
-            verdicts[str(pr_num)] = {
+            verdicts[pr_num] = {
                 "final_verdict": "REVIEW",
                 "confidence": "LOW",
                 "reasoning": "AI call failed",
                 "recommend_downgrade": False,
-                "accepted": False
+                "accepted": False,
             }
             continue
-        
+
         verdict_dict = parse_ai_response(response)
-        verdicts[str(pr_num)] = verdict_dict
-        
+        verdicts[pr_num] = verdict_dict
+
         action = "DOWNGRADE → SAFE" if verdict_dict.get("recommend_downgrade") else "KEEP REVIEW"
         print(f"PR#{pr_num}: {action} (confidence={verdict_dict.get('confidence')})", file=sys.stderr)
-    
+
     print(f"\n✅ Processed {review_count} REVIEW PRs", file=sys.stderr)
     return verdicts
 
@@ -173,16 +169,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("results", help="Path to build-results.json")
     ap.add_argument("--output", default="ai_verdicts.json", help="Output file for verdicts")
-    ap.add_argument("--model", default="claude-sonnet-4.5", help="AI model to use")
+    ap.add_argument("--model", default="claude-4.5-sonnet", help="AI model to use")
     args = ap.parse_args()
-    
-    # Check Cursor CLI available
-    import subprocess
-    try:
-        subprocess.run(["agent", "--version"], capture_output=True, timeout=5)
-    except Exception:
-        print("::error::Cursor agent CLI not found - AI layer requires 'agent' command", file=sys.stderr)
-        sys.exit(1)
     
     # Load build results
     with open(args.results) as f:

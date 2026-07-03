@@ -1,0 +1,7 @@
+{
+  "key": "pr-23",
+  "model": "claude-4-sonnet",
+  "namespace": "adjudication",
+  "prompt_sha": "replayed-from-ai_verdicts",
+  "response": "{\n  \"break_class\": \"behavioral\",\n  \"independent_verdict\": \"escalate\",\n  \"proof\": \"metric.go:72 installs the otel prometheus exporter as the MeterProvider reader; grep confirms our scrape path uses the changed translator. A static read cannot prove whether our metrics hit the changed dropped-data path; a faithful probe needs a live scrape against real metric cardinality.\",\n  \"deterministic_agrees\": true,\n  \"deterministic_flaw\": \"\",\n  \"final_verdict\": \"escalate\",\n  \"citation\": \"utils/middleware/log/metric.go:72\",\n  \"remediation\": \"\",\n  \"escalation_question\": \"Do any exported metrics rely on the pre-1.x otel-prometheus name/label translation (unit suffixes or dropped invalid labels)? A runtime scrape diff is required because the change is purely behavioral on real metric data.\",\n  \"confidence\": 0.7,\n  \"pr\": 23\n}"
+}

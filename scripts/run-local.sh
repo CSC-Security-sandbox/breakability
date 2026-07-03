@@ -18,11 +18,11 @@
 # actually comment, once you're shippable.
 #
 # Usage:
-#   .github/scripts/run-local.sh --prs 10,23,38                 # full run, dry-run comments
-#   .github/scripts/run-local.sh --prs 10,23,38 --from ai       # reuse cached build-results, redo AI+
-#   .github/scripts/run-local.sh --prs 10 --from reconcile      # reuse cached AI verdicts, redo reconcile+
-#   .github/scripts/run-local.sh --prs 10,23,38 --post          # actually post comments
-#   .github/scripts/run-local.sh --seed path/to/build-results.json --from ai
+#   scripts/run-local.sh --prs 10,23,38                 # full run, dry-run comments
+#   scripts/run-local.sh --prs 10,23,38 --from ai       # reuse cached build-results, redo AI+
+#   scripts/run-local.sh --prs 10 --from reconcile      # reuse cached AI verdicts, redo reconcile+
+#   scripts/run-local.sh --prs 10,23,38 --post          # actually post comments
+#   scripts/run-local.sh --seed path/to/build-results.json --from ai
 #
 # Flags:
 #   --prs LIST        comma-separated PR numbers (required unless --seed already has them)
@@ -37,8 +37,8 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$HERE/../.." && pwd)"
-HARNESS="$REPO_ROOT/.github/breakability/harness"
+REPO_ROOT="$(cd "$HERE/.." && pwd)"
+HARNESS="$REPO_ROOT/harness"
 
 PRS=""
 FROM="deterministic"
@@ -76,9 +76,9 @@ run_stage() { local i; i=$(stage_idx "$1"); [[ "$i" -ge "$FROM_I" && "$i" -le "$
 
 cd "$REPO_ROOT"
 # Auto-load a local, gitignored env file so CURSOR_API_KEY (and any registry tokens) are
-# picked up without re-exporting every shell. Create .github/breakability/.env.local with:
+# picked up without re-exporting every shell. Create .env.local with:
 #   export CURSOR_API_KEY=...
-ENV_LOCAL="$REPO_ROOT/.github/breakability/.env.local"
+ENV_LOCAL="$REPO_ROOT/.env.local"
 if [[ -f "$ENV_LOCAL" ]]; then
   # shellcheck disable=SC1090
   set -a; source "$ENV_LOCAL"; set +a
@@ -133,9 +133,9 @@ if run_stage deterministic; then
   [[ -z "$PRS" ]] && { echo "note: no --prs given; build-check will discover open PRs"; }
   st=$(date +%s)
   PR_FILTER="$PRS" BREAKABILITY_PR_NUMBERS="$PRS" \
-    CLI_PATH=".github/actions/breakability-check/index.js" \
+    CLI_PATH="${CLI_PATH:-}" \
     REPO_ROOT="$REPO_ROOT" \
-    bash .github/scripts/build-check.sh
+    bash scripts/build-check.sh
   echo "deterministic done in $(( $(date +%s) - st ))s -> $RESULTS"
 else
   echo "skip deterministic (--from $FROM); reusing $RESULTS"
@@ -161,7 +161,7 @@ if run_stage probe; then
     DP_DETERMINISTIC_ONLY=1 \
     DP_RESULTS=/tmp/build-results.json \
     DP_REPO_ROOT="$REPO_ROOT" \
-      python3 .github/scripts/differential-probe.py \
+      python3 scripts/differential-probe.py \
       && echo "deterministic npm probe done in $(( $(date +%s) - st ))s" \
       || echo "[warn] deterministic npm probe failed; residuals stay at deterministic verdict"
   else
@@ -173,7 +173,7 @@ if run_stage probe; then
     DP_AGENT_MODEL="$MODEL" \
     DP_RESULTS=/tmp/build-results.json \
     DP_REPO_ROOT="$REPO_ROOT" \
-      python3 .github/scripts/differential-probe.py \
+      python3 scripts/differential-probe.py \
       && echo "behavioral probe done in $(( $(date +%s) - st ))s" \
       || echo "[warn] behavioral probe failed; residuals stay at deterministic verdict"
   fi
@@ -186,14 +186,14 @@ if run_stage policy; then
   # (symbol/kind/old/new/severity) so reachability has named symbols to check, not
   # just a '### Breaking Changes' heading. Advisory + non-breaking: never changes a
   # verdict here. Set M8_USE_AI=1 (and BRK_AGENT_MODE) to enable AI enrichment.
-  if [[ -f .github/scripts/changelog_comprehension.py ]]; then
-    python3 .github/scripts/changelog_comprehension.py /tmp/build-results.json \
+  if [[ -f scripts/changelog_comprehension.py ]]; then
+    python3 scripts/changelog_comprehension.py /tmp/build-results.json \
       ${M8_USE_AI:+--ai} --write \
       && echo "M8 changelog comprehension applied" \
       || echo "[warn] M8 changelog comprehension failed; continuing"
   fi
-  if [[ -f .github/scripts/policy_lowering.py ]]; then
-    python3 .github/scripts/policy_lowering.py /tmp/build-results.json --enrich -o /tmp/build-results.policy.json \
+  if [[ -f scripts/policy_lowering.py ]]; then
+    python3 scripts/policy_lowering.py /tmp/build-results.json --enrich -o /tmp/build-results.policy.json \
       && mv /tmp/build-results.policy.json /tmp/build-results.json \
       && echo "policy lowering applied" \
       || echo "[warn] policy lowering failed; continuing with raw verdicts"
@@ -210,7 +210,7 @@ if run_stage ai; then
     echo "skip-ai: empty verdicts (Tier-0 deterministic module-scope still applies in reconcile)"
   else
     st=$(date +%s)
-    bash .github/scripts/independent_adjudicate.sh /tmp/build-results.json "$VERDICTS" "$MODEL"
+    bash scripts/independent_adjudicate.sh /tmp/build-results.json "$VERDICTS" "$MODEL"
     echo "ai adjudication done in $(( $(date +%s) - st ))s -> $VERDICTS"
   fi
 fi
@@ -220,17 +220,17 @@ if run_stage reconcile; then
   say "5/7 reconcile AI + deterministic verdicts"
   V=""
   [[ -f "$VERDICTS" ]] && V="--verdicts $VERDICTS"
-  python3 .github/scripts/reconcile_adjudication.py /tmp/build-results.json $V --repo "$REPO_ROOT" --write
+  python3 scripts/reconcile_adjudication.py /tmp/build-results.json $V --repo "$REPO_ROOT" --write
 fi
 
 # ── 5. Comments (dry-run unless --post) ───────────────────────────────────────
 if run_stage comments; then
   if [[ "$POST" == 1 ]]; then
     say "6/7 posting comments to GitHub (LIVE)"
-    DRY_RUN=0 bash .github/scripts/post-fallback-comments.sh
+    DRY_RUN=0 bash scripts/post-fallback-comments.sh
   else
     say "6/7 rendering comments (DRY-RUN -> /tmp/breakability-local/comments)"
-    DRY_RUN=1 DRY_RUN_DIR=/tmp/breakability-local/comments bash .github/scripts/post-fallback-comments.sh
+    DRY_RUN=1 DRY_RUN_DIR=/tmp/breakability-local/comments bash scripts/post-fallback-comments.sh
     echo "rendered comments:"; ls -1 /tmp/breakability-local/comments/ 2>/dev/null | sed 's/^/  /' || true
   fi
 fi
@@ -240,7 +240,7 @@ if run_stage summary; then
   say "7/7 final verdicts"
   python3 - /tmp/build-results.json <<'PY'
 import json, os, sys
-sys.path.insert(0, os.path.join(os.getcwd(), ".github", "scripts"))
+sys.path.insert(0, os.path.join(os.getcwd(), "scripts"))
 from verdict_contract import authoritative_verdict, prediction_for_pr, stage_report
 d = json.load(open(sys.argv[1]))
 prs = d.get("prs") or {}

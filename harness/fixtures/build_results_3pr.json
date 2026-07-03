@@ -1,0 +1,3423 @@
+{
+  "cross_pr_deps": [],
+  "govulncheck": {
+    "main_baseline": {
+      "findings": [],
+      "status": "skipped_disabled"
+    },
+    "prs_scanned": 0,
+    "prs_with_new_vulns": 0,
+    "total_new_findings": []
+  },
+  "main_build": {
+    "go": {
+      "exit": 0,
+      "output_tail": "\n--- module: /tmp/worktree-main/.github/tools/reachability (exit=0) ---\n\n--- module: /tmp/worktree-main/automations/tstctl (exit=0) ---\n\n--- module: /tmp/worktree-main/cicd (exit=0) ---\n# main/cmd/release-cmd/tag\ncmd/release-cmd/tag/utils.go:132:13: log.Printf call has arguments but no formatting directives\n--- module: /tmp/worktree-main (exit=0) ---\n\n",
+      "test_exit": -1,
+      "test_output_tail": "deferred \u2014 per-PR targeted comparison\n"
+    },
+    "npm": {
+      "exit": -1,
+      "output_tail": "\n"
+    },
+    "pip": {
+      "exit": -1,
+      "output_tail": "\n"
+    }
+  },
+  "metadata": {
+    "cli_path": ".github/actions/breakability-check/index.js",
+    "missing_pr_numbers": [],
+    "mode": "advisory",
+    "pr_count": 3,
+    "repo": "CSC-Security-sandbox/vcp-vsa-breakability-test",
+    "requested_pr_numbers": [
+      10,
+      23,
+      38
+    ],
+    "selected_pr_numbers": [
+      10,
+      23,
+      38
+    ],
+    "subset_requested": true,
+    "timestamp": "2026-06-09T05:52:26Z"
+  },
+  "nestjs_skew": [],
+  "prs": {
+    "10": {
+      "additional_imports": [],
+      "additional_packages": "",
+      "build": {
+        "error_class": "",
+        "install_method": "ci",
+        "main_exit": 0,
+        "new_errors": [],
+        "oom_override": false,
+        "oom_packages": [],
+        "output_tail": "  targeted build (cicd module): 1 dirs\n    dirs: ./cmd/jira/...\n",
+        "pr_exit": 0,
+        "verdict": "pass"
+      },
+      "bump": "minor",
+      "bumped_modules": {
+        "github.com/andygrunwald/go-jira": "v1.17.0"
+      },
+      "cascade_impact": [],
+      "cve_details": [],
+      "cves": [
+        "CVE-2025-30204"
+      ],
+      "declared_break_reachability": {
+        "affected_paths": [],
+        "behavior_confirmed": false,
+        "checked": false,
+        "evidence": [],
+        "named_symbols": [
+          "IssueService",
+          "Search",
+          "SearchWithContext"
+        ],
+        "prod_reachable": false,
+        "reachability_kind": "unresolved",
+        "surface_by_path": {},
+        "surface_evidence": [],
+        "surface_kind": "unknown",
+        "surface_symbols": [],
+        "test_only": false
+      },
+      "dep_relation": "direct",
+      "dep_type": "production",
+      "deterministic": {
+        "adapter": "go",
+        "api_changes": 4,
+        "api_changes_detail": [
+          {
+            "changeType": "type_changed",
+            "isHardBreak": true,
+            "newDefinition": "struct",
+            "oldDefinition": "struct",
+            "symbol": "Response"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "newDefinition": "method",
+            "symbol": "e.SearchV2JQL"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "newDefinition": "method",
+            "symbol": "e.SearchV2JQLWithContext"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "newDefinition": "struct",
+            "symbol": "SearchOptionsV2"
+          }
+        ],
+        "api_diff_tool": {
+          "command": "go doc -all <module> (structural fallback)",
+          "mode": "structural",
+          "name": "Go structural API diff",
+          "package": "golang.org/x/exp/cmd/apidiff",
+          "status": "structural_fallback",
+          "version": "v0.0.0-20260529124908-c761662dc8c9",
+          "warning": "apidiff module snapshots unavailable; used structural go doc fallback (golang.org/x/exp/cmd/apidiff@v0.0.0-20260529124908-c761662dc8c9)"
+        },
+        "changelogSignal": {
+          "bullets": [
+            "If you are using a Jira Cloud-hosted instance and are using either `IssueService.Search()` or `IssueService.SearchWithContext()`, there is a high likelihood that these functions will no longer work for you due to deprecation and removal by Atlassian.",
+            "### Breaking Changes",
+            "Replaced deprecated `ioutil.ReadFile` with `os.ReadFile`",
+            "Replaced deprecated `ioutil.ReadAll` with `io.ReadAll`",
+            "Replaced deprecated `ioutil.Discard` with `io.Discard`"
+          ],
+          "status": "breaking"
+        },
+        "changelogText": "- If you are using a Jira Cloud-hosted instance and are using either `IssueService.Search()` or `IssueService.SearchWithContext()`, there is a high likelihood that these functions will no longer work for you due to deprecation and removal by Atlassian.\n- ### Breaking Changes\n- Replaced deprecated `ioutil.ReadFile` with `os.ReadFile`\n- Replaced deprecated `ioutil.ReadAll` with `io.ReadAll`\n- Replaced deprecated `ioutil.Discard` with `io.Discard`",
+        "classification": "LOW",
+        "confidence": "PARTIAL",
+        "merge_risk": {
+          "buildVerificationAxis": "L2",
+          "confidenceAxis": "L2",
+          "evidenceAxis": "declared breaking change (changelog), behavior unverified",
+          "reason": "declared breaking change unverified by build/test: ### Breaking Changes",
+          "tag": "High"
+        },
+        "score": 1,
+        "security": null,
+        "usages": [],
+        "verification": {
+          "compatible": null,
+          "symbol_results": {},
+          "tier": 3,
+          "verified": false
+        }
+      },
+      "diff_lines": 65,
+      "diff_path": "/tmp/pr-10.diff",
+      "diff_truncated": false,
+      "ecosystem": "gomod",
+      "evidence": [
+        {
+          "command": "go mod tidy (affected modules) for github.com/andygrunwald/go-jira 1.16.0\u21921.17.0",
+          "exit_code": 0,
+          "label": "Dependency resolution",
+          "na_reason": "",
+          "signal": "dependency_resolution",
+          "status": "ran_pass",
+          "stdout": "\n--- go mod tidy: cicd (exit=0) ---\n",
+          "summary": "pass"
+        },
+        {
+          "command": "go_targeted_build (timeout 300 go build -o /dev/null <affected packages>)",
+          "exit_code": 0,
+          "label": "Build",
+          "na_reason": "",
+          "signal": "build",
+          "status": "ran_pass",
+          "stdout": "  targeted build (cicd module): 1 dirs\n    dirs: ./cmd/jira/...\n",
+          "summary": "pass"
+        },
+        {
+          "command": "node .github/actions/breakability-check/index.js --json",
+          "exit_code": 0,
+          "label": "API diff",
+          "na_reason": "",
+          "signal": "api_diff",
+          "status": "ran_pass",
+          "stdout": "onMs\": 0\n    },\n    {\n      \"stage\": \"api-extract\",\n      \"success\": true,\n      \"durationMs\": 21142\n    },\n    {\n      \"stage\": \"api-diff-apidiff\",\n      \"success\": false,\n      \"durationMs\": 0,\n      \"error\": \"apidiff module snapshots unavailable; used structural go doc fallback (golang.org/x/exp/cmd/apidiff@v0.0.0-20260529124908-c761662dc8c9)\"\n    },\n    {\n      \"stage\": \"api-diff\",\n      \"success\": true,\n      \"durationMs\": 1\n    },\n    {\n      \"stage\": \"usage-scan\",\n      \"success\": true,\n      \"durationMs\": 307\n    },\n    {\n      \"stage\": \"verification\",\n      \"success\": true,\n      \"durationMs\": 0\n    },\n    {\n      \"stage\": \"scoring\",\n      \"success\": true,\n      \"durationMs\": 0\n    }\n  ],\n  \"apiDiffTool\": {\n    \"name\": \"Go structural API diff\",\n    \"package\": \"golang.org/x/exp/cmd/apidiff\",\n    \"version\": \"v0.0.0-20260529124908-c761662dc8c9\",\n    \"mode\": \"structural\",\n    \"command\": \"go doc -all <module> (structural fallback)\",\n    \"status\": \"structural_fallback\",\n    \"warning\": \"apidiff module snapshots unavailable; used structural go doc fallback (golang.org/x/exp/cmd/apidiff@v0.0.0-20260529124908-c761662dc8c9)\"\n  },\n  \"timestamp\": \"2026-06-09T06:18:51.603Z\",\n  \"changelogText\": \"- If you are using a Jira Cloud-hosted instance and are using either `IssueService.Search()` or `IssueService.SearchWithContext()`, there is a high likelihood that these functions will no longer work for you due to deprecation and removal by Atlassian.\\n- ### Breaking Changes\\n- Replaced deprecated `ioutil.ReadFile` with `os.ReadFile`\\n- Replaced deprecated `ioutil.ReadAll` with `io.ReadAll`\\n- Replaced deprecated `ioutil.Discard` with `io.Discard`\",\n  \"changelogSignal\": {\n    \"status\": \"breaking\",\n    \"bullets\": [\n      \"If you are using a Jira Cloud-hosted instance and are using either `IssueService.Search()` or `IssueService.SearchWithContext()`, there is a high likelihood that these functions will no longer work for you due to deprecation and removal by Atlassian.\",\n      \"### Breaking Changes\",\n      \"Replaced deprecated `ioutil.ReadFile` with `os.ReadFile`\",\n      \"Replaced deprecated `ioutil.ReadAll` with `io.ReadAll`\",\n      \"Replaced deprecated `ioutil.Discard` with `io.Discard`\"\n    ]\n  }\n}\n{\"timestamp\":\"2026-06-09T06:18:29.763Z\",\"level\":\"info\",\"stage\":\"cli\",\"message\":\"Analyzing github.com/andygrunwald/go-jira 1.16.0 \u2192 1.17.0\"}\n{\"timestamp\":\"2026-06-09T06:18:29.763Z\",\"level\":\"info\",\"stage\":\"cli\",\"message\":\"Repository: /Users/hpoornac/actions-runner/_work/vcp-vsa-breakability-test/vcp-vsa-breakability-test\"}\n{\"timestamp\":\"2026-06-09T06:18:29.763Z\",\"level\":\"info\",\"stage\":\"cli\",\"message\":\"Ecosystem: gomod\"}\n{\"timestamp\":\"2026-06-09T06:18:29.763Z\",\"level\":\"info\",\"stage\":\"cli\",\"message\":\"Dep type: production\"}\n{\"timestamp\":\"2026-06-09T06:18:30.151Z\",\"level\":\"info\",\"stage\":\"cli\",\"message\":\"Using supplied changelog file (448 chars)\"}\n{\"timestamp\":\"2026-06-09T06:18:50.601Z\",\"level\":\"warn\",\"stage\":\"go-extractor\",\"message\":\"apidiff -m -w failed for github.com/andygrunwald/go-jira using golang.org/x/exp/cmd/apidiff@v0.0.0-20260529124908-c761662dc8c9\",\"data\":{\"stderr\":\"go: golang.org/x/exp@v0.0.0-20260529124908-c761662dc8c9 requires go >= 1.25.0; switching to go1.25.11\\nloading github.com/andygrunwald/go-jira: /Users/hpoornac/go/pkg/mod/github.com/andygrunwald/go-jira@v1.16.0/examples/addlabel/main.go:12:2: could not import golang.org/x/term (invalid package name: \\\"\\\")\\nexit status 1\\n\"}}\n{\"timestamp\":\"2026-06-09T06:18:50.603Z\",\"level\":\"warn\",\"stage\":\"go-extractor\",\"message\":\"apidiff -m -w failed for github.com/andygrunwald/go-jira using golang.org/x/exp/cmd/apidiff@v0.0.0-20260529124908-c761662dc8c9\",\"data\":{\"stderr\":\"go: golang.org/x/exp@v0.0.0-20260529124908-c761662dc8c9 requires go >= 1.25.0; switching to go1.25.11\\nloading github.com/andygrunwald/go-jira: /Users/hpoornac/go/pkg/mod/github.com/andygrunwald/go-jira@v1.17.0/examples/addlabel/main.go:12:2: could not import golang.org/x/term (invalid package name: \\\"\\\")\\nexit status 1\\n\"}}\n",
+          "summary": "api_changes=4, compatible=None"
+        },
+        {
+          "command": "scan_usage_go",
+          "exit_code": 0,
+          "label": "Usage scan",
+          "na_reason": "",
+          "signal": "usage_scan",
+          "status": "ran_pass",
+          "stdout": "cicd/cmd/jira/release.go:11:\t\"github.com/andygrunwald/go-jira\"\ncicd/cmd/jira/allow_main.go:7:\t\"github.com/andygrunwald/go-jira\"\ncicd/cmd/jira/jira.go:6:\t\"github.com/andygrunwald/go-jira\"",
+          "summary": "3 importing file(s) found"
+        },
+        {
+          "command": "govulncheck ./...",
+          "exit_code": null,
+          "label": "Vulnerability scan",
+          "na_reason": "govulncheck disabled by config",
+          "signal": "vuln_scan",
+          "status": "skipped",
+          "stdout": "  [security] govulncheck disabled (BREAKABILITY_GOVULNCHECK!=1) \u2014 Dependabot supplies CVE list; skipping",
+          "summary": "govulncheck disabled"
+        },
+        {
+          "command": "go_targeted_test (timeout 300 go test -timeout 5m -race <affected packages>)",
+          "exit_code": 0,
+          "label": "Tests",
+          "na_reason": "no Go test files present",
+          "signal": "tests",
+          "status": "n/a",
+          "stdout": "    testing cicd module: 1 dirs \u2014 ./cmd/jira/...\n?   \tmain/cmd/jira\t[no test files]\n",
+          "summary": "go test reported [no test files]; see no_test_confidence"
+        }
+      ],
+      "files_importing": [
+        "cicd/cmd/jira/allow_main.go",
+        "cicd/cmd/jira/jira.go",
+        "cicd/cmd/jira/release.go"
+      ],
+      "from": "1.16.0",
+      "go_resolution": {
+        "command": "go mod tidy (affected modules) for github.com/andygrunwald/go-jira 1.16.0\u21921.17.0",
+        "modsum_diff": "diff --git a/.github/tools/reachability/go.mod b/.github/tools/reachability/go.mod\ndeleted file mode 100644\nindex 81db8c74..00000000\n--- a/.github/tools/reachability/go.mod\n+++ /dev/null\n@@ -1,10 +0,0 @@\n-module breakability/reachability\n-\n-go 1.25.0\n-\n-require golang.org/x/tools v0.45.0\n-\n-require (\n-\tgolang.org/x/mod v0.36.0 // indirect\n-\tgolang.org/x/sync v0.20.0 // indirect\n-)\ndiff --git a/.github/tools/reachability/go.sum b/.github/tools/reachability/go.sum\ndeleted file mode 100644\nindex be8b55bf..00000000\n--- a/.github/tools/reachability/go.sum\n+++ /dev/null\n@@ -1,8 +0,0 @@\n-github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=\n-github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=\n-golang.org/x/mod v0.36.0 h1:JJjpVx6myfUsUdAzZuOSTTmRE0PfZeNWzzvKrP7amb4=\n-golang.org/x/mod v0.36.0/go.mod h1:moc6ELqsWcOw5Ef3xVprK5ul/MvtVvkIXLziUOICjUQ=\n-golang.org/x/sync v0.20.0 h1:e0PTpb7pjO8GAtTs2dQ6jYa5BWYlMuX047Dco/pItO4=\n-golang.org/x/sync v0.20.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=\n-golang.org/x/tools v0.45.0 h1:18qN3FAooORvApf5XjCXgsuayZOEtXf6JK18I3+ONa8=\n-golang.org/x/tools v0.45.0/go.mod h1:LuUGqqaXcXMEFEruIVJVm5mgDD8vww/z/SR1gQ4uE/0=\ndiff --git a/cicd/go.mod b/cicd/go.mod\nindex 3dc08385..9d4977f6 100644\n--- a/cicd/go.mod\n+++ b/cicd/go.mod\n@@ -6 +6 @@ require (\n-\tgithub.com/andygrunwald/go-jira v1.16.0\n+\tgithub.com/andygrunwald/go-jira v1.17.0\ndiff --git a/cicd/go.sum b/cicd/go.sum\nindex 1661461e..372f4310 100644\n--- a/cicd/go.sum\n+++ b/cicd/go.sum\n@@ -24,2 +24,2 @@ github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapp\n-github.com/andygrunwald/go-jira v1.16.0 h1:PU7C7Fkk5L96JvPc6vDVIrd99vdPnYudHu4ju2c2ikQ=\n-github.com/andygrunwald/go-jira v1.16.0/go.mod h1:UQH4IBVxIYWbgagc0LF/k9FRs9xjIiQ8hIcC6HfLwFU=\n+github.com/andygrunwald/go-jira v1.17.0 h1:bbu5H676l6MaNcV6A7VDIAjIOQVgzNGEhNAwNI/Cjgo=\n+github.com/andygrunwald/go-jira v1.17.0/go.mod h1:tiZsPUu9824bwcI2BUXatE4hJbs9rUOif0nv1lkq1hQ=\n@@ -101 +100,0 @@ github.com/gogo/protobuf v1.3.2/go.mod h1:P1XiOD3dCwIKUDQYPy72D8LYyHL2YPYrpS2s69\n-github.com/golang-jwt/jwt/v4 v4.4.2/go.mod h1:m21LjoU+eqJr34lmDMbreY2eSTRJ1cv77w39/MY0Ch0=\n@@ -117 +115,0 @@ github.com/google/go-cmp v0.5.2/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/\n-github.com/google/go-cmp v0.5.8/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=\n@@ -190 +187,0 @@ github.com/onsi/gomega v1.35.1/go.mod h1:PvZbdDc8J6XJEpDK4HCuRBm8a6Fzp9/DmhC9C7y\n-github.com/opentracing/opentracing-go v1.1.0 h1:pWlfV3Bxv7k65HYwkikxat0+s3pV4bsqf19k25Ur8rU=\n@@ -320 +316,0 @@ golang.org/x/sys v0.0.0-20211025201205-69cdffdb9359/go.mod h1:oPkhp1MJrh7nUepCBc\n-golang.org/x/sys v0.0.0-20220330033206-e17cdc41300f/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=\n@@ -325 +320,0 @@ golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1/go.mod h1:bj7SfCRtBDWHUb9sn\n-golang.org/x/term v0.0.0-20210220032956-6a3ed077a48d/go.mod h1:bj7SfCRtBDWHUb9snDiAeCFNEtKQo2Wmx5Cou7ajbmo=\n",
+        "output_tail": "\n--- go mod tidy: cicd (exit=0) ---\n"
+      },
+      "gosum_new_count": 1,
+      "gosum_new_names": "github.com/andygrunwald/go-jira",
+      "gosum_total_main": 414,
+      "gosum_total_pr": 409,
+      "install_ok": true,
+      "merge_risk": {
+        "buildVerificationAxis": "L2",
+        "confidenceAxis": "L2",
+        "evidenceAxis": "declared breaking change (changelog), behavior unverified",
+        "reason": "declared breaking change unverified by build/test: ### Breaking Changes",
+        "tag": "High"
+      },
+      "mergeable_status": "UNKNOWN",
+      "nestjs_peer_warning": "",
+      "no_test_confidence": {
+        "applies": true,
+        "basis": {
+          "api_changes": 0,
+          "dep_type": "production",
+          "semver_bump": "minor",
+          "usage_signals": 3
+        },
+        "confidence": "medium",
+        "residual_risk": "No Go test files were present, so runtime behavior is not exercised by CI. API diff reported no removed/changed exported APIs. Reachability saw 3 usage signal(s); review touched call sites if behavior changed."
+      },
+      "npm_audit": {
+        "critical": 0,
+        "high": 0
+      },
+      "ownership_class": "direct_dep",
+      "package": "github.com/andygrunwald/go-jira",
+      "pkg_dir": "cicd",
+      "policy_lowering": {
+        "bundle": {
+          "abstain_reason": "none",
+          "citations": [],
+          "commands": [],
+          "confidence": "medium",
+          "ecosystem": "gomod",
+          "from_version": "1.16.0",
+          "is_ci_only": false,
+          "is_major": false,
+          "package": "github.com/andygrunwald/go-jira",
+          "rationale": "",
+          "residual_risk": "high",
+          "security_sensitive": true,
+          "signals": {
+            "api_diff": {
+              "abstain_reason": "none",
+              "citations": [],
+              "commands": [],
+              "confidence": "high",
+              "introduced": null,
+              "name": "api_diff",
+              "new_output_hash": "",
+              "new_output_text": "",
+              "old_output_hash": "",
+              "old_output_text": "",
+              "rationale": "",
+              "relevant": true,
+              "residual_risk": "high",
+              "same_behavior": null,
+              "sensitive": false,
+              "severity": "high",
+              "status": "fail",
+              "tool_failure": false
+            },
+            "build": {
+              "abstain_reason": "none",
+              "citations": [],
+              "commands": [],
+              "confidence": "high",
+              "introduced": null,
+              "name": "build",
+              "new_output_hash": "",
+              "new_output_text": "",
+              "old_output_hash": "",
+              "old_output_text": "",
+              "rationale": "",
+              "relevant": null,
+              "residual_risk": "none",
+              "same_behavior": null,
+              "sensitive": false,
+              "severity": "none",
+              "status": "pass",
+              "tool_failure": false
+            },
+            "reachability": {
+              "abstain_reason": "none",
+              "citations": [],
+              "commands": [],
+              "confidence": "low",
+              "introduced": null,
+              "name": "reachability",
+              "new_output_hash": "",
+              "new_output_text": "",
+              "old_output_hash": "",
+              "old_output_text": "",
+              "rationale": "",
+              "relevant": null,
+              "residual_risk": "medium",
+              "same_behavior": null,
+              "sensitive": false,
+              "severity": "none",
+              "status": "unknown",
+              "tool_failure": false
+            },
+            "release_notes": {
+              "abstain_reason": "none",
+              "citations": [
+                {
+                  "locator": "release_notes_text",
+                  "source": "changelogSignal.bullets(5), changelogText",
+                  "text": "l by Atlassian. ### Breaking Changes Replaced deprecated `ioutil.ReadFile` with `os.ReadFile` Replaced deprecated `ioutil.ReadAll` with `io."
+                },
+                {
+                  "locator": "changelog_bullet",
+                  "source": "changelogSignal.bullets(5), changelogText",
+                  "text": "If you are using a Jira Cloud-hosted instance and are using either `IssueService.Search()` or `IssueService.SearchWithContext()`, there is a high likelihood that these functions will no longer work fo"
+                },
+                {
+                  "locator": "changelog_bullet",
+                  "source": "changelogSignal.bullets(5), changelogText",
+                  "text": "### Breaking Changes"
+                },
+                {
+                  "locator": "changelog_bullet",
+                  "source": "changelogSignal.bullets(5), changelogText",
+                  "text": "Replaced deprecated `ioutil.ReadFile` with `os.ReadFile`"
+                }
+              ],
+              "commands": [],
+              "confidence": "high",
+              "introduced": null,
+              "name": "release_notes",
+              "new_output_hash": "",
+              "new_output_text": "",
+              "old_output_hash": "",
+              "old_output_text": "",
+              "rationale": "release-notes classification: breaking_change; matched markers: ['breaking change']; sources: changelogSignal.bullets(5), changelogText",
+              "relevant": true,
+              "residual_risk": "high",
+              "same_behavior": null,
+              "sensitive": false,
+              "severity": "high",
+              "status": "fail",
+              "tool_failure": false
+            },
+            "security": {
+              "abstain_reason": "none",
+              "citations": [],
+              "commands": [],
+              "confidence": "medium",
+              "introduced": null,
+              "name": "security",
+              "new_output_hash": "",
+              "new_output_text": "",
+              "old_output_hash": "",
+              "old_output_text": "",
+              "rationale": "",
+              "relevant": null,
+              "residual_risk": "none",
+              "same_behavior": null,
+              "sensitive": false,
+              "severity": "none",
+              "status": "not_applicable",
+              "tool_failure": false
+            },
+            "test": {
+              "abstain_reason": "none",
+              "citations": [],
+              "commands": [],
+              "confidence": "high",
+              "introduced": null,
+              "name": "test",
+              "new_output_hash": "",
+              "new_output_text": "",
+              "old_output_hash": "",
+              "old_output_text": "",
+              "rationale": "",
+              "relevant": null,
+              "residual_risk": "none",
+              "same_behavior": null,
+              "sensitive": false,
+              "severity": "none",
+              "status": "pass",
+              "tool_failure": false
+            }
+          },
+          "to_version": "1.17.0"
+        },
+        "callsite_impact": {
+          "callsites": [],
+          "claimed_symbols": [],
+          "confidence": "low",
+          "dynamic_hazards": [],
+          "impact": "UNCERTAIN",
+          "is_breaking": false,
+          "matched_claims": [],
+          "reachability_verdict": "UNCERTAIN",
+          "reason_code": "uncertain:insufficient_callsite_data",
+          "signal": {
+            "confidence": "low",
+            "name": "reachability",
+            "relevant": null,
+            "status": "unknown"
+          },
+          "sources_used": [
+            "files_importing"
+          ],
+          "unmatched_claims": []
+        },
+        "decision": {
+          "confidence": "high",
+          "display_reason": "a breaking API change in the dependency is reachable from your code (the build still compiles, so verify the changed behavior)",
+          "reason_code": "review:break-reachable-api",
+          "severity": "high",
+          "verdict": "REVIEW"
+        },
+        "reachability": {
+          "absent_reason": null,
+          "callsites": [],
+          "checked": false,
+          "confidence": "low",
+          "dynamic_hazards": [],
+          "import_sites": [
+            {
+              "file": "cicd/cmd/jira/allow_main.go",
+              "is_test": false,
+              "line": null
+            },
+            {
+              "file": "cicd/cmd/jira/jira.go",
+              "is_test": false,
+              "line": null
+            },
+            {
+              "file": "cicd/cmd/jira/release.go",
+              "is_test": false,
+              "line": null
+            }
+          ],
+          "searched_symbols": [],
+          "sources_used": [
+            "files_importing"
+          ],
+          "uncertain_reason": "insufficient_callsite_data",
+          "verdict": "UNCERTAIN"
+        },
+        "reachability_adjudication": {
+          "agent_task": "Package `github.com/andygrunwald/go-jira` has a breaking API change. Grep the repository (excluding *_test.go) for any use of these changed symbols: Response. Report each production call site (file:line) or state definitively that none exist.",
+          "called_symbols": [],
+          "changed_symbols": [
+            "Response"
+          ],
+          "citation": "symbol-level reachability is unresolved; an agent must confirm whether any changed symbol is called in production code",
+          "manual_review_required": true,
+          "matched_symbols": [],
+          "recommend_lower": false,
+          "safety_locked": true,
+          "verdict": "NEEDS_AGENT"
+        },
+        "release_notes": {
+          "abstain_reason": "none",
+          "citations": [
+            {
+              "locator": "release_notes_text",
+              "source": "changelogSignal.bullets(5), changelogText",
+              "text": "l by Atlassian. ### Breaking Changes Replaced deprecated `ioutil.ReadFile` with `os.ReadFile` Replaced deprecated `ioutil.ReadAll` with `io."
+            },
+            {
+              "locator": "changelog_bullet",
+              "source": "changelogSignal.bullets(5), changelogText",
+              "text": "If you are using a Jira Cloud-hosted instance and are using either `IssueService.Search()` or `IssueService.SearchWithContext()`, there is a high likelihood that these functions will no longer work fo"
+            },
+            {
+              "locator": "changelog_bullet",
+              "source": "changelogSignal.bullets(5), changelogText",
+              "text": "### Breaking Changes"
+            },
+            {
+              "locator": "changelog_bullet",
+              "source": "changelogSignal.bullets(5), changelogText",
+              "text": "Replaced deprecated `ioutil.ReadFile` with `os.ReadFile`"
+            }
+          ],
+          "commands": [],
+          "confidence": "high",
+          "introduced": null,
+          "name": "release_notes",
+          "new_output_hash": "",
+          "new_output_text": "",
+          "old_output_hash": "",
+          "old_output_text": "",
+          "rationale": "release-notes classification: breaking_change; matched markers: ['breaking change']; sources: changelogSignal.bullets(5), changelogText",
+          "relevant": true,
+          "residual_risk": "high",
+          "same_behavior": null,
+          "sensitive": false,
+          "severity": "high",
+          "status": "fail",
+          "tool_failure": false
+        }
+      },
+      "smoke": {
+        "exit": null,
+        "ran": false
+      },
+      "test": {
+        "exit": 0,
+        "main_npm_test_exit": -1,
+        "main_test_exit": 0,
+        "output_tail": "    testing cicd module: 1 dirs \u2014 ./cmd/jira/...\n?   \tmain/cmd/jira\t[no test files]\n",
+        "ran": true
+      },
+      "to": "1.17.0",
+      "verification_label": "L2_type_checked",
+      "verification_level": 2,
+      "verification_steps": [
+        {
+          "status": "pass",
+          "step": "dependency_resolution"
+        },
+        {
+          "status": "pass",
+          "step": "type_check"
+        },
+        {
+          "detail": "not run or no .d.ts",
+          "status": "skip",
+          "step": "symbol_verification"
+        },
+        {
+          "detail": "go test reported [no test files]; see no_test_confidence",
+          "status": "skip",
+          "step": "test_suite"
+        },
+        {
+          "detail": "no dist/main.js after build",
+          "status": "skip",
+          "step": "smoke_probe"
+        }
+      ],
+      "vuln_finding": "",
+      "vuln_new_findings": [],
+      "vuln_output": "  [security] govulncheck disabled (BREAKABILITY_GOVULNCHECK!=1) \u2014 Dependabot supplies CVE list; skipping",
+      "vuln_preexisting_count": 0,
+      "vuln_status": "skipped_disabled"
+    },
+    "23": {
+      "additional_imports": [],
+      "additional_packages": "",
+      "behavioral_grade": {
+        "_call_site_package_mismatch": true,
+        "behavior_changed": "unverified",
+        "call_site": "utils/middleware/log/metric.go:22",
+        "call_site_import_path": "go.opentelemetry.io/otel/exporters/prometheus",
+        "confidence": "low",
+        "generated_at": 1780986187,
+        "grade": "medium",
+        "guidance": "Affected package used at utils/middleware/log/metric.go:22. Check whether your usage relies on the changed behavior.",
+        "rationale": "Improve error handling for dropped data during translation by using `prometheus.NewInvalidMetric` in `go.opentelemetry.io/otel/exporters/prometheus`. \u26a0\ufe0f **Breaking Change:** Previously, these cases we \u2014 this break depends on runtime state/load/timing and is not reproducible from a minimal probe; assess against your usage.",
+        "router_class": "not_observable",
+        "router_markers": [
+          "cardinalit",
+          "high cardinalit"
+        ],
+        "source": "reasoning_failed"
+      },
+      "build": {
+        "error_class": "",
+        "install_method": "ci",
+        "main_exit": 0,
+        "new_errors": [],
+        "oom_override": false,
+        "oom_packages": [],
+        "output_tail": "  targeted build (root module): 2 dirs\n    dirs: ./ontap-proxy/middleware/... ./utils/middleware/log/...\n",
+        "pr_exit": 0,
+        "verdict": "pass"
+      },
+      "bump": "minor",
+      "bumped_modules": {
+        "github.com/rogpeppe/go-internal": "v1.14.1",
+        "go.opentelemetry.io/auto/sdk": "v1.2.1",
+        "go.opentelemetry.io/otel": "v1.42.0",
+        "go.opentelemetry.io/otel/metric": "v1.42.0",
+        "go.opentelemetry.io/otel/sdk": "v1.42.0",
+        "go.opentelemetry.io/otel/sdk/metric": "v1.42.0",
+        "go.opentelemetry.io/otel/trace": "v1.42.0",
+        "golang.org/x/sys": "v0.41.0"
+      },
+      "cascade_impact": [],
+      "cve_details": [
+        {
+          "advisory_url": "https://github.com/advisories/GHSA-hfvc-g4fc-pqhx",
+          "cve_id": "CVE-2026-39883",
+          "cvss_score": 0.0,
+          "ghsa_id": "GHSA-hfvc-g4fc-pqhx",
+          "id": "CVE-2026-39883",
+          "severity": "high",
+          "summary": "opentelemetry-go: BSD kenv command not using absolute path enables PATH hijacking"
+        },
+        {
+          "advisory_url": "https://github.com/advisories/GHSA-9h8m-3fm2-qjrq",
+          "cve_id": "CVE-2026-24051",
+          "cvss_score": 7.0,
+          "ghsa_id": "GHSA-9h8m-3fm2-qjrq",
+          "id": "CVE-2026-24051",
+          "severity": "high",
+          "summary": "OpenTelemetry Go SDK Vulnerable to Arbitrary Code Execution via PATH Hijacking"
+        }
+      ],
+      "cves": [
+        "CVE-2026-39883",
+        "CVE-2026-24051"
+      ],
+      "declared_break_reachability": {
+        "affected_paths": [
+          "go.opentelemetry.io/otel/exporters/prometheus",
+          "go.opentelemetry.io/otel/attribute"
+        ],
+        "behavior_confirmed": false,
+        "checked": true,
+        "evidence": [
+          {
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "is_test": true,
+            "line": "19",
+            "path": "go.opentelemetry.io/otel/exporters/prometheus"
+          },
+          {
+            "file": "utils/middleware/log/metric_test.go",
+            "is_test": true,
+            "line": "12",
+            "path": "go.opentelemetry.io/otel/exporters/prometheus"
+          },
+          {
+            "file": "utils/middleware/log/metric.go",
+            "is_test": false,
+            "line": "12",
+            "path": "go.opentelemetry.io/otel/exporters/prometheus"
+          },
+          {
+            "file": "core/core-api/core-servergen/oas_handlers_gen.go",
+            "is_test": false,
+            "line": "11",
+            "path": "go.opentelemetry.io/otel/attribute"
+          },
+          {
+            "file": "core/core-api/core-servergen/oas_labeler_gen.go",
+            "is_test": false,
+            "line": "8",
+            "path": "go.opentelemetry.io/otel/attribute"
+          },
+          {
+            "file": "ontap-proxy/middleware/metrics.go",
+            "is_test": false,
+            "line": "14",
+            "path": "go.opentelemetry.io/otel/attribute"
+          },
+          {
+            "file": "ontap-proxy/api/ontap-proxy-servergen/oas_handlers_gen.go",
+            "is_test": false,
+            "line": "11",
+            "path": "go.opentelemetry.io/otel/attribute"
+          },
+          {
+            "file": "ontap-proxy/api/ontap-proxy-servergen/oas_labeler_gen.go",
+            "is_test": false,
+            "line": "8",
+            "path": "go.opentelemetry.io/otel/attribute"
+          },
+          {
+            "file": "google-proxy/api/gcp-servergen/oas_handlers_gen.go",
+            "is_test": false,
+            "line": "11",
+            "path": "go.opentelemetry.io/otel/attribute"
+          },
+          {
+            "file": "google-proxy/api/gcp-servergen/oas_labeler_gen.go",
+            "is_test": false,
+            "line": "8",
+            "path": "go.opentelemetry.io/otel/attribute"
+          },
+          {
+            "file": "google-proxy/helper/helper.go",
+            "is_test": false,
+            "line": "8",
+            "path": "go.opentelemetry.io/otel/attribute"
+          },
+          {
+            "file": "utils/middleware/log/metric.go",
+            "is_test": false,
+            "line": "11",
+            "path": "go.opentelemetry.io/otel/attribute"
+          }
+        ],
+        "named_symbols": [
+          "Distinct",
+          "NewInvalidMetric"
+        ],
+        "prod_reachable": true,
+        "reachability_kind": "import",
+        "surface_by_path": {
+          "go.opentelemetry.io/otel/attribute": {
+            "kind": "package",
+            "local": "attribute",
+            "symbols": [
+              "Int",
+              "KeyValue",
+              "NewSet",
+              "Set",
+              "String"
+            ]
+          },
+          "go.opentelemetry.io/otel/exporters/prometheus": {
+            "kind": "package",
+            "local": "prometheus",
+            "symbols": [
+              "New"
+            ]
+          }
+        },
+        "surface_evidence": [
+          {
+            "file": "utils/middleware/log/metric.go",
+            "line": "22",
+            "named": false,
+            "path": "go.opentelemetry.io/otel/exporters/prometheus",
+            "symbol": "New"
+          },
+          {
+            "file": "core/core-api/core-servergen/oas_handlers_gen.go",
+            "line": "41",
+            "named": false,
+            "path": "go.opentelemetry.io/otel/attribute",
+            "symbol": "KeyValue"
+          },
+          {
+            "file": "core/core-api/core-servergen/oas_labeler_gen.go",
+            "line": "21",
+            "named": false,
+            "path": "go.opentelemetry.io/otel/attribute",
+            "symbol": "Set"
+          },
+          {
+            "file": "core/core-api/core-servergen/oas_labeler_gen.go",
+            "line": "23",
+            "named": false,
+            "path": "go.opentelemetry.io/otel/attribute",
+            "symbol": "NewSet"
+          },
+          {
+            "file": "ontap-proxy/middleware/metrics.go",
+            "line": "241",
+            "named": false,
+            "path": "go.opentelemetry.io/otel/attribute",
+            "symbol": "String"
+          },
+          {
+            "file": "google-proxy/helper/helper.go",
+            "line": "31",
+            "named": false,
+            "path": "go.opentelemetry.io/otel/attribute",
+            "symbol": "Int"
+          }
+        ],
+        "surface_kind": "package",
+        "surface_symbols": [
+          "Int",
+          "KeyValue",
+          "New",
+          "NewSet",
+          "Set",
+          "String"
+        ],
+        "test_only": false
+      },
+      "dep_relation": "direct",
+      "dep_type": "production",
+      "deterministic": {
+        "adapter": "go",
+        "api_changes": 0,
+        "api_changes_detail": [],
+        "api_diff_tool": {
+          "command": "go doc -all <module> (structural fallback)",
+          "mode": "structural",
+          "name": "Go structural API diff",
+          "package": "golang.org/x/exp/cmd/apidiff",
+          "status": "structural_fallback",
+          "version": "v0.0.0-20260529124908-c761662dc8c9",
+          "warning": "apidiff module snapshots unavailable; used structural go doc fallback (golang.org/x/exp/cmd/apidiff@v0.0.0-20260529124908-c761662dc8c9)"
+        },
+        "changelogSignal": {
+          "bullets": [
+            "### Removed",
+            "### Deprecated",
+            "Improve error handling for dropped data during translation by using `prometheus.NewInvalidMetric` in `go.opentelemetry.io/otel/exporters/prometheus`. \u26a0\ufe0f **Breaking Change:** Previously, these cases were only logged and scrapes succeeded. Now, when translation would drop data (",
+            "`Distinct` in `go.opentelemetry.io/otel/attribute` is no longer guaranteed to uniquely identify an attribute set. Collisions between `Distinct` values for different Sets are possible with extremely high cardinality (billions of series per instrument), but are highly unlikely. (#7175)",
+            "`Distinct` in `go.opentelemetry.io/otel/attribute` is no longer guaranteed to uniquely identify an attribute set."
+          ],
+          "status": "breaking"
+        },
+        "changelogText": "- ### Removed\n- ### Deprecated\n- `Distinct` in `go.opentelemetry.io/otel/attribute` is no longer guaranteed to uniquely identify an attribute set. Collisions between `Distinct` values for different Sets are possible with extremely high cardinality (billions of series per instrument), but are highly unlikely. (#7175)\n- Improve error handling for dropped data during translation by using `prometheus.NewInvalidMetric` in `go.opentelemetry.io/otel/exporters/prometheus`. \u26a0\ufe0f **Breaking Change:** Previously, these cases were only logged and scrapes succeeded. Now, when translation would drop data (\n- `Distinct` in `go.opentelemetry.io/otel/attribute` is no longer guaranteed to uniquely identify an attribute set.",
+        "classification": "LOW",
+        "confidence": "PARTIAL",
+        "merge_risk": {
+          "buildVerificationAxis": "L4",
+          "confidenceAxis": "L4",
+          "evidenceAxis": "declared behavioral change in a used package (internal trigger), unverified by build/test/api-diff",
+          "reason": "review required: the changelog declares a BEHAVIORAL breaking change inside a package your production code uses (go.opentelemetry.io/otel/exporters/prometheus) (e.g. prometheus.New at utils/middleware/log/metric.go:22); the change is internal to the package, so whether it affects you depends on your runtime data/configuration \u2014 build, tests, and API-diff cannot confirm or rule it out; verify against the release notes",
+          "tag": "Medium"
+        },
+        "score": 1,
+        "security": {
+          "advisoryUrl": "https://github.com/advisories/GHSA-hfvc-g4fc-pqhx",
+          "cveIds": [
+            "CVE-2026-39883",
+            "CVE-2026-24051"
+          ],
+          "cvssScore": null,
+          "description": "opentelemetry-go: BSD kenv command not using absolute path enables PATH hijacking",
+          "isSecurity": true,
+          "severity": "high",
+          "vulnerableVersionRange": ">= 1.15.0, <= 1.42.0"
+        },
+        "usages": [
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 25,
+            "symbol": "MeterProvider",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 26,
+            "symbol": "Mutex",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 30,
+            "symbol": "T",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 32,
+            "symbol": "Helper",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 35,
+            "symbol": "Lock",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 34,
+            "symbol": "Shutdown",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 37,
+            "symbol": "Background",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 40,
+            "symbol": "Unlock",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 42,
+            "symbol": "Once",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 55,
+            "symbol": "SetMeterProvider",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 55,
+            "symbol": "NewMeterProvider",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 60,
+            "symbol": "Gatherer",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 67,
+            "symbol": "NewRegistry",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 55,
+            "symbol": "New",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 73,
+            "symbol": "WithRegisterer",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 71,
+            "symbol": "WithoutTargetInfo",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 76,
+            "symbol": "NoError",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 80,
+            "symbol": "WithReader",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 110,
+            "symbol": "Run",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 112,
+            "symbol": "Equal",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 162,
+            "symbol": "Itoa",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 200,
+            "symbol": "False",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 203,
+            "symbol": "Now",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 206,
+            "symbol": "True",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 207,
+            "symbol": "IsZero",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 211,
+            "symbol": "WithValue",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 60,
+            "symbol": "Gather",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 238,
+            "symbol": "MetricFamily",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 240,
+            "symbol": "GetName",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 249,
+            "symbol": "NotNil",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 29,
+            "symbol": "Metric",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 256,
+            "symbol": "Label",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 240,
+            "symbol": "Name",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 211,
+            "symbol": "Value",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 269,
+            "symbol": "GreaterOrEqual",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 182,
+            "symbol": "Add",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 291,
+            "symbol": "Millisecond",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 295,
+            "symbol": "NewRequest",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 295,
+            "symbol": "MethodGet",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 296,
+            "symbol": "WithContext",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 284,
+            "symbol": "Response",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 298,
+            "symbol": "StatusNotFound",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 300,
+            "symbol": "NopCloser",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 300,
+            "symbol": "NewBufferString",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 326,
+            "symbol": "Counter",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 327,
+            "symbol": "GetValue",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 740,
+            "symbol": "HandlerFunc",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 740,
+            "symbol": "ResponseWriter",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 46,
+            "symbol": "Request",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 741,
+            "symbol": "WriteHeader",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 746,
+            "symbol": "NewRecorder",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 750,
+            "symbol": "ServeHTTP",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 117,
+            "symbol": "Code",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 269,
+            "symbol": "Greater",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 824,
+            "symbol": "StatusOK",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 895,
+            "symbol": "Sleep",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 924,
+            "symbol": "GetHistogram",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 925,
+            "symbol": "GetSampleSum",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 1053,
+            "symbol": "GetCounter",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 740,
+            "symbol": "Write",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 173,
+            "symbol": "Context",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 300,
+            "symbol": "String",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 71,
+            "symbol": "Info",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "test",
+            "file": "ontap-proxy/middleware/metrics_test.go",
+            "isReExport": false,
+            "line": 48,
+            "symbol": "Error",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 74,
+            "symbol": "MeterProvider",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 63,
+            "symbol": "Shutdown",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 96,
+            "symbol": "SetMeterProvider",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 74,
+            "symbol": "NewMeterProvider",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 22,
+            "symbol": "New",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 75,
+            "symbol": "WithReader",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 60,
+            "symbol": "Name",
+            "usageType": "IMPORT_ONLY"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 84,
+            "symbol": "Value",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 28,
+            "symbol": "Context",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 36,
+            "symbol": "Join",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 42,
+            "symbol": "SetTextMapPropagator",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 42,
+            "symbol": "TraceContext",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 48,
+            "symbol": "OtelGoogleProjectID",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 51,
+            "symbol": "WithProjectID",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 52,
+            "symbol": "WithTraceClientOptions",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 52,
+            "symbol": "ClientOption",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 52,
+            "symbol": "WithTelemetryDisabled",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 56,
+            "symbol": "NewTracerProvider",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 57,
+            "symbol": "WithBatcher",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 58,
+            "symbol": "WithResource",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 58,
+            "symbol": "NewWithAttributes",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 59,
+            "symbol": "SchemaURL",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 60,
+            "symbol": "ServiceNameKey",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 60,
+            "symbol": "String",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 60,
+            "symbol": "ServiceName",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 64,
+            "symbol": "SetTracerProvider",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 65,
+            "symbol": "Info",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 49,
+            "symbol": "Error",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 80,
+            "symbol": "WithView",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 81,
+            "symbol": "NewView",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 82,
+            "symbol": "Instrument",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 83,
+            "symbol": "Stream",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 84,
+            "symbol": "KeyValue",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 86,
+            "symbol": "Contains",
+            "usageType": "DIRECT_CALL"
+          },
+          {
+            "context": "production",
+            "file": "utils/middleware/log/metric.go",
+            "isReExport": false,
+            "line": 86,
+            "symbol": "AsString",
+            "usageType": "DIRECT_CALL"
+          }
+        ],
+        "verification": {
+          "compatible": null,
+          "symbol_results": {},
+          "tier": 3,
+          "verified": false
+        }
+      },
+      "diff_lines": 115,
+      "diff_path": "/tmp/pr-23.diff",
+      "diff_truncated": false,
+      "ecosystem": "gomod",
+      "evidence": [
+        {
+          "command": "go mod tidy (affected modules) for go.opentelemetry.io/otel/sdk 1.38.0\u21921.42.0",
+          "exit_code": 0,
+          "label": "Dependency resolution",
+          "na_reason": "",
+          "signal": "dependency_resolution",
+          "status": "ran_pass",
+          "stdout": "\n--- go mod tidy: . (exit=0) ---\n",
+          "summary": "pass"
+        },
+        {
+          "command": "go_targeted_build (timeout 300 go build -o /dev/null <affected packages>)",
+          "exit_code": 0,
+          "label": "Build",
+          "na_reason": "",
+          "signal": "build",
+          "status": "ran_pass",
+          "stdout": "  targeted build (root module): 2 dirs\n    dirs: ./ontap-proxy/middleware/... ./utils/middleware/log/...\n",
+          "summary": "pass"
+        },
+        {
+          "command": "node .github/actions/breakability-check/index.js --json",
+          "exit_code": 0,
+          "label": "API diff",
+          "na_reason": "",
+          "signal": "api_diff",
+          "status": "ran_pass",
+          "stdout": "ationMs\": 0\n    }\n  ],\n  \"apiDiffTool\": {\n    \"name\": \"Go structural API diff\",\n    \"package\": \"golang.org/x/exp/cmd/apidiff\",\n    \"version\": \"v0.0.0-20260529124908-c761662dc8c9\",\n    \"mode\": \"structural\",\n    \"command\": \"go doc -all <module> (structural fallback)\",\n    \"status\": \"structural_fallback\",\n    \"warning\": \"apidiff module snapshots unavailable; used structural go doc fallback (golang.org/x/exp/cmd/apidiff@v0.0.0-20260529124908-c761662dc8c9)\"\n  },\n  \"timestamp\": \"2026-06-09T06:13:18.871Z\",\n  \"changelogText\": \"- ### Removed\\n- ### Deprecated\\n- `Distinct` in `go.opentelemetry.io/otel/attribute` is no longer guaranteed to uniquely identify an attribute set. Collisions between `Distinct` values for different Sets are possible with extremely high cardinality (billions of series per instrument), but are highly unlikely. (#7175)\\n- Improve error handling for dropped data during translation by using `prometheus.NewInvalidMetric` in `go.opentelemetry.io/otel/exporters/prometheus`. \u26a0\ufe0f **Breaking Change:** Previously, these cases were only logged and scrapes succeeded. Now, when translation would drop data (\\n- `Distinct` in `go.opentelemetry.io/otel/attribute` is no longer guaranteed to uniquely identify an attribute set.\",\n  \"changelogSignal\": {\n    \"status\": \"breaking\",\n    \"bullets\": [\n      \"### Removed\",\n      \"### Deprecated\",\n      \"Improve error handling for dropped data during translation by using `prometheus.NewInvalidMetric` in `go.opentelemetry.io/otel/exporters/prometheus`. \u26a0\ufe0f **Breaking Change:** Previously, these cases were only logged and scrapes succeeded. Now, when translation would drop data (\",\n      \"`Distinct` in `go.opentelemetry.io/otel/attribute` is no longer guaranteed to uniquely identify an attribute set. Collisions between `Distinct` values for different Sets are possible with extremely high cardinality (billions of series per instrument), but are highly unlikely. (#7175)\",\n      \"`Distinct` in `go.opentelemetry.io/otel/attribute` is no longer guaranteed to uniquely identify an attribute set.\"\n    ]\n  }\n}\n{\"timestamp\":\"2026-06-09T06:13:01.643Z\",\"level\":\"info\",\"stage\":\"cli\",\"message\":\"Analyzing go.opentelemetry.io/otel/sdk 1.38.0 \u2192 1.42.0\"}\n{\"timestamp\":\"2026-06-09T06:13:01.644Z\",\"level\":\"info\",\"stage\":\"cli\",\"message\":\"Repository: /Users/hpoornac/actions-runner/_work/vcp-vsa-breakability-test/vcp-vsa-breakability-test\"}\n{\"timestamp\":\"2026-06-09T06:13:01.644Z\",\"level\":\"info\",\"stage\":\"cli\",\"message\":\"Ecosystem: gomod\"}\n{\"timestamp\":\"2026-06-09T06:13:01.644Z\",\"level\":\"info\",\"stage\":\"cli\",\"message\":\"Dep type: production\"}\n{\"timestamp\":\"2026-06-09T06:13:02.135Z\",\"level\":\"info\",\"stage\":\"cli\",\"message\":\"CVE found: CVE-2026-39883, CVE-2026-24051 (CVSS: null)\"}\n{\"timestamp\":\"2026-06-09T06:13:02.136Z\",\"level\":\"info\",\"stage\":\"cli\",\"message\":\"Using supplied changelog file (713 chars)\"}\n{\"timestamp\":\"2026-06-09T06:13:18.046Z\",\"level\":\"warn\",\"stage\":\"go-extractor\",\"message\":\"apidiff -m -w failed for go.opentelemetry.io/otel/sdk using golang.org/x/exp/cmd/apidiff@v0.0.0-20260529124908-c761662dc8c9\",\"data\":{\"stderr\":\"go: golang.org/x/exp@v0.0.0-20260529124908-c761662dc8c9 requires go >= 1.25.0; switching to go1.25.11\\nloading go.opentelemetry.io/otel/sdk: /Users/hpoornac/go/pkg/mod/go.opentelemetry.io/otel/sdk@v1.38.0/instrumentation/scope.go:6:8: could not import go.opentelemetry.io/otel/attribute (invalid package name: \\\"\\\")\\nexit status 1\\n\"}}\n{\"timestamp\":\"2026-06-09T06:13:18.051Z\",\"level\":\"warn\",\"stage\":\"go-extractor\",\"message\":\"apidiff -m -w failed for go.opentelemetry.io/otel/sdk using golang.org/x/exp/cmd/apidiff@v0.0.0-20260529124908-c761662dc8c9\",\"data\":{\"stderr\":\"go: golang.org/x/exp@v0.0.0-20260529124908-c761662dc8c9 requires go >= 1.25.0; switching to go1.25.11\\nloading go.opentelemetry.io/otel/sdk: /Users/hpoornac/go/pkg/mod/go.opentelemetry.io/otel/sdk@v1.42.0/instrumentation/scope.go:6:8: could not import go.opentelemetry.io/otel/attribute (invalid package name: \\\"\\\")\\nexit status 1\\n\"}}\n",
+          "summary": "api_changes=0, compatible=None"
+        },
+        {
+          "command": "scan_usage_go",
+          "exit_code": 0,
+          "label": "Usage scan",
+          "na_reason": "",
+          "signal": "usage_scan",
+          "status": "ran_pass",
+          "stdout": "./ontap-proxy/middleware/metrics_test.go:20:\t\"go.opentelemetry.io/otel/sdk/metric\"\n./utils/middleware/log/metric.go:14:\t\"go.opentelemetry.io/otel/sdk/metric\"\n./utils/middleware/log/metric.go:15:\t\"go.opentelemetry.io/otel/sdk/resource\"\n./utils/middleware/log/metric.go:16:\t\"go.opentelemetry.io/otel/sdk/trace\"",
+          "summary": "2 importing file(s) found"
+        },
+        {
+          "command": "govulncheck ./...",
+          "exit_code": null,
+          "label": "Vulnerability scan",
+          "na_reason": "govulncheck disabled by config",
+          "signal": "vuln_scan",
+          "status": "skipped",
+          "stdout": "  [security] govulncheck disabled (BREAKABILITY_GOVULNCHECK!=1) \u2014 Dependabot supplies CVE list; skipping",
+          "summary": "govulncheck disabled"
+        },
+        {
+          "command": "go_targeted_test (timeout 300 go test -timeout 5m -race <affected packages>)",
+          "exit_code": 0,
+          "label": "Tests",
+          "na_reason": "",
+          "signal": "tests",
+          "status": "ran_pass",
+          "stdout": "    testing . module: 2 dirs \u2014 ./ontap-proxy/middleware/... ./utils/middleware/log/...\n# github.com/vcp-vsa-control-Plane/vsa-control-plane/ontap-proxy/middleware.test\nld: warning: '/private/var/folders/hd/384cc81x08v0f_q5zl7h6yf40000gp/T/go-link-1820950079/000013.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626\n# github.com/vcp-vsa-control-Plane/vsa-control-plane/utils/middleware/log.test\nld: warning: '/private/var/folders/hd/384cc81x08v0f_q5zl7h6yf40000gp/T/go-link-1897449049/000013.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/ontap-proxy/middleware\t3.456s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/middleware/log\t1.931s\n",
+          "summary": "pass"
+        }
+      ],
+      "files_importing": [
+        "./ontap-proxy/middleware/metrics_test.go",
+        "./utils/middleware/log/metric.go"
+      ],
+      "fixes_cves": [
+        {
+          "cve_id": "CVE-2026-29181",
+          "first_patched_version": "1.41.0",
+          "severity": "high"
+        },
+        {
+          "cve_id": "CVE-2026-24051",
+          "first_patched_version": "1.40.0",
+          "severity": "high"
+        }
+      ],
+      "from": "1.38.0",
+      "go_resolution": {
+        "command": "go mod tidy (affected modules) for go.opentelemetry.io/otel/sdk 1.38.0\u21921.42.0",
+        "modsum_diff": "diff --git a/.github/tools/reachability/go.mod b/.github/tools/reachability/go.mod\ndeleted file mode 100644\nindex 81db8c74..00000000\n--- a/.github/tools/reachability/go.mod\n+++ /dev/null\n@@ -1,10 +0,0 @@\n-module breakability/reachability\n-\n-go 1.25.0\n-\n-require golang.org/x/tools v0.45.0\n-\n-require (\n-\tgolang.org/x/mod v0.36.0 // indirect\n-\tgolang.org/x/sync v0.20.0 // indirect\n-)\ndiff --git a/.github/tools/reachability/go.sum b/.github/tools/reachability/go.sum\ndeleted file mode 100644\nindex be8b55bf..00000000\n--- a/.github/tools/reachability/go.sum\n+++ /dev/null\n@@ -1,8 +0,0 @@\n-github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=\n-github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=\n-golang.org/x/mod v0.36.0 h1:JJjpVx6myfUsUdAzZuOSTTmRE0PfZeNWzzvKrP7amb4=\n-golang.org/x/mod v0.36.0/go.mod h1:moc6ELqsWcOw5Ef3xVprK5ul/MvtVvkIXLziUOICjUQ=\n-golang.org/x/sync v0.20.0 h1:e0PTpb7pjO8GAtTs2dQ6jYa5BWYlMuX047Dco/pItO4=\n-golang.org/x/sync v0.20.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=\n-golang.org/x/tools v0.45.0 h1:18qN3FAooORvApf5XjCXgsuayZOEtXf6JK18I3+ONa8=\n-golang.org/x/tools v0.45.0/go.mod h1:LuUGqqaXcXMEFEruIVJVm5mgDD8vww/z/SR1gQ4uE/0=\ndiff --git a/go.mod b/go.mod\nindex 1b5c7e56..23410770 100644\n--- a/go.mod\n+++ b/go.mod\n@@ -3,3 +3 @@ module github.com/vcp-vsa-control-Plane/vsa-control-plane\n-go 1.24.11\n-\n-toolchain go1.24.12\n+go 1.25.0\n@@ -37 +35 @@ require (\n-\tgo.opentelemetry.io/otel v1.38.0\n+\tgo.opentelemetry.io/otel v1.42.0\n@@ -39,4 +37,4 @@ require (\n-\tgo.opentelemetry.io/otel/metric v1.38.0\n-\tgo.opentelemetry.io/otel/sdk v1.38.0\n-\tgo.opentelemetry.io/otel/sdk/metric v1.38.0\n-\tgo.opentelemetry.io/otel/trace v1.38.0\n+\tgo.opentelemetry.io/otel/metric v1.42.0\n+\tgo.opentelemetry.io/otel/sdk v1.42.0\n+\tgo.opentelemetry.io/otel/sdk/metric v1.42.0\n+\tgo.opentelemetry.io/otel/trace v1.42.0\n@@ -169 +167 @@ require (\n-\tgo.opentelemetry.io/auto/sdk v1.1.0 // indirect\n+\tgo.opentelemetry.io/auto/sdk v1.2.1 // indirect\n@@ -175 +173 @@ require (\n-\tgolang.org/x/sys v0.37.0 // indirect\n+\tgolang.org/x/sys v0.41.0 // indirect\ndiff --git a/go.sum b/go.sum\nindex c59c8570..db6acb78 100644\n--- a/go.sum\n+++ b/go.sum\n@@ -298,2 +298,2 @@ github.com/robfig/cron v1.2.0/go.mod h1:JGuDeoQd7Z6yL4zQhZ3OPEVHB7fL6Ka6skscFHfm\n-github.com/rogpeppe/go-internal v1.13.1 h1:KvO1DLK/DRN07sQ1LQKScxyZJuNnedQ5/wKSR38lUII=\n-github.com/rogpeppe/go-internal v1.13.1/go.mod h1:uMEvuHeurkdAXX61udpOXGD/AzZDWNMNyH2VO9fmH0o=\n+github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=\n+github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=\n@@ -336,2 +336,2 @@ go.mongodb.org/mongo-driver v1.17.7/go.mod h1:Hy04i7O2kC4RS06ZrhPRqj/u4DTYkFDAAc\n-go.opentelemetry.io/auto/sdk v1.1.0 h1:cH53jehLUN6UFLY71z+NDOiNJqDdPRaXzTel0sJySYA=\n-go.opentelemetry.io/auto/sdk v1.1.0/go.mod h1:3wSPjt5PWp2RhlCcmmOial7AvC4DQqZb7a7wCow3W8A=\n+go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=\n+go.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=\n@@ -344,2 +344,2 @@ go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0/go.mod h1:\n-go.opentelemetry.io/otel v1.38.0 h1:RkfdswUDRimDg0m2Az18RKOsnI8UDzppJAtj01/Ymk8=\n-go.opentelemetry.io/otel v1.38.0/go.mod h1:zcmtmQ1+YmQM9wrNsTGV/q/uyusom3P8RxwExxkZhjM=\n+go.opentelemetry.io/otel v1.42.0 h1:lSQGzTgVR3+sgJDAU/7/ZMjN9Z+vUip7leaqBKy4sho=\n+go.opentelemetry.io/otel v1.42.0/go.mod h1:lJNsdRMxCUIWuMlVJWzecSMuNjE7dOYyWlqOXWkdqCc=\n@@ -350,8 +350,8 @@ go.opentelemetry.io/otel/exporters/stdout/stdoutmetric v1.35.0/go.mod h1:U2R3XyV\n-go.opentelemetry.io/otel/metric v1.38.0 h1:Kl6lzIYGAh5M159u9NgiRkmoMKjvbsKtYRwgfrA6WpA=\n-go.opentelemetry.io/otel/metric v1.38.0/go.mod h1:kB5n/QoRM8YwmUahxvI3bO34eVtQf2i4utNVLr9gEmI=\n-go.opentelemetry.io/otel/sdk v1.38.0 h1:l48sr5YbNf2hpCUj/FoGhW9yDkl+Ma+LrVl8qaM5b+E=\n-go.opentelemetry.io/otel/sdk v1.38.0/go.mod h1:ghmNdGlVemJI3+ZB5iDEuk4bWA3GkTpW+DOoZMYBVVg=\n-go.opentelemetry.io/otel/sdk/metric v1.38.0 h1:aSH66iL0aZqo//xXzQLYozmWrXxyFkBJ6qT5wthqPoM=\n-go.opentelemetry.io/otel/sdk/metric v1.38.0/go.mod h1:dg9PBnW9XdQ1Hd6ZnRz689CbtrUp0wMMs9iPcgT9EZA=\n-go.opentelemetry.io/otel/trace v1.38.0 h1:Fxk5bKrDZJUH+AMyyIXGcFAPah0oRcT+LuNtJrmcNLE=\n-go.opentelemetry.io/otel/trace v1.38.0/go.mod h1:j1P9ivuFsTceSWe1oY+EeW3sc+Pp42sO++GHkg4wwhs=\n+go.opentelemetry.io/otel/metric v1.42.0 h1:2jXG+3oZLNXEPfNmnpxKDeZsFI5o4J+nz6xUlaFdF/4=\n+go.opentelemetry.io/otel/metric v1.42.0/go.mod h1:RlUN/7vTU7Ao/diDkEpQpnz3/92J9ko05BIwxYa2SSI=\n+go.opentelemetry.io/otel/sdk v1.42.0 h1:LyC8+jqk6UJwdrI/8VydAq/hvkFKNHZVIWuslJXYsDo=\n+go.opentelemetry.io/otel/sdk v1.42.0/go.mod h1:rGHCAxd9DAph0joO4W6OPwxjNTYWghRWmkHuGbayMts=\n+go.opentelemetry.io/otel/sdk/metric v1.42.0 h1:D/1QR46Clz6ajyZ3G8SgNlTJKBdGp84q9RKCAZ3YGuA=\n+go.opentelemetry.io/otel/sdk/metric v1.42.0/go.mod h1:Ua6AAlDKdZ7tdvaQKfSmnFTdHx37+J4ba8MwVCYM5hc=\n+go.opentelemetry.io/otel/trace v1.42.0 h1:OUCgIPt+mzOnaUTpOQcBiM/PLQ/Op7oq6g4LenLmOYY=\n+go.opentelemetry.io/otel/trace v1.42.0/go.mod h1:f3K9S+IFqnumBkKhRJMeaZeNk9epyhnCmQh/EysQCdc=\n@@ -425,2 +425,2 @@ golang.org/x/sys v0.6.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=\n-golang.org/x/sys v0.37.0 h1:fdNQudmxPjkdUTPnLn5mdQv7Zwvbvpaxqs831goi9kQ=\n-golang.org/x/sys v0.37.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=\n+golang.org/x/sys v0.41.0 h1:Ivj+2Cp/ylzLiEU89QhWblYnOE9zerudt9Ftecq2C6k=\n+golang.org/x/sys v0.41.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=\n",
+        "output_tail": "\n--- go mod tidy: . (exit=0) ---\n"
+      },
+      "gosum_new_count": 8,
+      "gosum_new_names": "github.com/rogpeppe/go-internal,go.opentelemetry.io/auto/sdk,go.opentelemetry.io/otel,go.opentelemetry.io/otel/metric,go.opentelemetry.io/otel/sdk",
+      "gosum_total_main": 520,
+      "gosum_total_pr": 520,
+      "install_ok": true,
+      "merge_risk": {
+        "buildVerificationAxis": "L4",
+        "confidenceAxis": "L4",
+        "evidenceAxis": "declared behavioral change in a used package (internal trigger), unverified by build/test/api-diff",
+        "reason": "review required: the changelog declares a BEHAVIORAL breaking change inside a package your production code uses (go.opentelemetry.io/otel/exporters/prometheus) (e.g. prometheus.New at utils/middleware/log/metric.go:22); the change is internal to the package, so whether it affects you depends on your runtime data/configuration \u2014 build, tests, and API-diff cannot confirm or rule it out; verify against the release notes",
+        "tag": "Medium"
+      },
+      "mergeable_status": "UNKNOWN",
+      "nestjs_peer_warning": "",
+      "no_test_confidence": {},
+      "npm_audit": {
+        "critical": 0,
+        "high": 0
+      },
+      "ownership_class": "direct_dep",
+      "package": "go.opentelemetry.io/otel/sdk",
+      "pkg_dir": "/",
+      "policy_lowering": {
+        "bundle": {
+          "abstain_reason": "none",
+          "citations": [],
+          "commands": [],
+          "confidence": "medium",
+          "ecosystem": "gomod",
+          "from_version": "1.38.0",
+          "is_ci_only": false,
+          "is_major": false,
+          "package": "go.opentelemetry.io/otel/sdk",
+          "rationale": "",
+          "residual_risk": "high",
+          "security_sensitive": true,
+          "signals": {
+            "api_diff": {
+              "abstain_reason": "none",
+              "citations": [],
+              "commands": [],
+              "confidence": "high",
+              "introduced": null,
+              "name": "api_diff",
+              "new_output_hash": "",
+              "new_output_text": "",
+              "old_output_hash": "",
+              "old_output_text": "",
+              "rationale": "",
+              "relevant": null,
+              "residual_risk": "none",
+              "same_behavior": null,
+              "sensitive": false,
+              "severity": "none",
+              "status": "pass",
+              "tool_failure": false
+            },
+            "build": {
+              "abstain_reason": "none",
+              "citations": [],
+              "commands": [],
+              "confidence": "high",
+              "introduced": null,
+              "name": "build",
+              "new_output_hash": "",
+              "new_output_text": "",
+              "old_output_hash": "",
+              "old_output_text": "",
+              "rationale": "",
+              "relevant": null,
+              "residual_risk": "none",
+              "same_behavior": null,
+              "sensitive": false,
+              "severity": "none",
+              "status": "pass",
+              "tool_failure": false
+            },
+            "reachability": {
+              "abstain_reason": "none",
+              "citations": [],
+              "commands": [],
+              "confidence": "medium",
+              "introduced": null,
+              "name": "reachability",
+              "new_output_hash": "",
+              "new_output_text": "",
+              "old_output_hash": "",
+              "old_output_text": "",
+              "rationale": "",
+              "relevant": true,
+              "residual_risk": "medium",
+              "same_behavior": null,
+              "sensitive": false,
+              "severity": "none",
+              "status": "unknown",
+              "tool_failure": false
+            },
+            "release_notes": {
+              "abstain_reason": "none",
+              "citations": [
+                {
+                  "locator": "release_notes_text",
+                  "source": "changelogSignal.bullets(5), changelogText",
+                  "text": "s/prometheus`. \u26a0\ufe0f **Breaking Change:** Previously, these cases were only logged and scrapes succeeded. Now, when translation would drop data"
+                },
+                {
+                  "locator": "changelog_bullet",
+                  "source": "changelogSignal.bullets(5), changelogText",
+                  "text": "### Removed"
+                },
+                {
+                  "locator": "changelog_bullet",
+                  "source": "changelogSignal.bullets(5), changelogText",
+                  "text": "### Deprecated"
+                },
+                {
+                  "locator": "changelog_bullet",
+                  "source": "changelogSignal.bullets(5), changelogText",
+                  "text": "Improve error handling for dropped data during translation by using `prometheus.NewInvalidMetric` in `go.opentelemetry.io/otel/exporters/prometheus`. \u26a0\ufe0f **Breaking Change:** Previously, these cases we"
+                }
+              ],
+              "commands": [],
+              "confidence": "high",
+              "introduced": null,
+              "name": "release_notes",
+              "new_output_hash": "",
+              "new_output_text": "",
+              "old_output_hash": "",
+              "old_output_text": "",
+              "rationale": "release-notes classification: breaking_change; matched markers: ['breaking change']; sources: changelogSignal.bullets(5), changelogText",
+              "relevant": true,
+              "residual_risk": "high",
+              "same_behavior": null,
+              "sensitive": false,
+              "severity": "high",
+              "status": "fail",
+              "tool_failure": false
+            },
+            "security": {
+              "abstain_reason": "none",
+              "citations": [],
+              "commands": [],
+              "confidence": "medium",
+              "introduced": null,
+              "name": "security",
+              "new_output_hash": "",
+              "new_output_text": "",
+              "old_output_hash": "",
+              "old_output_text": "",
+              "rationale": "",
+              "relevant": null,
+              "residual_risk": "none",
+              "same_behavior": null,
+              "sensitive": false,
+              "severity": "none",
+              "status": "not_applicable",
+              "tool_failure": false
+            },
+            "test": {
+              "abstain_reason": "none",
+              "citations": [],
+              "commands": [],
+              "confidence": "high",
+              "introduced": null,
+              "name": "test",
+              "new_output_hash": "",
+              "new_output_text": "",
+              "old_output_hash": "",
+              "old_output_text": "",
+              "rationale": "",
+              "relevant": null,
+              "residual_risk": "none",
+              "same_behavior": null,
+              "sensitive": false,
+              "severity": "none",
+              "status": "pass",
+              "tool_failure": false
+            }
+          },
+          "to_version": "1.42.0"
+        },
+        "callsite_impact": {
+          "callsites": [
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 22,
+              "symbol": "New"
+            },
+            {
+              "file": "core/core-api/core-servergen/oas_handlers_gen.go",
+              "is_test": false,
+              "line": 41,
+              "symbol": "KeyValue"
+            },
+            {
+              "file": "core/core-api/core-servergen/oas_labeler_gen.go",
+              "is_test": false,
+              "line": 21,
+              "symbol": "Set"
+            },
+            {
+              "file": "core/core-api/core-servergen/oas_labeler_gen.go",
+              "is_test": false,
+              "line": 23,
+              "symbol": "NewSet"
+            },
+            {
+              "file": "ontap-proxy/middleware/metrics.go",
+              "is_test": false,
+              "line": 241,
+              "symbol": "String"
+            },
+            {
+              "file": "google-proxy/helper/helper.go",
+              "is_test": false,
+              "line": 31,
+              "symbol": "Int"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 74,
+              "symbol": "MeterProvider"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 63,
+              "symbol": "Shutdown"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 96,
+              "symbol": "SetMeterProvider"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 74,
+              "symbol": "NewMeterProvider"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 75,
+              "symbol": "WithReader"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 60,
+              "symbol": "Name"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 84,
+              "symbol": "Value"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 28,
+              "symbol": "Context"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 36,
+              "symbol": "Join"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 42,
+              "symbol": "SetTextMapPropagator"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 42,
+              "symbol": "TraceContext"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 48,
+              "symbol": "OtelGoogleProjectID"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 51,
+              "symbol": "WithProjectID"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 52,
+              "symbol": "WithTraceClientOptions"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 52,
+              "symbol": "ClientOption"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 52,
+              "symbol": "WithTelemetryDisabled"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 56,
+              "symbol": "NewTracerProvider"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 57,
+              "symbol": "WithBatcher"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 58,
+              "symbol": "WithResource"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 58,
+              "symbol": "NewWithAttributes"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 59,
+              "symbol": "SchemaURL"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 60,
+              "symbol": "ServiceNameKey"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 60,
+              "symbol": "String"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 60,
+              "symbol": "ServiceName"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 64,
+              "symbol": "SetTracerProvider"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 65,
+              "symbol": "Info"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 49,
+              "symbol": "Error"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 80,
+              "symbol": "WithView"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 81,
+              "symbol": "NewView"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 82,
+              "symbol": "Instrument"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 83,
+              "symbol": "Stream"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 84,
+              "symbol": "KeyValue"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 86,
+              "symbol": "Contains"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 86,
+              "symbol": "AsString"
+            }
+          ],
+          "claimed_symbols": [],
+          "confidence": "medium",
+          "dynamic_hazards": [],
+          "impact": "REACHED_UNKNOWN",
+          "is_breaking": false,
+          "matched_claims": [],
+          "reachability_verdict": "PRESENT",
+          "reason_code": "callsite:present:no_release_note_symbol_claims",
+          "signal": {
+            "confidence": "medium",
+            "name": "reachability",
+            "relevant": true,
+            "status": "unknown"
+          },
+          "sources_used": [
+            "files_importing",
+            "declared_break_reachability.evidence",
+            "declared_break_reachability.surface_evidence",
+            "deterministic.usages"
+          ],
+          "unmatched_claims": []
+        },
+        "decision": {
+          "confidence": "medium",
+          "display_reason": "security-sensitive update requires human review",
+          "reason_code": "review:security-sensitive",
+          "severity": "high",
+          "verdict": "REVIEW"
+        },
+        "reachability": {
+          "absent_reason": null,
+          "callsites": [
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 22,
+              "symbol": "New"
+            },
+            {
+              "file": "core/core-api/core-servergen/oas_handlers_gen.go",
+              "is_test": false,
+              "line": 41,
+              "symbol": "KeyValue"
+            },
+            {
+              "file": "core/core-api/core-servergen/oas_labeler_gen.go",
+              "is_test": false,
+              "line": 21,
+              "symbol": "Set"
+            },
+            {
+              "file": "core/core-api/core-servergen/oas_labeler_gen.go",
+              "is_test": false,
+              "line": 23,
+              "symbol": "NewSet"
+            },
+            {
+              "file": "ontap-proxy/middleware/metrics.go",
+              "is_test": false,
+              "line": 241,
+              "symbol": "String"
+            },
+            {
+              "file": "google-proxy/helper/helper.go",
+              "is_test": false,
+              "line": 31,
+              "symbol": "Int"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 74,
+              "symbol": "MeterProvider"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 63,
+              "symbol": "Shutdown"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 96,
+              "symbol": "SetMeterProvider"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 74,
+              "symbol": "NewMeterProvider"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 75,
+              "symbol": "WithReader"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 60,
+              "symbol": "Name"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 84,
+              "symbol": "Value"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 28,
+              "symbol": "Context"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 36,
+              "symbol": "Join"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 42,
+              "symbol": "SetTextMapPropagator"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 42,
+              "symbol": "TraceContext"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 48,
+              "symbol": "OtelGoogleProjectID"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 51,
+              "symbol": "WithProjectID"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 52,
+              "symbol": "WithTraceClientOptions"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 52,
+              "symbol": "ClientOption"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 52,
+              "symbol": "WithTelemetryDisabled"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 56,
+              "symbol": "NewTracerProvider"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 57,
+              "symbol": "WithBatcher"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 58,
+              "symbol": "WithResource"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 58,
+              "symbol": "NewWithAttributes"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 59,
+              "symbol": "SchemaURL"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 60,
+              "symbol": "ServiceNameKey"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 60,
+              "symbol": "String"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 60,
+              "symbol": "ServiceName"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 64,
+              "symbol": "SetTracerProvider"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 65,
+              "symbol": "Info"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 49,
+              "symbol": "Error"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 80,
+              "symbol": "WithView"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 81,
+              "symbol": "NewView"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 82,
+              "symbol": "Instrument"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 83,
+              "symbol": "Stream"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 84,
+              "symbol": "KeyValue"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 86,
+              "symbol": "Contains"
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 86,
+              "symbol": "AsString"
+            }
+          ],
+          "checked": true,
+          "confidence": "high",
+          "dynamic_hazards": [],
+          "import_sites": [
+            {
+              "file": "./ontap-proxy/middleware/metrics_test.go",
+              "is_test": true,
+              "line": null
+            },
+            {
+              "file": "./utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": null
+            },
+            {
+              "file": "ontap-proxy/middleware/metrics_test.go",
+              "is_test": true,
+              "line": 19
+            },
+            {
+              "file": "utils/middleware/log/metric_test.go",
+              "is_test": true,
+              "line": 12
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 12
+            },
+            {
+              "file": "core/core-api/core-servergen/oas_handlers_gen.go",
+              "is_test": false,
+              "line": 11
+            },
+            {
+              "file": "core/core-api/core-servergen/oas_labeler_gen.go",
+              "is_test": false,
+              "line": 8
+            },
+            {
+              "file": "ontap-proxy/middleware/metrics.go",
+              "is_test": false,
+              "line": 14
+            },
+            {
+              "file": "ontap-proxy/api/ontap-proxy-servergen/oas_handlers_gen.go",
+              "is_test": false,
+              "line": 11
+            },
+            {
+              "file": "ontap-proxy/api/ontap-proxy-servergen/oas_labeler_gen.go",
+              "is_test": false,
+              "line": 8
+            },
+            {
+              "file": "google-proxy/api/gcp-servergen/oas_handlers_gen.go",
+              "is_test": false,
+              "line": 11
+            },
+            {
+              "file": "google-proxy/api/gcp-servergen/oas_labeler_gen.go",
+              "is_test": false,
+              "line": 8
+            },
+            {
+              "file": "google-proxy/helper/helper.go",
+              "is_test": false,
+              "line": 8
+            },
+            {
+              "file": "utils/middleware/log/metric.go",
+              "is_test": false,
+              "line": 11
+            }
+          ],
+          "searched_symbols": [],
+          "sources_used": [
+            "files_importing",
+            "declared_break_reachability.evidence",
+            "declared_break_reachability.surface_evidence",
+            "deterministic.usages"
+          ],
+          "uncertain_reason": null,
+          "verdict": "PRESENT"
+        },
+        "reachability_adjudication": {
+          "agent_task": null,
+          "called_symbols": [
+            "AsString",
+            "ClientOption",
+            "Contains",
+            "Context",
+            "Error",
+            "Info",
+            "Instrument",
+            "Int",
+            "Join",
+            "KeyValue",
+            "MeterProvider",
+            "Name",
+            "New",
+            "NewMeterProvider",
+            "NewSet",
+            "NewTracerProvider",
+            "NewView",
+            "NewWithAttributes",
+            "OtelGoogleProjectID",
+            "SchemaURL",
+            "ServiceName",
+            "ServiceNameKey",
+            "Set",
+            "SetMeterProvider",
+            "SetTextMapPropagator",
+            "SetTracerProvider",
+            "Shutdown",
+            "Stream",
+            "String",
+            "TraceContext",
+            "Value",
+            "WithBatcher",
+            "WithProjectID",
+            "WithReader",
+            "WithResource",
+            "WithTelemetryDisabled",
+            "WithTraceClientOptions",
+            "WithView"
+          ],
+          "changed_symbols": [],
+          "citation": "no breaking changed symbols were extracted; defer to upstream evidence",
+          "manual_review_required": true,
+          "matched_symbols": [],
+          "safety_locked": true,
+          "verdict": "NEEDS_AGENT"
+        },
+        "release_notes": {
+          "abstain_reason": "none",
+          "citations": [
+            {
+              "locator": "release_notes_text",
+              "source": "changelogSignal.bullets(5), changelogText",
+              "text": "s/prometheus`. \u26a0\ufe0f **Breaking Change:** Previously, these cases were only logged and scrapes succeeded. Now, when translation would drop data"
+            },
+            {
+              "locator": "changelog_bullet",
+              "source": "changelogSignal.bullets(5), changelogText",
+              "text": "### Removed"
+            },
+            {
+              "locator": "changelog_bullet",
+              "source": "changelogSignal.bullets(5), changelogText",
+              "text": "### Deprecated"
+            },
+            {
+              "locator": "changelog_bullet",
+              "source": "changelogSignal.bullets(5), changelogText",
+              "text": "Improve error handling for dropped data during translation by using `prometheus.NewInvalidMetric` in `go.opentelemetry.io/otel/exporters/prometheus`. \u26a0\ufe0f **Breaking Change:** Previously, these cases we"
+            }
+          ],
+          "commands": [],
+          "confidence": "high",
+          "introduced": null,
+          "name": "release_notes",
+          "new_output_hash": "",
+          "new_output_text": "",
+          "old_output_hash": "",
+          "old_output_text": "",
+          "rationale": "release-notes classification: breaking_change; matched markers: ['breaking change']; sources: changelogSignal.bullets(5), changelogText",
+          "relevant": true,
+          "residual_risk": "high",
+          "same_behavior": null,
+          "sensitive": false,
+          "severity": "high",
+          "status": "fail",
+          "tool_failure": false
+        }
+      },
+      "smoke": {
+        "exit": null,
+        "ran": false
+      },
+      "test": {
+        "exit": 0,
+        "main_npm_test_exit": -1,
+        "main_test_exit": 0,
+        "output_tail": "    testing . module: 2 dirs \u2014 ./ontap-proxy/middleware/... ./utils/middleware/log/...\n# github.com/vcp-vsa-control-Plane/vsa-control-plane/ontap-proxy/middleware.test\nld: warning: '/private/var/folders/hd/384cc81x08v0f_q5zl7h6yf40000gp/T/go-link-1820950079/000013.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626\n# github.com/vcp-vsa-control-Plane/vsa-control-plane/utils/middleware/log.test\nld: warning: '/private/var/folders/hd/384cc81x08v0f_q5zl7h6yf40000gp/T/go-link-1897449049/000013.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/ontap-proxy/middleware\t3.456s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/middleware/log\t1.931s\n",
+        "ran": true
+      },
+      "to": "1.42.0",
+      "verification_label": "L4_tests_pass",
+      "verification_level": 4,
+      "verification_steps": [
+        {
+          "status": "pass",
+          "step": "dependency_resolution"
+        },
+        {
+          "status": "pass",
+          "step": "type_check"
+        },
+        {
+          "detail": "not run or no .d.ts",
+          "status": "skip",
+          "step": "symbol_verification"
+        },
+        {
+          "status": "pass",
+          "step": "test_suite"
+        },
+        {
+          "detail": "no dist/main.js after build",
+          "status": "skip",
+          "step": "smoke_probe"
+        }
+      ],
+      "vuln_finding": "",
+      "vuln_new_findings": [],
+      "vuln_output": "  [security] govulncheck disabled (BREAKABILITY_GOVULNCHECK!=1) \u2014 Dependabot supplies CVE list; skipping",
+      "vuln_preexisting_count": 0,
+      "vuln_status": "skipped_disabled"
+    },
+    "38": {
+      "additional_imports": [],
+      "additional_packages": "",
+      "build": {
+        "error_class": "",
+        "install_method": "ci",
+        "main_exit": 0,
+        "new_errors": [],
+        "oom_override": false,
+        "oom_packages": [],
+        "output_tail": "  full build: no import data available, building ./...\n",
+        "pr_exit": 0,
+        "verdict": "pass"
+      },
+      "bump": "minor",
+      "bumped_modules": {},
+      "cascade_impact": [],
+      "cve_details": [],
+      "cves": [],
+      "dep_relation": "direct",
+      "dep_type": "production",
+      "deterministic": {
+        "adapter": "go",
+        "api_changes": 25,
+        "api_changes_detail": [
+          {
+            "changeType": "type_changed",
+            "isHardBreak": true,
+            "newDefinition": "github.com/lib/pq/pqerror.Code",
+            "oldDefinition": "ErrorCode",
+            "symbol": "Error.Code"
+          },
+          {
+            "changeType": "type_changed",
+            "isHardBreak": true,
+            "newDefinition": "github.com/lib/pq/pqerror.Class",
+            "oldDefinition": "ErrorClass",
+            "symbol": "ErrorClass"
+          },
+          {
+            "changeType": "type_changed",
+            "isHardBreak": true,
+            "newDefinition": "github.com/lib/pq/pqerror.Code",
+            "oldDefinition": "ErrorCode",
+            "symbol": "ErrorCode"
+          },
+          {
+            "changeType": "removed",
+            "isHardBreak": true,
+            "symbol": "package github.com/lib/pq/cmd/pqlisten"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "As"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "Config.MaxProtocolVersion"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "Config.MinProtocolVersion"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "Config.SSLMaxProtocolVersion"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "Config.SSLMinProtocolVersion"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "Config.Service"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "Config.ServiceFile"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "ListenerEventType.String"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "ProtocolVersion30"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "ProtocolVersion32"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "ProtocolVersion"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "ProtocolVersionLatest"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "SSLModeAllow"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "SSLModePrefer"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "SSLProtocolVersion"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "SSLProtocolVersionTLS10"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "SSLProtocolVersionTLS11"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "SSLProtocolVersionTLS12"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "SSLProtocolVersionTLS13"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "subpath": "hstore",
+            "symbol": "Hstore.BinaryValue"
+          },
+          {
+            "changeType": "added",
+            "isHardBreak": false,
+            "symbol": "package github.com/lib/pq/pqerror"
+          }
+        ],
+        "api_diff_tool": {
+          "command": "go run golang.org/x/exp/cmd/apidiff@v0.0.0-20260529124908-c761662dc8c9 -m /var/folders/hd/384cc81x08v0f_q5zl7h6yf40000gp/T/bc-go-api-f779c697ee2d146e.api /var/folders/hd/384cc81x08v0f_q5zl7h6yf40000gp/T/bc-go-api-d97dfc624a5531a8.api",
+          "mode": "module",
+          "name": "Go apidiff",
+          "package": "golang.org/x/exp/cmd/apidiff",
+          "status": "semantic",
+          "version": "v0.0.0-20260529124908-c761662dc8c9"
+        },
+        "changelogSignal": {
+          "bullets": [
+            "`CopyIn()` and `CopyInToSchema()` have been marked as deprecated. These are simple query builders and not needed for `COPY [..] FROM STDIN` support (which is *not* deprecated). ([#1279])"
+          ],
+          "status": "breaking"
+        },
+        "changelogText": "- `CopyIn()` and `CopyInToSchema()` have been marked as deprecated. These are simple query builders and not needed for `COPY [..] FROM STDIN` support (which is *not* deprecated). ([#1279])",
+        "classification": "HIGH",
+        "confidence": "VERIFIED_EXISTENCE",
+        "merge_risk": {
+          "buildVerificationAxis": "L3",
+          "confidenceAxis": "L3",
+          "evidenceAxis": "break-reachable API change",
+          "reason": "BREAK-reachable type changed API symbol `Error.Code`",
+          "tag": "High"
+        },
+        "score": 8,
+        "security": null,
+        "usages": [
+          {
+            "context": "production",
+            "file": "database/metrics/persistance_store.go",
+            "isReExport": false,
+            "line": 357,
+            "symbol": "Error.Code",
+            "usageType": "PROPERTY_ACCESS"
+          },
+          {
+            "context": "production",
+            "file": "database/vcp/persistance_store.go",
+            "isReExport": false,
+            "line": 345,
+            "symbol": "Error.Code",
+            "usageType": "PROPERTY_ACCESS"
+          }
+        ],
+        "verification": {
+          "compatible": true,
+          "symbol_results": {
+            "Error.Code": "COMPATIBLE"
+          },
+          "tier": 2,
+          "verified": true
+        }
+      },
+      "diff_lines": 25,
+      "diff_path": "/tmp/pr-38.diff",
+      "diff_truncated": false,
+      "ecosystem": "gomod",
+      "evidence": [
+        {
+          "command": "go mod tidy (affected modules) for github.com/lib/pq 1.11.2\u21921.12.3",
+          "exit_code": 0,
+          "label": "Dependency resolution",
+          "na_reason": "",
+          "signal": "dependency_resolution",
+          "status": "ran_pass",
+          "stdout": "\n--- go mod tidy: automations/tstctl (exit=0) ---\n",
+          "summary": "pass"
+        },
+        {
+          "command": "go_targeted_build (timeout 300 go build -o /dev/null <affected packages>)",
+          "exit_code": 0,
+          "label": "Build",
+          "na_reason": "",
+          "signal": "build",
+          "status": "ran_pass",
+          "stdout": "  full build: no import data available, building ./...\n",
+          "summary": "pass"
+        },
+        {
+          "command": "node .github/actions/breakability-check/index.js --json",
+          "exit_code": 0,
+          "label": "API diff",
+          "na_reason": "",
+          "signal": "api_diff",
+          "status": "ran_pass",
+          "stdout": ": 357,\n      \"symbol\": \"Error.Code\",\n      \"usageType\": \"PROPERTY_ACCESS\",\n      \"context\": \"production\",\n      \"isReExport\": false\n    },\n    {\n      \"file\": \"database/vcp/persistance_store.go\",\n      \"line\": 345,\n      \"symbol\": \"Error.Code\",\n      \"usageType\": \"PROPERTY_ACCESS\",\n      \"context\": \"production\",\n      \"isReExport\": false\n    }\n  ],\n  \"score\": {\n    \"total\": 8,\n    \"hardBreakScore\": 7,\n    \"softSignalScore\": 0,\n    \"breakdown\": [\n      {\n        \"signal\": \"semver_minor\",\n        \"points\": 1,\n        \"category\": \"semver\",\n        \"details\": \"Semver bump: minor\"\n      },\n      {\n        \"signal\": \"type_changed:Error.Code\",\n        \"points\": 7,\n        \"category\": \"hard_break\",\n        \"details\": \"type_changed Error.Code (base=7, context-weighted usage=1x)\"\n      },\n      {\n        \"signal\": \"type_changed:ErrorClass\",\n        \"points\": 0,\n        \"category\": \"hard_break\",\n        \"details\": \"type_changed ErrorClass (base=7, context-weighted usage=0x)\"\n      },\n      {\n        \"signal\": \"type_changed:ErrorCode\",\n        \"points\": 0,\n        \"category\": \"hard_break\",\n        \"details\": \"type_changed ErrorCode (base=7, context-weighted usage=0x)\"\n      },\n      {\n        \"signal\": \"removed:package github.com/lib/pq/cmd/pqlisten\",\n        \"points\": 0,\n        \"category\": \"hard_break\",\n        \"details\": \"removed package github.com/lib/pq/cmd/pqlisten (base=10, context-weighted usage=0x)\"\n      }\n    ]\n  },\n  \"classification\": \"HIGH\",\n  \"mergeRisk\": {\n    \"tag\": \"High\",\n    \"reason\": \"BREAK-reachable type changed API symbol `Error.Code`\",\n    \"evidenceAxis\": \"break-reachable API change\",\n    \"confidenceAxis\": \"symbol existence verified\"\n  },\n  \"confidence\": \"VERIFIED_EXISTENCE\",\n  \"adapterUsed\": \"go\",\n  \"stageResults\": [\n    {\n      \"stage\": \"semver\",\n      \"success\": true,\n      \"durationMs\": 0\n    },\n    {\n      \"stage\": \"api-extract\",\n      \"success\": true,\n      \"durationMs\": 21601\n    },\n    {\n      \"stage\": \"api-diff-apidiff\",\n      \"success\": true,\n      \"durationMs\": 1039\n    },\n    {\n      \"stage\": \"api-diff\",\n      \"success\": true,\n      \"durationMs\": 1040\n    },\n    {\n      \"stage\": \"usage-scan\",\n      \"success\": true,\n      \"durationMs\": 315\n    },\n    {\n      \"stage\": \"verification\",\n      \"success\": true,\n      \"durationMs\": 2766\n    },\n    {\n      \"stage\": \"scoring\",\n      \"success\": true,\n      \"durationMs\": 0\n    }\n  ],\n  \"apiDiffTool\": {\n    \"name\": \"Go apidiff\",\n    \"package\": \"golang.org/x/exp/cmd/apidiff\",\n    \"version\": \"v0.0.0-20260529124908-c761662dc8c9\",\n    \"mode\": \"module\",\n    \"command\": \"go run golang.org/x/exp/cmd/apidiff@v0.0.0-20260529124908-c761662dc8c9 -m /var/folders/hd/384cc81x08v0f_q5zl7h6yf40000gp/T/bc-go-api-f779c697ee2d146e.api /var/folders/hd/384cc81x08v0f_q5zl7h6yf40000gp/T/bc-go-api-d97dfc624a5531a8.api\",\n    \"status\": \"semantic\"\n  },\n  \"timestamp\": \"2026-06-09T05:59:07.243Z\",\n  \"changelogText\": \"- `CopyIn()` and `CopyInToSchema()` have been marked as deprecated. These are simple query builders and not needed for `COPY [..] FROM STDIN` support (which is *not* deprecated). ([#1279])\",\n  \"changelogSignal\": {\n    \"status\": \"breaking\",\n    \"bullets\": [\n      \"`CopyIn()` and `CopyInToSchema()` have been marked as deprecated. These are simple query builders and not needed for `COPY [..] FROM STDIN` support (which is *not* deprecated). ([#1279])\"\n    ]\n  }\n}\n{\"timestamp\":\"2026-06-09T05:58:41.079Z\",\"level\":\"info\",\"stage\":\"cli\",\"message\":\"Analyzing github.com/lib/pq 1.11.2 \u2192 1.12.3\"}\n{\"timestamp\":\"2026-06-09T05:58:41.080Z\",\"level\":\"info\",\"stage\":\"cli\",\"message\":\"Repository: /Users/hpoornac/actions-runner/_work/vcp-vsa-breakability-test/vcp-vsa-breakability-test\"}\n{\"timestamp\":\"2026-06-09T05:58:41.080Z\",\"level\":\"info\",\"stage\":\"cli\",\"message\":\"Ecosystem: gomod\"}\n{\"timestamp\":\"2026-06-09T05:58:41.080Z\",\"level\":\"info\",\"stage\":\"cli\",\"message\":\"Dep type: production\"}\n{\"timestamp\":\"2026-06-09T05:58:41.519Z\",\"level\":\"info\",\"stage\":\"cli\",\"message\":\"Using supplied changelog file (188 chars)\"}\n",
+          "summary": "api_changes=25, compatible=True"
+        },
+        {
+          "command": "scan_usage_go",
+          "exit_code": 0,
+          "label": "Usage scan",
+          "na_reason": "",
+          "signal": "usage_scan",
+          "status": "ran_pass",
+          "stdout": "",
+          "summary": "0 importing file(s) found"
+        },
+        {
+          "command": "govulncheck ./...",
+          "exit_code": null,
+          "label": "Vulnerability scan",
+          "na_reason": "govulncheck disabled by config",
+          "signal": "vuln_scan",
+          "status": "skipped",
+          "stdout": "  [security] govulncheck disabled (BREAKABILITY_GOVULNCHECK!=1) \u2014 Dependabot supplies CVE list; skipping",
+          "summary": "govulncheck disabled"
+        },
+        {
+          "command": "go_targeted_test (timeout 300 go test -timeout 5m -race <affected packages>)",
+          "exit_code": 1,
+          "label": "Tests",
+          "na_reason": "",
+          "signal": "tests",
+          "status": "ran_fail",
+          "stdout": "4.851s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/jobs\t2.982s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/metadata\t2.042s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/monitoring\t3.336s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/performance\t1.171s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/processor\t11.720s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/usage\t1.170s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/utils\t2.389s\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/migrate\t[no test files]\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/mock-metadata-server\t[no test files]\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/mock-metadata-server/hosted-server\t[no test files]\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/mock-resource-generator\t[no test files]\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/pr-analysis\t[no test files]\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql\t[no test files]\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/cmd\t2.008s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/config\t2.380s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/analyzer\t2.834s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/audit\t3.284s\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/database\t[no test files]\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/executor\t2.434s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/github\t3.234s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/logging\t2.782s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/parser\t3.128s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/planner\t2.391s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/rollback\t2.817s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/setup\t2.678s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/storage\t2.806s\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/telemetry-deployer\t[no test files]\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/vsa-deployment\t[no test files]\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils\t8.273s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/auth\t4.666s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/crypto\t2.624s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/env\t0.516s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/errors\t4.392s\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/middleware\t[no test files]\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/middleware/httphelpers\t4.929s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/middleware/log\t2.025s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/nillable\t2.987s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/retry\t2.424s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/validator\t2.428s\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/worker\t[no test files]\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/worker/helper\t2.422s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/worker/metrics\t1.925s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/worker/temporalmanager\t1.777s\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/workflow_engine\t[no test files]\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/workflow_engine/temporal\t1.803s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/workflow_engine/util\t1.182s\nFAIL\n",
+          "summary": "exit=1 \u2014 1 new test failure(s): TestDeletePoolAndWaitForCompletion"
+        }
+      ],
+      "files_importing": [],
+      "from": "1.11.2",
+      "go_resolution": {
+        "command": "go mod tidy (affected modules) for github.com/lib/pq 1.11.2\u21921.12.3",
+        "modsum_diff": "diff --git a/.github/tools/reachability/go.mod b/.github/tools/reachability/go.mod\ndeleted file mode 100644\nindex 81db8c74..00000000\n--- a/.github/tools/reachability/go.mod\n+++ /dev/null\n@@ -1,10 +0,0 @@\n-module breakability/reachability\n-\n-go 1.25.0\n-\n-require golang.org/x/tools v0.45.0\n-\n-require (\n-\tgolang.org/x/mod v0.36.0 // indirect\n-\tgolang.org/x/sync v0.20.0 // indirect\n-)\ndiff --git a/.github/tools/reachability/go.sum b/.github/tools/reachability/go.sum\ndeleted file mode 100644\nindex be8b55bf..00000000\n--- a/.github/tools/reachability/go.sum\n+++ /dev/null\n@@ -1,8 +0,0 @@\n-github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=\n-github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=\n-golang.org/x/mod v0.36.0 h1:JJjpVx6myfUsUdAzZuOSTTmRE0PfZeNWzzvKrP7amb4=\n-golang.org/x/mod v0.36.0/go.mod h1:moc6ELqsWcOw5Ef3xVprK5ul/MvtVvkIXLziUOICjUQ=\n-golang.org/x/sync v0.20.0 h1:e0PTpb7pjO8GAtTs2dQ6jYa5BWYlMuX047Dco/pItO4=\n-golang.org/x/sync v0.20.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=\n-golang.org/x/tools v0.45.0 h1:18qN3FAooORvApf5XjCXgsuayZOEtXf6JK18I3+ONa8=\n-golang.org/x/tools v0.45.0/go.mod h1:LuUGqqaXcXMEFEruIVJVm5mgDD8vww/z/SR1gQ4uE/0=\ndiff --git a/automations/tstctl/go.mod b/automations/tstctl/go.mod\nindex d7680825..17de2d4e 100644\n--- a/automations/tstctl/go.mod\n+++ b/automations/tstctl/go.mod\n@@ -7 +6,0 @@ require (\n-\tgithub.com/lib/pq v1.11.2\ndiff --git a/automations/tstctl/go.sum b/automations/tstctl/go.sum\nindex a978f9cf..144f07d0 100644\n--- a/automations/tstctl/go.sum\n+++ b/automations/tstctl/go.sum\n@@ -14,2 +13,0 @@ github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLf\n-github.com/lib/pq v1.11.2 h1:x6gxUeu39V0BHZiugWe8LXZYZ+Utk7hSJGThs8sdzfs=\n-github.com/lib/pq v1.11.2/go.mod h1:/p+8NSbOcwzAEI7wiMXFlgydTwcgTr3OSKMsD2BitpA=\n",
+        "output_tail": "\n--- go mod tidy: automations/tstctl (exit=0) ---\n"
+      },
+      "gosum_new_count": 0,
+      "gosum_new_names": "",
+      "gosum_total_main": 38,
+      "gosum_total_pr": 36,
+      "install_ok": true,
+      "merge_risk": {
+        "buildVerificationAxis": "L3",
+        "confidenceAxis": "L3",
+        "evidenceAxis": "break-reachable API change",
+        "reason": "BREAK-reachable type changed API symbol `Error.Code`",
+        "tag": "High"
+      },
+      "mergeable_status": "UNKNOWN",
+      "nestjs_peer_warning": "",
+      "no_test_confidence": {},
+      "npm_audit": {
+        "critical": 0,
+        "high": 0
+      },
+      "ownership_class": "direct_dep",
+      "package": "github.com/lib/pq",
+      "pkg_dir": "automations/tstctl",
+      "policy_lowering": {
+        "bundle": {
+          "abstain_reason": "none",
+          "citations": [],
+          "commands": [],
+          "confidence": "medium",
+          "ecosystem": "gomod",
+          "from_version": "1.11.2",
+          "is_ci_only": false,
+          "is_major": false,
+          "package": "github.com/lib/pq",
+          "rationale": "",
+          "residual_risk": "high",
+          "security_sensitive": false,
+          "signals": {
+            "api_diff": {
+              "abstain_reason": "none",
+              "citations": [],
+              "commands": [],
+              "confidence": "high",
+              "introduced": null,
+              "name": "api_diff",
+              "new_output_hash": "",
+              "new_output_text": "",
+              "old_output_hash": "",
+              "old_output_text": "",
+              "rationale": "",
+              "relevant": true,
+              "residual_risk": "high",
+              "same_behavior": null,
+              "sensitive": false,
+              "severity": "high",
+              "status": "fail",
+              "tool_failure": false
+            },
+            "build": {
+              "abstain_reason": "none",
+              "citations": [],
+              "commands": [],
+              "confidence": "high",
+              "introduced": null,
+              "name": "build",
+              "new_output_hash": "",
+              "new_output_text": "",
+              "old_output_hash": "",
+              "old_output_text": "",
+              "rationale": "",
+              "relevant": null,
+              "residual_risk": "none",
+              "same_behavior": null,
+              "sensitive": false,
+              "severity": "none",
+              "status": "pass",
+              "tool_failure": false
+            },
+            "reachability": {
+              "abstain_reason": "none",
+              "citations": [],
+              "commands": [],
+              "confidence": "medium",
+              "introduced": null,
+              "name": "reachability",
+              "new_output_hash": "",
+              "new_output_text": "",
+              "old_output_hash": "",
+              "old_output_text": "",
+              "rationale": "",
+              "relevant": true,
+              "residual_risk": "medium",
+              "same_behavior": null,
+              "sensitive": false,
+              "severity": "none",
+              "status": "unknown",
+              "tool_failure": false
+            },
+            "release_notes": {
+              "abstain_reason": "none",
+              "citations": [
+                {
+                  "locator": "changelog_bullet",
+                  "source": "changelogSignal.bullets(1), changelogText",
+                  "text": "`CopyIn()` and `CopyInToSchema()` have been marked as deprecated. These are simple query builders and not needed for `COPY [..] FROM STDIN` support (which is *not* deprecated). ([#1279])"
+                }
+              ],
+              "commands": [],
+              "confidence": "low",
+              "introduced": null,
+              "name": "release_notes",
+              "new_output_hash": "",
+              "new_output_text": "",
+              "old_output_hash": "",
+              "old_output_text": "",
+              "rationale": "release-notes classification: unavailable; matched markers: []; sources: changelogSignal.bullets(1), changelogText",
+              "relevant": null,
+              "residual_risk": "medium",
+              "same_behavior": null,
+              "sensitive": false,
+              "severity": "none",
+              "status": "unavailable",
+              "tool_failure": false
+            },
+            "security": {
+              "abstain_reason": "none",
+              "citations": [],
+              "commands": [],
+              "confidence": "medium",
+              "introduced": null,
+              "name": "security",
+              "new_output_hash": "",
+              "new_output_text": "",
+              "old_output_hash": "",
+              "old_output_text": "",
+              "rationale": "",
+              "relevant": null,
+              "residual_risk": "none",
+              "same_behavior": null,
+              "sensitive": false,
+              "severity": "none",
+              "status": "not_applicable",
+              "tool_failure": false
+            },
+            "test": {
+              "abstain_reason": "none",
+              "citations": [],
+              "commands": [],
+              "confidence": "medium",
+              "introduced": null,
+              "name": "test",
+              "new_output_hash": "",
+              "new_output_text": "",
+              "old_output_hash": "",
+              "old_output_text": "",
+              "rationale": "test failure also occurs on main; not introduced by this PR",
+              "relevant": null,
+              "residual_risk": "none",
+              "same_behavior": null,
+              "sensitive": false,
+              "severity": "none",
+              "status": "pass",
+              "tool_failure": false
+            }
+          },
+          "to_version": "1.12.3"
+        },
+        "callsite_impact": {
+          "callsites": [
+            {
+              "file": "database/metrics/persistance_store.go",
+              "is_test": false,
+              "line": 357,
+              "symbol": "Error.Code"
+            },
+            {
+              "file": "database/vcp/persistance_store.go",
+              "is_test": false,
+              "line": 345,
+              "symbol": "Error.Code"
+            }
+          ],
+          "claimed_symbols": [],
+          "confidence": "medium",
+          "dynamic_hazards": [],
+          "impact": "REACHED_UNKNOWN",
+          "is_breaking": false,
+          "matched_claims": [],
+          "reachability_verdict": "PRESENT",
+          "reason_code": "callsite:present:no_release_note_symbol_claims",
+          "signal": {
+            "confidence": "medium",
+            "name": "reachability",
+            "relevant": true,
+            "status": "unknown"
+          },
+          "sources_used": [
+            "deterministic.usages"
+          ],
+          "unmatched_claims": []
+        },
+        "decision": {
+          "confidence": "high",
+          "display_reason": "a breaking API change in the dependency is reachable from your code (the build still compiles, so verify the changed behavior)",
+          "reason_code": "review:break-reachable-api",
+          "severity": "high",
+          "verdict": "REVIEW"
+        },
+        "reachability": {
+          "absent_reason": null,
+          "callsites": [
+            {
+              "file": "database/metrics/persistance_store.go",
+              "is_test": false,
+              "line": 357,
+              "symbol": "Error.Code"
+            },
+            {
+              "file": "database/vcp/persistance_store.go",
+              "is_test": false,
+              "line": 345,
+              "symbol": "Error.Code"
+            }
+          ],
+          "checked": false,
+          "confidence": "high",
+          "dynamic_hazards": [],
+          "import_sites": [],
+          "searched_symbols": [],
+          "sources_used": [
+            "deterministic.usages"
+          ],
+          "uncertain_reason": null,
+          "verdict": "PRESENT"
+        },
+        "reachability_adjudication": {
+          "agent_task": null,
+          "called_symbols": [
+            "Error.Code"
+          ],
+          "changed_symbols": [
+            "Error.Code",
+            "ErrorClass",
+            "ErrorCode"
+          ],
+          "citation": "your production code calls `Error.Code`, which the upstream API diff marks as a breaking change \u2014 review the call site(s) against the new signature/behaviour",
+          "manual_review_required": true,
+          "matched_symbols": [
+            "Error.Code"
+          ],
+          "recommend_lower": false,
+          "safety_locked": false,
+          "verdict": "REACHED_RELEVANT"
+        },
+        "release_notes": {
+          "abstain_reason": "none",
+          "citations": [
+            {
+              "locator": "changelog_bullet",
+              "source": "changelogSignal.bullets(1), changelogText",
+              "text": "`CopyIn()` and `CopyInToSchema()` have been marked as deprecated. These are simple query builders and not needed for `COPY [..] FROM STDIN` support (which is *not* deprecated). ([#1279])"
+            }
+          ],
+          "commands": [],
+          "confidence": "low",
+          "introduced": null,
+          "name": "release_notes",
+          "new_output_hash": "",
+          "new_output_text": "",
+          "old_output_hash": "",
+          "old_output_text": "",
+          "rationale": "release-notes classification: unavailable; matched markers: []; sources: changelogSignal.bullets(1), changelogText",
+          "relevant": null,
+          "residual_risk": "medium",
+          "same_behavior": null,
+          "sensitive": false,
+          "severity": "none",
+          "status": "unavailable",
+          "tool_failure": false
+        }
+      },
+      "smoke": {
+        "exit": null,
+        "ran": false
+      },
+      "test": {
+        "exit": 1,
+        "main_npm_test_exit": -1,
+        "main_test_exit": 1,
+        "output_tail": "        \tError Trace:\t/tmp/worktree-38-test/scripts/sanity/sanity_test.go:697\n        \tError:      \tReceived unexpected error:\n        \t            \tdo request:\n        \t            \t    github.com/vcp-vsa-control-Plane/vsa-control-plane/clients/google-proxy-client.(*Client).sendV1betaDeleteVolume\n        \t            \t        /tmp/worktree-38-test/clients/google-proxy-client/oas_client_gen.go:3846\n        \t            \t  - Delete \"http://localhost:8080/v1beta/projects/1234567/locations/region-a/volumes/\": dial tcp [::1]:8080: connect: connection refused\n        \tTest:       \tTestDeleteNFSVolumeAndWaitForCompletion\n2026/06/09 11:40:24 DeletePool response: <nil>, err: do request: Delete \"http://localhost:8080/v1beta/projects/1234567/locations/region-a/pools/\": dial tcp [::1]:8080: connect: connection refused\n--- FAIL: TestDeletePoolAndWaitForCompletion (0.00s)\n    sanity_test.go:723: \n        \tError Trace:\t/tmp/worktree-38-test/scripts/sanity/sanity_test.go:723\n        \tError:      \tReceived unexpected error:\n        \t            \tdo request:\n        \t            \t    github.com/vcp-vsa-control-Plane/vsa-control-plane/clients/google-proxy-client.(*Client).sendV1betaDeletePool\n        \t            \t        /tmp/worktree-38-test/clients/google-proxy-client/oas_client_gen.go:3209\n        \t            \t  - Delete \"http://localhost:8080/v1beta/projects/1234567/locations/region-a/pools/\": dial tcp [::1]:8080: connect: connection refused\n        \tTest:       \tTestDeletePoolAndWaitForCompletion\nFAIL\nFAIL\tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/scripts/sanity\t1.192s\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry\t[no test files]\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/aggregator\t1.198s\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/api\t[no test files]\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/api/endpoints\t2.498s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/api/telemetry-servergen\t2.687s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/bizops\t3.797s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/bizops/sink\t0.492s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/bizops/sink/gcs\t1.171s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/bizops/sink/terminal\t4.090s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/collector\t1.487s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/common\t2.125s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/datamodel\t2.919s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/entity\t2.442s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/googlePusher\t134.851s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/jobs\t2.982s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/metadata\t2.042s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/monitoring\t3.336s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/performance\t1.171s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/processor\t11.720s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/usage\t1.170s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/telemetry/utils\t2.389s\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/migrate\t[no test files]\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/mock-metadata-server\t[no test files]\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/mock-metadata-server/hosted-server\t[no test files]\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/mock-resource-generator\t[no test files]\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/pr-analysis\t[no test files]\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql\t[no test files]\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/cmd\t2.008s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/config\t2.380s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/analyzer\t2.834s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/audit\t3.284s\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/database\t[no test files]\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/executor\t2.434s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/github\t3.234s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/logging\t2.782s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/parser\t3.128s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/planner\t2.391s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/rollback\t2.817s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/setup\t2.678s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/safesql/internal/storage\t2.806s\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/telemetry-deployer\t[no test files]\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/tools/vsa-deployment\t[no test files]\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils\t8.273s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/auth\t4.666s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/crypto\t2.624s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/env\t0.516s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/errors\t4.392s\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/middleware\t[no test files]\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/middleware/httphelpers\t4.929s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/middleware/log\t2.025s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/nillable\t2.987s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/retry\t2.424s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/utils/validator\t2.428s\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/worker\t[no test files]\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/worker/helper\t2.422s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/worker/metrics\t1.925s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/worker/temporalmanager\t1.777s\n?   \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/workflow_engine\t[no test files]\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/workflow_engine/temporal\t1.803s\nok  \tgithub.com/vcp-vsa-control-Plane/vsa-control-plane/workflow_engine/util\t1.182s\nFAIL\n",
+        "ran": true
+      },
+      "to": "1.12.3",
+      "verification_label": "L3_symbols_verified",
+      "verification_level": 3,
+      "verification_steps": [
+        {
+          "status": "pass",
+          "step": "dependency_resolution"
+        },
+        {
+          "status": "pass",
+          "step": "type_check"
+        },
+        {
+          "detail": "compatible=True",
+          "status": "pass",
+          "step": "symbol_verification"
+        },
+        {
+          "detail": "exit=1 \u2014 1 new test failure(s): TestDeletePoolAndWaitForCompletion",
+          "status": "fail",
+          "step": "test_suite"
+        }
+      ],
+      "vuln_finding": "",
+      "vuln_new_findings": [],
+      "vuln_output": "  [security] govulncheck disabled (BREAKABILITY_GOVULNCHECK!=1) \u2014 Dependabot supplies CVE list; skipping",
+      "vuln_preexisting_count": 0,
+      "vuln_status": "skipped_disabled"
+    }
+  },
+  "security_posture": {
+    "alert_counts_scope": "repository",
+    "alerts_fixable_by_merging": 4,
+    "alerts_unavailable": false,
+    "cve_fixes": [
+      {
+        "cve_id": "CVE-2026-29181",
+        "first_patched_version": "1.41.0",
+        "from_version": "",
+        "package": "go.opentelemetry.io/otel",
+        "pr": 23,
+        "primary_package": "go.opentelemetry.io/otel/sdk",
+        "severity": "high",
+        "summary": "OpenTelemetry-Go: multi-value `baggage` header extraction causes excessive allocations (remote dos amplification)",
+        "to_version": "v1.42.0",
+        "via": "transitive"
+      },
+      {
+        "cve_id": "CVE-2026-24051",
+        "first_patched_version": "1.40.0",
+        "from_version": "1.38.0",
+        "package": "go.opentelemetry.io/otel/sdk",
+        "pr": 23,
+        "primary_package": "go.opentelemetry.io/otel/sdk",
+        "severity": "high",
+        "summary": "OpenTelemetry Go SDK Vulnerable to Arbitrary Code Execution via PATH Hijacking",
+        "to_version": "1.42.0",
+        "via": "primary"
+      }
+    ],
+    "omitted_due_to_subset": {
+      "orphan_alerts": [
+        {
+          "cve_id": "CVE-2026-33816",
+          "first_patched_version": "5.9.0",
+          "package": "github.com/jackc/pgx/v5",
+          "severity": "critical",
+          "summary": "Memory-safety vulnerability in github.com/jackc/pgx/v5."
+        },
+        {
+          "cve_id": "CVE-2026-33186",
+          "first_patched_version": "1.79.3",
+          "package": "google.golang.org/grpc",
+          "severity": "critical",
+          "summary": "gRPC-Go has an authorization bypass via missing leading slash in :path"
+        },
+        {
+          "cve_id": "CVE-2026-39883",
+          "first_patched_version": "1.43.0",
+          "package": "go.opentelemetry.io/otel/sdk",
+          "severity": "high",
+          "summary": "opentelemetry-go: BSD kenv command not using absolute path enables PATH hijacking"
+        },
+        {
+          "cve_id": "CVE-2026-34986",
+          "first_patched_version": "4.1.4",
+          "package": "github.com/go-jose/go-jose/v4",
+          "severity": "high",
+          "summary": "Go JOSE Panics in JWE decryption"
+        },
+        {
+          "cve_id": "CVE-2026-32285",
+          "first_patched_version": "1.1.2",
+          "package": "github.com/buger/jsonparser",
+          "severity": "high",
+          "summary": "github.com/buger/jsonparser has a denial of service vulnerability"
+        },
+        {
+          "cve_id": "CVE-2025-47914",
+          "first_patched_version": "0.45.0",
+          "package": "golang.org/x/crypto",
+          "severity": "medium",
+          "summary": "golang.org/x/crypto/ssh/agent vulnerable to panic if message is malformed due to out of bounds read"
+        },
+        {
+          "cve_id": "CVE-2025-58181",
+          "first_patched_version": "0.45.0",
+          "package": "golang.org/x/crypto",
+          "severity": "medium",
+          "summary": "golang.org/x/crypto/ssh allows an attacker to cause unbounded memory consumption"
+        },
+        {
+          "cve_id": "GHSA-vrw8-fxc6-2r93",
+          "first_patched_version": "5.2.2",
+          "package": "github.com/go-chi/chi/v5",
+          "severity": "medium",
+          "summary": "chi Allows Host Header Injection which Leads to Open Redirect in RedirectSlashes"
+        },
+        {
+          "cve_id": "CVE-2026-41889",
+          "first_patched_version": "5.9.2",
+          "package": "github.com/jackc/pgx/v5",
+          "severity": "low",
+          "summary": "pgx: SQL Injection via placeholder confusion with dollar quoted string literals"
+        }
+      ]
+    },
+    "orphan_alerts": [],
+    "orphan_alerts_omitted_for_subset": 9,
+    "pr_rows_scope": "selected_prs",
+    "prs_fixing_alerts": {
+      "23": {
+        "alert_count": 4,
+        "cve_ids": [
+          "CVE-2026-39883",
+          "CVE-2026-39883",
+          "CVE-2026-24051",
+          "CVE-2026-24051"
+        ],
+        "package": "go.opentelemetry.io/otel/sdk",
+        "severities": [
+          "high",
+          "high",
+          "high",
+          "high"
+        ]
+      }
+    },
+    "prs_with_cves": {
+      "10": [
+        "CVE-2025-30204"
+      ],
+      "23": [
+        "CVE-2026-39883",
+        "CVE-2026-24051"
+      ]
+    },
+    "scope": "subset",
+    "severity_counts": {
+      "critical": 3,
+      "high": 8,
+      "low": 1,
+      "medium": 5
+    },
+    "subset_note": "PR-scoped security rows are limited to selected PRs; repository-wide alert counts remain for context.",
+    "subset_pr_numbers": [
+      10,
+      23,
+      38
+    ],
+    "total_cves_in_prs": 3,
+    "total_open_alerts": 17
+  },
+  "workspace_graph": {
+    "consumers": {},
+    "nestjs_skew": [],
+    "packages": {}
+  }
+}

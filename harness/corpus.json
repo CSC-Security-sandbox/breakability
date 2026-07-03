@@ -1,0 +1,96 @@
+{
+  "_comment": "Ground-truth labels VERIFIED against build-results.json + repo source grep (not copied from tool output). This is the fitness oracle. expected_label drives breakability_eval.py. The two critical false-green guards are pr 11 and pr 38 (tool said High, truth is SAFE); the critical true-positive is pr 18 (real build break).",
+  "ecosystem": "go",
+  "cases": [
+    {
+      "pr_id": "18", "ecosystem": "go", "package": "github.com/pb33f/libopenapi",
+      "from_version": "0.21.12", "to_version": "0.34.4",
+      "expected_label": "true_fix", "expected_evidence_class": "build_fail_new_errors",
+      "notes": "VERIFIED: pr build exit=1, real compile error scripts/fetch_models.go:94 len(errors) no longer valid. Headline reason MUST be the build error, not symbol 'Document'."
+    },
+    {
+      "pr_id": "38", "ecosystem": "go", "package": "github.com/lib/pq",
+      "from_version": "1.11.2", "to_version": "1.12.3",
+      "expected_label": "true_safe", "expected_evidence_class": "not_imported_in_bumped_module",
+      "notes": "FALSE-GREEN GUARD: tool said High/Error.Code reachable. VERIFIED: bumped in automations/tstctl where files_importing=[]; the 2 'prod files' are root-module and use pq.QuoteIdentifier, not Error.Code. Build+test pass. Safe."
+    },
+    {
+      "pr_id": "11", "ecosystem": "go", "package": "github.com/golang-migrate/migrate/v4",
+      "from_version": "4.18.2", "to_version": "4.19.1",
+      "expected_label": "true_safe", "expected_evidence_class": "additive_api_caller_not_implementer",
+      "notes": "FALSE-GREEN GUARD: tool said High/NewWithInstance. VERIFIED: change is additive; we are a CALLER (database/drivers/postgres/migrate.go), not an implementer. Build+test pass. Additive does not break callers. Also clears CVEs. Safe."
+    },
+    {
+      "pr_id": "17", "ecosystem": "go", "package": "github.com/prometheus/client_golang",
+      "from_version": "1.22.0", "to_version": "1.23.2",
+      "expected_label": "true_safe", "expected_evidence_class": "clean_minor_changelog",
+      "notes": "VERIFIED: minor bump, changelog bug-fixes only, build pass, no called symbols changed. Tool correctly Low."
+    },
+    {
+      "pr_id": "1", "ecosystem": "go", "package": "github.com/sirupsen/logrus",
+      "from_version": "1.9.3", "to_version": "1.9.4",
+      "expected_label": "true_safe", "expected_evidence_class": "patch_clean",
+      "notes": "Patch bump, build/test/apidiff clean."
+    },
+    {
+      "pr_id": "4", "ecosystem": "go", "package": "golang.org/x/oauth2",
+      "from_version": "0.32.0", "to_version": "0.36.0",
+      "expected_label": "true_safe", "expected_evidence_class": "clean_apidiff",
+      "notes": "Build/test/apidiff clean; changelog unavailable but no break-reachable. Glance-only."
+    },
+    {
+      "pr_id": "5", "ecosystem": "go", "package": "github.com/spf13/cobra",
+      "from_version": "1.10.1", "to_version": "1.10.2",
+      "expected_label": "true_safe", "expected_evidence_class": "patch_clean",
+      "notes": "Patch bump, L2 build clean."
+    },
+    {
+      "pr_id": "25", "ecosystem": "go", "package": "golang.org/x/net",
+      "from_version": "0.45.0", "to_version": "0.52.0",
+      "expected_label": "true_safe", "expected_evidence_class": "cve_fix_build_clean",
+      "notes": "Security fix (CVE-2025-47914/58181). Build pass, apidiff clean. 0.x major but only used in credentialsClient.go + tests. Merge-priority safe."
+    },
+    {
+      "pr_id": "19", "ecosystem": "go", "package": "github.com/jackc/pgx/v5",
+      "from_version": "5.7.4", "to_version": "5.9.1",
+      "expected_label": "true_safe", "expected_evidence_class": "cve_fix_tests_pass",
+      "notes": "Critical CVE-2026-33816 fix. Build+test (L2) pass, no break-reachable. Widely used (database/*). Merge-priority safe."
+    },
+    {
+      "pr_id": "23", "ecosystem": "go", "package": "go.opentelemetry.io/otel/sdk",
+      "from_version": "1.38.0", "to_version": "1.42.0",
+      "expected_label": "true_review", "expected_evidence_class": "behavioral_change_in_used_pkg",
+      "notes": "LEGIT REVIEW: changelog declares behavioral change in otel exporters/prometheus, used at utils/middleware/log/metric.go:22. L4 tests pass but config-dependent behavior is invisible to tests. Tool got this right."
+    },
+    {
+      "pr_id": "27", "ecosystem": "go", "package": "go.opentelemetry.io/otel/trace",
+      "from_version": "1.38.0", "to_version": "1.42.0",
+      "expected_label": "true_review", "expected_evidence_class": "behavioral_change_in_used_pkg",
+      "notes": "LEGIT REVIEW: same otel-train behavioral trigger as #23. Coordinate-merge with #23/#36."
+    },
+    {
+      "pr_id": "10", "ecosystem": "go", "package": "github.com/andygrunwald/go-jira",
+      "from_version": "1.16.0", "to_version": "1.17.0",
+      "expected_label": "true_review", "expected_evidence_class": "changelog_declares_breaking",
+      "notes": "LEGIT REVIEW: changelog has a Breaking Changes section; go-jira used in 3 cicd/cmd/jira files. BUT tool's evidence was just the heading text '### Breaking Changes' — must extract the actual bullet."
+    },
+    {
+      "pr_id": "32", "ecosystem": "go", "package": "github.com/go-openapi/strfmt",
+      "from_version": "0.23.0", "to_version": "0.26.1",
+      "expected_label": "true_review", "expected_evidence_class": "release_note_behavior_surface",
+      "notes": "REVIEW: release notes mention config/middleware/pipeline behavior changes across a multi-minor jump. Worth a glance; tool's keyword reason is weak and should cite the specific note."
+    },
+    {
+      "pr_id": "2", "ecosystem": "github_actions", "package": "actions/create-github-app-token",
+      "from_version": "1", "to_version": "3",
+      "expected_label": "true_review", "expected_evidence_class": "ci_supply_chain_major",
+      "notes": "LEGIT REVIEW: token-minting action, major bump. Pin to SHA, verify permission/scope changes. Supply-chain sensitive."
+    },
+    {
+      "pr_id": "8", "ecosystem": "github_actions", "package": "actions/setup-python",
+      "from_version": "5", "to_version": "6",
+      "expected_label": "true_safe", "expected_evidence_class": "ci_setup_major_glance",
+      "notes": "CI setup action major bump, no app code affected, not auth/registry/deploy. Glance changelog then merge."
+    }
+  ]
+}

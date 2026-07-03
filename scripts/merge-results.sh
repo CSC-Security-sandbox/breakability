@@ -12,7 +12,7 @@
 #   - /tmp/batch-results/batch-*/_bc_peer_groups.json   (from any batch)
 #   - GH_TOKEN / GITHUB_TOKEN env
 # ──────────────────────────────────────────────────────────────────────────────
-set -u
+set -euo pipefail
 export LC_ALL=en_US.UTF-8
 unset GH_TOKEN
 
@@ -142,13 +142,63 @@ total_prs = len(merged["prs"])
 merged["metadata"]["pr_count"] = total_prs
 selected_prs = sorted(int(n) for n in merged["prs"].keys() if str(n).isdigit())
 merged["metadata"]["selected_pr_numbers"] = selected_prs
-expected_count = int(os.environ.get("EXPECTED_PR_COUNT", "0"))
+def _discover_expected_count():
+    raw = os.environ.get("EXPECTED_PR_COUNT", "0")
+    try:
+        explicit = int(raw or "0")
+    except (TypeError, ValueError):
+        explicit = 0
+    if explicit > 0:
+        return explicit, "EXPECTED_PR_COUNT"
+    if subset_requested and requested_prs:
+        return len(requested_prs), "requested PR filter"
+    # Derive from the producer metadata embedded in each batch. This is the count
+    # build-check.sh discovered before matrix partitioning; using it prevents the
+    # merge plan from declaring all-clear when only a stale/cancelled subset merged.
+    meta_counts = []
+    for bf in batch_files:
+        try:
+            with open(bf) as fh:
+                meta = (json.load(fh).get("metadata") or {})
+            if meta.get("subset_requested") and meta.get("requested_pr_numbers"):
+                meta_counts.append(len(meta.get("requested_pr_numbers") or []))
+            elif int(meta.get("pr_count") or 0) > 0:
+                meta_counts.append(int(meta.get("pr_count") or 0))
+        except Exception:
+            continue
+    if meta_counts:
+        return max(meta_counts), "batch metadata"
+    # Last local fallback: each downloaded PR diff corresponds to a discovered PR.
+    diff_prs = set()
+    for df in glob.glob(os.path.join(batch_dir, "batch-*", "pr-*.diff")):
+        m = re.search(r"pr-(\d+)\.diff$", df)
+        if m:
+            diff_prs.add(m.group(1))
+    if diff_prs:
+        return len(diff_prs), "downloaded PR diffs"
+    return 0, "unknown"
+
+expected_count, expected_source = _discover_expected_count()
+if expected_count > 0:
+    merged["metadata"]["expected_pr_count"] = expected_count
+    merged["metadata"]["expected_pr_count_source"] = expected_source
 if expected_count > 0 and total_prs < expected_count:
     merged["metadata"]["incomplete"] = True
     merged["metadata"]["expected_pr_count"] = expected_count
     merged["metadata"]["missing_pr_count"] = expected_count - total_prs
     print(f"  ⚠️  INCOMPLETE: expected {expected_count} PRs, got {total_prs} ({expected_count - total_prs} missing)")
+elif subset_requested and merged["metadata"].get("missing_pr_numbers"):
+    merged["metadata"]["incomplete"] = True
+    merged["metadata"]["expected_pr_count"] = len(merged["metadata"].get("requested_pr_numbers") or [])
+    merged["metadata"]["missing_pr_count"] = len(merged["metadata"].get("missing_pr_numbers") or [])
+    print(f"  ⚠️  INCOMPLETE: missing requested PRs: {merged['metadata']['missing_pr_numbers']}")
+elif total_prs == 0 and (batch_files or all_batch_dirs):
+    merged["metadata"]["incomplete"] = True
+    merged["metadata"]["expected_pr_count"] = expected_count or len(all_batch_dirs)
+    merged["metadata"]["missing_pr_count"] = expected_count or len(all_batch_dirs)
+    print("  ⚠️  INCOMPLETE: no PR results were merged")
 if incomplete_batches:
+    merged["metadata"]["incomplete"] = True
     merged["metadata"]["incomplete_batches"] = incomplete_batches
 
 # V9.9: COMPATIBILITY SHIM — Convert .prs{} → .results[] for backward compatibility
@@ -211,6 +261,8 @@ KNOWN_DEPS = {
     ("react", "react-dom"): ("react and react-dom must match", "merge together"),
     ("react", "@types/react"): ("types follow react", "react first"),
     ("react-dom", "@types/react-dom"): ("types follow react-dom", "react-dom first"),
+    ("eslint", "@typescript-eslint/parser"): ("ESLint parser peer dependency — parser must support the ESLint major", "merge parser-compatible PR first"),
+    ("@typescript-eslint/eslint-plugin", "@typescript-eslint/parser"): ("TypeScript ESLint plugin/parser pair must stay in lockstep", "merge together"),
 }
 try:
     with open(os.environ.get("PEER_GROUPS_FILE", "/tmp/_bc_peer_groups.json")) as f: pd = json.load(f)
@@ -264,6 +316,19 @@ for pkg, entries in same_pkg_groups.items():
             nums = [n for n, _ in entries]
             if len(set(dirs)) > 1:
                 print(f"  Same package group: {pkg} in {len(entries)} modules (PRs: {', '.join('#'+n for n in nums)})")
+# Same package duplicated across open PRs for any ecosystem (e.g. @types/node duplicate Dependabot PRs).
+duplicate_pkg_groups = {}
+for num, pr in prs.items():
+    key = (pr.get("ecosystem", ""), pr.get("package", ""), pr.get("to", ""))
+    if key[1] and key[2]:
+        duplicate_pkg_groups.setdefault(key, []).append(num)
+for (eco, pkg, to_ver), nums in duplicate_pkg_groups.items():
+    if len(nums) > 1:
+        for i, na in enumerate(nums):
+            for nb in nums[i+1:]:
+                if not any((d["pr_a"]==int(na) and d["pr_b"]==int(nb)) or (d["pr_a"]==int(nb) and d["pr_b"]==int(na)) for d in cross_deps):
+                    cross_deps.append({"pr_a": int(na), "pr_b": int(nb), "reason": f"Duplicate {eco} upgrade: {pkg} -> {to_ver} appears in multiple PRs", "merge_order": "merge only one; close/rebase duplicate"})
+        print(f"  Duplicate package group: {pkg} -> {to_ver} (PRs: {', '.join('#'+str(n) for n in nums)})")
 # K8s module coordination: k8s.io modules must be upgraded together
 K8S_MODULES = {"k8s.io/api", "k8s.io/apimachinery", "k8s.io/client-go", "k8s.io/apiserver", "k8s.io/apiextensions-apiserver"}
 k8s_prs = [(num, pr["package"]) for num, pr in prs.items() if any(pr.get("package", "").startswith(m) for m in K8S_MODULES)]
@@ -324,7 +389,7 @@ owner_repo = os.environ["OWNER_REPO"]
 try:
     result = subprocess.run(
         ["gh", "api", f"repos/{owner_repo}/dependabot/alerts",
-         "--jq", '.[] | {number, state, security_advisory: {ghsa_id: .security_advisory.ghsa_id, cve_id: .security_advisory.cve_id, severity: .security_advisory.severity, summary: .security_advisory.summary}, security_vulnerability: {first_patched_version: .security_vulnerability.first_patched_version.identifier, vulnerable_version_range: .security_vulnerability.vulnerable_version_range}, dependency: {package: .dependency.package.name, ecosystem: .dependency.package.ecosystem, manifest_path: .dependency.manifest_path}}',
+         "--jq", '.[] | {number, html_url, state, security_advisory: {ghsa_id: .security_advisory.ghsa_id, cve_id: .security_advisory.cve_id, severity: .security_advisory.severity, cvss: .security_advisory.cvss, references: .security_advisory.references, summary: .security_advisory.summary}, security_vulnerability: {first_patched_version: .security_vulnerability.first_patched_version.identifier, vulnerable_version_range: .security_vulnerability.vulnerable_version_range}, dependency: {package: .dependency.package.name, ecosystem: .dependency.package.ecosystem, manifest_path: .dependency.manifest_path}}',
          "-X", "GET", "--paginate"],
         capture_output=True, text=True, timeout=60,
         env={**os.environ, **({"GH_TOKEN": os.environ["BREAKABILITY_PAT"], "GITHUB_TOKEN": os.environ["BREAKABILITY_PAT"]} if os.environ.get("BREAKABILITY_PAT") else {})}
@@ -379,7 +444,9 @@ for num, pr in prs.items():
             "package": pkg,
             "alert_count": len(matching_alerts),
             "severities": [a.get("security_advisory", {}).get("severity", "unknown") for a in matching_alerts],
-            "cve_ids": [a.get("security_advisory", {}).get("cve_id") or a.get("security_advisory", {}).get("ghsa_id", "") for a in matching_alerts]
+            "cve_ids": [a.get("security_advisory", {}).get("cve_id") or a.get("security_advisory", {}).get("ghsa_id", "") for a in matching_alerts],
+            "cvss_scores": [((a.get("security_advisory", {}).get("cvss") or {}).get("score") or "") for a in matching_alerts],
+            "advisory_urls": [a.get("html_url") or "" for a in matching_alerts]
         }
 
 cve_fixes, orphan_alerts = build_cve_attribution(open_alerts, prs)
@@ -417,8 +484,24 @@ for fix in cve_fixes:
     if pr_num in prs:
         if "fixes_cves" not in prs[pr_num]:
             prs[pr_num]["fixes_cves"] = []
+        _score = ""
+        _url = ""
+        for _alert in open_alerts:
+            _adv = _alert.get("security_advisory", {}) or {}
+            _dep = _alert.get("dependency", {}) or {}
+            _aid = _adv.get("cve_id") or _adv.get("ghsa_id") or ""
+            if _aid == fix["cve_id"] and _dep.get("package") == fix["package"]:
+                _cvss = _adv.get("cvss") or {}
+                _score = _cvss.get("score") or _cvss.get("cvss_v3", {}).get("base_score") or ""
+                _url = _alert.get("html_url") or ""
+                _refs = _adv.get("references") or []
+                if not _url and _refs:
+                    _first = _refs[0]
+                    _url = _first.get("url") if isinstance(_first, dict) else str(_first)
+                break
         prs[pr_num]["fixes_cves"].append({
             "cve_id": fix["cve_id"], "severity": fix["severity"],
+            "cvss_score": _score, "advisory_url": _url,
             "first_patched_version": fix["first_patched_version"],
         })
 

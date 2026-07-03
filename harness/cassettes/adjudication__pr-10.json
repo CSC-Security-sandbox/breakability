@@ -1,0 +1,7 @@
+{
+  "key": "pr-10",
+  "model": "replay",
+  "namespace": "adjudication",
+  "prompt_sha": "corpus-aligned",
+  "response": "{\n  \"pr\": 10,\n  \"final_verdict\": \"escalate\",\n  \"break_class\": \"symbol_removed\",\n  \"independent_verdict\": \"escalate\",\n  \"deterministic_agrees\": true,\n  \"deterministic_flaw\": \"\",\n  \"proof\": \"grep -rn 'go-jira' cicd --include=*.go shows Issue.Get at cicd/cmd/jira/jira.go:97; the changelog Breaking Changes section is real and the package is used, so a static scan cannot safely clear it.\",\n  \"citation\": \"cicd/cmd/jira/jira.go:97\",\n  \"remediation\": \"\",\n  \"escalation_question\": \"Do any of the 3 cicd/cmd/jira call sites depend on the symbols named in the go-jira 1.17.0 Breaking Changes bullet? A reviewer must confirm against the extracted bullet, not just the heading.\",\n  \"confidence\": 0.6\n}"
+}

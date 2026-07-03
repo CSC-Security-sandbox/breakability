@@ -7,7 +7,7 @@ Provides:
   - False-green/false-block detection with rates
   - Target gates for 85% dev-work reduction: auto_clear >=85%, zero false-green
 
-Run: python3 .github/scripts/breakability_eval.py <corpus.json> [--predict <predictions.json>]
+Run: python3 scripts/breakability_eval.py <corpus.json> [--predict <predictions.json>]
 """
 import json
 import sys

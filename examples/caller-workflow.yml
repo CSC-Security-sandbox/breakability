@@ -3,17 +3,19 @@
 # Copy this file to your repo at .github/workflows/breakability.yml
 # It triggers on: cron (weekly), manual dispatch, or new Dependabot PRs.
 #
-# ZERO additional secrets needed for basic use.
-# If your repo has private registries, see the breakability-config.yml template.
+# Prerequisites:
+#   1. The breakability repo must be accessible to this repo's GITHUB_TOKEN
+#      (same org, or pass a PAT with repo scope as `token`)
+#   2. For AI-powered comments, set CURSOR_API_KEY as a repo secret
+#   3. For private registries, create .github/breakability-config.yml
+#      (see examples/breakability-config.yml)
 
 name: Breakability Analysis
 
 on:
-  # Run weekly on Monday at 6 AM UTC (adjust to your timezone)
   schedule:
     - cron: '0 6 * * 1'
 
-  # Manual trigger from Actions tab
   workflow_dispatch:
     inputs:
       pr_filter:
@@ -21,26 +23,26 @@ on:
         required: false
         default: ''
       batch_count:
-        description: 'Number of parallel batches (increase for large monorepos)'
+        description: 'Number of parallel batches'
         required: false
         default: '4'
+        type: choice
+        options: ['1', '2', '4', '6']
       skip_agent:
-        description: 'Skip Copilot agent analysis (deterministic only)'
+        description: 'Skip AI agent (deterministic only)'
         required: false
         type: boolean
         default: false
 
-  # Trigger on new Dependabot PRs
   pull_request:
     types: [opened]
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
   issues: write
 
 jobs:
-  # Gate: only run on Dependabot PRs (for pull_request trigger)
   check:
     runs-on: ubuntu-latest
     outputs:
@@ -53,7 +55,6 @@ jobs:
               echo "should_run=true" >> "$GITHUB_OUTPUT"
             else
               echo "should_run=false" >> "$GITHUB_OUTPUT"
-              echo "⏭️ Not a Dependabot PR — skipping"
             fi
           else
             echo "should_run=true" >> "$GITHUB_OUTPUT"
@@ -62,11 +63,11 @@ jobs:
   breakability:
     needs: check
     if: needs.check.outputs.should_run == 'true'
-    uses: CSC-Security-sandbox/breakability/.github/workflows/breakability-reusable.yml@main
+    uses: CSC-Security-sandbox/breakability/.github/workflows/breakability-reusable.yml@v1
     with:
       pr_filter: ${{ github.event.inputs.pr_filter || '' }}
       batch_count: ${{ fromJson(github.event.inputs.batch_count || '4') }}
       skip_agent: ${{ github.event.inputs.skip_agent == 'true' }}
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }}
-      breakability_pat: ${{ secrets.BREAKABILITY_PAT }}
+      cursor_api_key: ${{ secrets.CURSOR_API_KEY }}

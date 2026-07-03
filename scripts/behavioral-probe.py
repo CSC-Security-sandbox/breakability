@@ -25,7 +25,9 @@ import sys
 import time
 
 RESULTS = os.environ.get("BP_RESULTS", "/tmp/build-results.json")
-PROMPT_FILE = os.environ.get("BP_PROMPT", ".github/behavioral-probe-prompt.md")
+_PROMPTS_DIR = os.environ.get("BREAKABILITY_PROMPTS_DIR",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prompts"))
+PROMPT_FILE = os.environ.get("BP_PROMPT", os.path.join(_PROMPTS_DIR, "behavioral-probe-prompt.md"))
 REPO_ROOT = os.environ.get("BP_REPO_ROOT", ".")
 # Default agent command; override with BP_AGENT_CMD (e.g. a stub) for local testing.
 AGENT_CMD = os.environ.get(

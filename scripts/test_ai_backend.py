@@ -149,6 +149,21 @@ class LiveAndRecordTests(unittest.TestCase):
         self.assertNotIn("-p", argv)
 
 
+class AnthropicModelMappingTests(unittest.TestCase):
+    def test_cursor_model_names_map_to_valid_anthropic_ids(self):
+        for cursor_name, api_id in ab._CURSOR_TO_ANTHROPIC.items():
+            self.assertTrue(api_id.startswith("claude-"), f"{cursor_name} -> {api_id}")
+            self.assertRegex(api_id, r"^claude-[\w-]+\d$",
+                             f"Anthropic API model ID should be a valid claude model: {api_id}")
+
+    def test_default_model_is_mapped(self):
+        self.assertIn(ab.DEFAULT_MODEL, ab._CURSOR_TO_ANTHROPIC)
+
+    def test_unknown_model_passes_through(self):
+        self.assertEqual(ab._CURSOR_TO_ANTHROPIC.get("custom-model", "custom-model"),
+                         "custom-model")
+
+
 class EnvResolutionTests(unittest.TestCase):
     def test_mode_defaults_to_live(self):
         old = os.environ.pop("BRK_AGENT_MODE", None)
@@ -183,6 +198,40 @@ class EnvResolutionTests(unittest.TestCase):
             os.environ.pop("BRK_AGENT_MODEL", None)
             if old is not None:
                 os.environ["BRK_AGENT_MODEL"] = old
+
+
+class PreflightCheckTests(unittest.TestCase):
+    def test_no_keys_returns_false(self):
+        old_cursor = os.environ.pop("CURSOR_API_KEY", None)
+        old_anthropic = os.environ.pop("ANTHROPIC_API_KEY", None)
+        try:
+            be = ab.Backend(mode=ab.MODE_LIVE, model="m", cmd_template="false",
+                            cassette_dir="/tmp", timeout=5)
+            ok, err = be.preflight_check()
+            self.assertFalse(ok)
+            self.assertIn("API key not set", err)
+        finally:
+            if old_cursor is not None:
+                os.environ["CURSOR_API_KEY"] = old_cursor
+            if old_anthropic is not None:
+                os.environ["ANTHROPIC_API_KEY"] = old_anthropic
+
+    def test_cursor_key_only_with_no_sdk(self):
+        old_cursor = os.environ.pop("CURSOR_API_KEY", None)
+        old_anthropic = os.environ.pop("ANTHROPIC_API_KEY", None)
+        os.environ["CURSOR_API_KEY"] = "test-key"
+        try:
+            be = ab.Backend(mode=ab.MODE_LIVE, model="m", cmd_template="false",
+                            cassette_dir="/tmp", timeout=5)
+            ok, err = be.preflight_check()
+            self.assertFalse(ok)
+            self.assertIn("agent CLI returned empty", err)
+        finally:
+            os.environ.pop("CURSOR_API_KEY", None)
+            if old_cursor is not None:
+                os.environ["CURSOR_API_KEY"] = old_cursor
+            if old_anthropic is not None:
+                os.environ["ANTHROPIC_API_KEY"] = old_anthropic
 
 
 if __name__ == "__main__":

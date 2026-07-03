@@ -1,0 +1,3 @@
+{
+  "10": {"final_verdict": "escalate", "pr": 10, "break_class": "symbol_removed", "independent_verdict": "escalate", "deterministic_agrees": true, "deterministic_flaw": "", "proof": "grep -rn 'go-jira' cicd --include=*.go shows Issue.Get at cicd/cmd/jira/jira.go:97; the changelog Breaking Changes section is real and the package is used, so a static scan cannot safely clear it.", "citation": "cicd/cmd/jira/jira.go:97", "remediation": "", "escalation_question": "Do any of the 3 cicd/cmd/jira call sites depend on the symbols named in the go-jira 1.17.0 Breaking Changes bullet? A reviewer must confirm against the extracted bullet, not just the heading.", "confidence": 0.6}
+}

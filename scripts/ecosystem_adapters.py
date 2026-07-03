@@ -11,6 +11,7 @@ and the framework fails safely (ABSTAIN) on unknown ecosystems or unsupported ca
 """
 from __future__ import annotations
 
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
@@ -337,7 +338,7 @@ def _build_npm_adapter() -> EcosystemAdapter:
                 commands=(
                     CommandSpec(
                         cmd="node",
-                        args=(".github/scripts/npm_apidiff.mjs",),
+                        args=(os.path.join(os.environ.get("BREAKABILITY_SCRIPTS_DIR", os.path.dirname(os.path.abspath(__file__))), "npm_apidiff.mjs"),),
                         timeout_sec=240,
                         description="TypeScript type-surface diff of the dependency's .d.ts (from/to)",
                     ),

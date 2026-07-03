@@ -41,8 +41,10 @@ from break_class_router import classify_break, NOT_OBSERVABLE, AMBIGUOUS, CALL_O
 from cross_pr_reconciler import filter_package_correct_evidence, reconcile_release_train_grades
 
 RESULTS = os.environ.get("DP_RESULTS", "/tmp/build-results.json")
-PROMPT_FILE = os.environ.get("DP_PROMPT", ".github/differential-probe-prompt.md")
-REASON_PROMPT_FILE = os.environ.get("DP_REASON_PROMPT", ".github/differential-reasoning-prompt.md")
+_PROMPTS_DIR = os.environ.get("BREAKABILITY_PROMPTS_DIR",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prompts"))
+PROMPT_FILE = os.environ.get("DP_PROMPT", os.path.join(_PROMPTS_DIR, "differential-probe-prompt.md"))
+REASON_PROMPT_FILE = os.environ.get("DP_REASON_PROMPT", os.path.join(_PROMPTS_DIR, "differential-reasoning-prompt.md"))
 REPO_ROOT = os.environ.get("DP_REPO_ROOT", ".")
 AGENT_CMD = os.environ.get("DP_AGENT_CMD", "agent -p --force --model claude-4-sonnet")
 # Substitute a {model} placeholder (consistent with ai_backend's template) so a
@@ -671,7 +673,38 @@ def is_npm_probe_candidate(pr):
 
 
 def _is_private_npm_package(pkg):
-    return pkg.startswith("@netapp-cloud-datamigrate/")
+    for scope in _get_private_scopes():
+        if pkg.startswith(scope.rstrip("/") + "/"):
+            return True
+    return False
+
+
+_PRIVATE_SCOPES_CACHE = None
+
+
+def _get_private_scopes():
+    global _PRIVATE_SCOPES_CACHE
+    if _PRIVATE_SCOPES_CACHE is not None:
+        return _PRIVATE_SCOPES_CACHE
+    scopes = []
+    config_path = os.environ.get("BREAKABILITY_CONFIG", "")
+    if config_path and os.path.isfile(config_path):
+        try:
+            import yaml
+            with open(config_path) as f:
+                cfg = yaml.safe_load(f) or {}
+            for reg in cfg.get("private_registries", []):
+                s = reg.get("scope", "").strip()
+                if s:
+                    scopes.append(s)
+        except Exception:
+            pass
+    if not scopes:
+        raw = os.environ.get("BREAKABILITY_PRIVATE_SCOPES", "")
+        if raw:
+            scopes = [s.strip() for s in raw.split(",") if s.strip()]
+    _PRIVATE_SCOPES_CACHE = scopes
+    return scopes
 
 
 def _valid_npm_ref(pkg, version):
@@ -1076,6 +1109,170 @@ console.log(JSON.stringify({
 '''
 
 
+# ── deterministic Go module API-surface probe ─────────────────────────────
+_GOMOD_RE = re.compile(r"^[a-zA-Z0-9_.~\-]+(/[a-zA-Z0-9_.~\-]+)*$")
+_GOMOD_VERSION_RE = re.compile(r"^v?\d+\.\d+\.\d+([.\-][\w.+\-]+)?$")
+GOMOD_PROBE_TIMEOUT = int(os.environ.get("DP_GOMOD_TIMEOUT", "120"))
+GOMOD_PROBE_ROOT = os.environ.get("DP_GOMOD_PROBE_ROOT", os.path.join(REPO_ROOT, ".github", ".gomod-probe-work"))
+
+
+def is_gomod_probe_candidate(pr):
+    if str(pr.get("ecosystem") or "").strip().lower() != "gomod":
+        return False
+    return bool(str(pr.get("package") or "").strip()
+                and str(pr.get("from") or "").strip()
+                and str(pr.get("to") or "").strip())
+
+
+def _valid_gomod_ref(pkg, version):
+    if not pkg or ".." in pkg or pkg.startswith("-"):
+        return False
+    if not _GOMOD_VERSION_RE.match(version or ""):
+        return False
+    return True
+
+
+def gomod_unavailable_grade(reason, commands=None):
+    return {
+        "grade": "medium",
+        "source": "probe",
+        "probe_kind": "gomod_api_surface",
+        "behavior_changed": "unverified",
+        "same_behavior": None,
+        "rationale": f"Go module API-surface probe unavailable: {str(reason)[:220]}; committed at Medium (no false-green).",
+        "confidence": "low",
+        "probe_commands": commands or [],
+        "generated_at": int(time.time()),
+    }
+
+
+def _go_doc_snapshot(pkg, version, workdir):
+    ver = version if version.startswith("v") else f"v{version}"
+    project_dir = os.path.join(workdir, ver.replace("/", "_"))
+    os.makedirs(project_dir, exist_ok=True)
+
+    init = subprocess.run(
+        ["go", "mod", "init", "breakability-gomod-probe"],
+        cwd=project_dir, capture_output=True, text=True,
+        timeout=GOMOD_PROBE_TIMEOUT, check=False,
+    )
+    if init.returncode != 0:
+        raise RuntimeError(f"go mod init failed: {init.stderr[-300:]}")
+
+    get = subprocess.run(
+        ["go", "get", f"{pkg}@{ver}"],
+        cwd=project_dir, capture_output=True, text=True,
+        timeout=GOMOD_PROBE_TIMEOUT, check=False,
+    )
+    if get.returncode != 0:
+        raise RuntimeError(f"go get {pkg}@{ver} failed: {get.stderr[-300:]}")
+
+    doc = subprocess.run(
+        ["go", "doc", "-all", pkg],
+        cwd=project_dir, capture_output=True, text=True,
+        timeout=GOMOD_PROBE_TIMEOUT, check=False,
+    )
+    doc_output = doc.stdout.strip() if doc.returncode == 0 else ""
+
+    lst = subprocess.run(
+        ["go", "list", "-json", pkg],
+        cwd=project_dir, capture_output=True, text=True,
+        timeout=GOMOD_PROBE_TIMEOUT, check=False,
+    )
+    list_output = lst.stdout.strip() if lst.returncode == 0 else ""
+
+    return {"doc": doc_output, "list": list_output, "ok": bool(doc_output or list_output)}
+
+
+def gomod_grade_from_snapshots(pkg, from_version, to_version, old_snap, new_snap, commands=None):
+    commands = commands or []
+    if not old_snap.get("ok") or not new_snap.get("ok"):
+        return gomod_unavailable_grade("go doc did not produce output for both versions", commands)
+
+    old_doc = old_snap.get("doc", "")
+    new_doc = new_snap.get("doc", "")
+    old_hash = hashlib.sha256(old_doc.encode("utf-8", "replace")).hexdigest()
+    new_hash = hashlib.sha256(new_doc.encode("utf-8", "replace")).hexdigest()
+
+    if old_hash == new_hash:
+        return {
+            "grade": "low",
+            "source": "probe",
+            "probe_kind": "gomod_api_surface",
+            "behavior_changed": False,
+            "same_behavior": True,
+            "rationale": (
+                f"Go API-surface probe compared `go doc -all` for {pkg}@{from_version} and "
+                f"{pkg}@{to_version}; exported API documentation is identical."
+            ),
+            "observed_from": f"doc_sha256={old_hash[:16]}",
+            "observed_to": f"doc_sha256={new_hash[:16]}",
+            "evidence": f"{pkg} public API surface unchanged between versions.",
+            "confidence": "high",
+            "probe_commands": commands,
+            "generated_at": int(time.time()),
+        }
+
+    old_lines = set(old_doc.splitlines())
+    new_lines = set(new_doc.splitlines())
+    removed = old_lines - new_lines
+    func_removed = [l.strip() for l in removed if l.strip().startswith("func ")]
+
+    if func_removed:
+        diff_detail = f"removed symbols: {'; '.join(func_removed[:5])}"
+    elif removed:
+        diff_detail = f"{len(removed)} API doc line(s) changed"
+    else:
+        diff_detail = "API documentation differs (additions only)"
+
+    return {
+        "grade": "medium",
+        "source": "probe",
+        "probe_kind": "gomod_api_surface",
+        "behavior_changed": True,
+        "same_behavior": False,
+        "changed_behavior": diff_detail,
+        "rationale": (
+            f"Go API-surface probe compared `go doc -all` for {pkg}@{from_version} and "
+            f"{pkg}@{to_version}; public API surface differs."
+        ),
+        "observed_from": f"doc_sha256={old_hash[:16]}",
+        "observed_to": f"doc_sha256={new_hash[:16]}",
+        "evidence": diff_detail,
+        "confidence": "high",
+        "probe_commands": commands,
+        "generated_at": int(time.time()),
+    }
+
+
+def run_gomod_differential_probe(num, pr):
+    pkg = str(pr.get("package") or "").strip()
+    from_version = str(pr.get("from") or "").strip()
+    to_version = str(pr.get("to") or "").strip()
+    commands = [
+        f"go get {pkg}@v{from_version}",
+        f"go get {pkg}@v{to_version}",
+        f"go doc -all {pkg}",
+    ]
+    if not _valid_gomod_ref(pkg, from_version) or not _valid_gomod_ref(pkg, to_version):
+        return gomod_unavailable_grade("invalid Go module/version reference", commands)
+    if shutil.which("go") is None:
+        return gomod_unavailable_grade("go executable not found", commands)
+
+    os.makedirs(GOMOD_PROBE_ROOT, exist_ok=True)
+    workdir = tempfile.mkdtemp(prefix=f"gomod-dp-{num}-", dir=GOMOD_PROBE_ROOT)
+    env_backup = os.environ.copy()
+    try:
+        os.environ["GOWORK"] = "off"
+        old_snap = _go_doc_snapshot(pkg, from_version, workdir)
+        new_snap = _go_doc_snapshot(pkg, to_version, workdir)
+        return gomod_grade_from_snapshots(pkg, from_version, to_version, old_snap, new_snap, commands=commands)
+    except Exception as e:
+        return gomod_unavailable_grade(str(e), commands)
+    finally:
+        os.environ.clear()
+        os.environ.update(env_backup)
+        shutil.rmtree(workdir, ignore_errors=True)
 
 
 # ── cache ───────────────────────────────────────────────────────────────────
@@ -1134,6 +1331,11 @@ def _grade_residual_inner(num, pr, budgets):
         log(f"PR {num}: deterministic npm runtime-shape probe for {pr.get('package')} "
             f"{pr.get('from')}->{pr.get('to')}")
         return run_npm_differential_probe(num, pr)
+
+    if is_gomod_probe_candidate(pr):
+        log(f"PR {num}: deterministic Go API-surface probe for {pr.get('package')} "
+            f"{pr.get('from')}->{pr.get('to')}")
+        return run_gomod_differential_probe(num, pr)
 
     det = pr.get("deterministic") or {}
     sig = det.get("changelogSignal") or {}
@@ -1317,18 +1519,18 @@ def main():
     if DETERMINISTIC_ONLY:
         candidates = [
             (n, pr) for n, pr in prs.items()
-            if isinstance(pr, dict) and is_npm_probe_candidate(pr)
+            if isinstance(pr, dict) and (is_npm_probe_candidate(pr) or is_gomod_probe_candidate(pr))
         ]
         if not candidates:
-            log("deterministic-only mode: no npm runtime-shape probe candidates; nothing to grade")
+            log("deterministic-only mode: no npm/gomod probe candidates; nothing to grade")
             return 0
     else:
         candidates = [
             (n, pr) for n, pr in prs.items()
-            if isinstance(pr, dict) and (is_residual(pr) or is_npm_probe_candidate(pr))
+            if isinstance(pr, dict) and (is_residual(pr) or is_npm_probe_candidate(pr) or is_gomod_probe_candidate(pr))
         ]
         if not candidates:
-            log("no declared-behavioral residual or npm probe candidate PRs; nothing to grade")
+            log("no declared-behavioral residual or npm/gomod probe candidate PRs; nothing to grade")
             return 0
     probe_budget = MAX_PRS
     reason_budget = MAX_REASON

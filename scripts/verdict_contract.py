@@ -143,10 +143,23 @@ def _policy_decision(pr: Mapping[str, Any]) -> dict:
     return dec if isinstance(dec, Mapping) else {}
 
 
+def _is_preexisting_test_failure(pr: Mapping[str, Any]) -> bool:
+    """True when the test failure exists on main with the same exit code."""
+    test = pr.get("test") or {}
+    test_exit = test.get("exit")
+    main_exit = test.get("main_test_exit")
+    if test_exit is None or main_exit is None:
+        return False
+    return test_exit != 0 and main_exit != 0 and test_exit == main_exit
+
+
 def _hard_fix_floor(pr: Mapping[str, Any]) -> bool:
     """States that MUST be FIX/BLOCKED and can never be downgraded (false-green floor):
-    a build that does not compile, new build errors introduced, test failures,
+    a build that does not compile, new build errors introduced, NEW test failures,
     or a policy decision that introduced a security finding.
+
+    Pre-existing test failures (same exit code on main) are excluded — they get
+    REVIEW via the normal path, not BLOCKED.
     """
     build_verdict = (pr.get("build") or {}).get("verdict", "")
     if build_verdict in ("fail", "pre_existing_plus_new"):
@@ -159,11 +172,13 @@ def _hard_fix_floor(pr: Mapping[str, Any]) -> bool:
     if test_ran and test_exit is not None and test_exit != 0:
         output = test.get("output_tail", "") or ""
         if "no test specified" not in output and "Error: no test specified" not in output:
-            return True
+            if not _is_preexisting_test_failure(pr):
+                return True
     if test.get("verdict") == "fail":
         output = test.get("output_tail", "") or ""
         if "no test specified" not in output and "Error: no test specified" not in output:
-            return True
+            if not _is_preexisting_test_failure(pr):
+                return True
     rc = str(_policy_decision(pr).get("reason_code") or "")
     return rc.startswith("build:") or rc == "security:introduced"
 
@@ -176,25 +191,83 @@ def _valid_v2(pr: Mapping[str, Any]) -> Optional[dict]:
 
 
 def _probe_escalation(pr: Mapping[str, Any], result: dict) -> dict:
-    """Post-determination check: if behavioral probe found DIFFERENT behavior,
-    a SAFE verdict must be escalated to REVIEW. A SAFE verdict on a PR where
-    the probe shows changed runtime exports is a false green."""
+    """Post-determination check: escalate SAFE → REVIEW when evidence contradicts.
+
+    Two guards:
+      1. Behavioral probe found DIFFERENT runtime behavior.
+      2. Rule 4+6: breaking changelog + reachable code + no passing tests.
+    """
     if result.get("verdict") != BUCKET_SAFE:
         return result
     bg = pr.get("behavioral_grade")
-    if not isinstance(bg, Mapping):
-        return result
-    if bg.get("same_behavior") is False or bg.get("behavior_changed") is True:
+    if isinstance(bg, Mapping):
+        if bg.get("same_behavior") is False or bg.get("behavior_changed") is True:
+            result = dict(result)
+            result["verdict"] = BUCKET_REVIEW
+            result["severity"] = max(result.get("severity", "medium"),
+                                     "medium", key=lambda s: _SEVERITY_RANK.get(s, 1))
+            result["source"] = result.get("source", "") + "+probe_escalation"
+            result["reason"] = (result.get("reason", "") +
+                                "; behavioral probe detected changed runtime behavior").lstrip("; ")
+            result["breakability_grade"] = assign_breakability_grade(pr, BUCKET_REVIEW)
+            return result
+    if _breaking_changelog_reachable_floor(pr):
         result = dict(result)
         result["verdict"] = BUCKET_REVIEW
         result["severity"] = max(result.get("severity", "medium"),
                                  "medium", key=lambda s: _SEVERITY_RANK.get(s, 1))
-        result["source"] = result.get("source", "") + "+probe_escalation"
+        result["source"] = result.get("source", "") + "+breaking_changelog_ai_override"
         result["reason"] = (result.get("reason", "") +
-                            "; behavioral probe detected changed runtime behavior").lstrip("; ")
+                            "; breaking changelog + reachable code + no passing tests (Rule 4)").lstrip("; ")
         result["breakability_grade"] = assign_breakability_grade(pr, BUCKET_REVIEW)
         return result
     return result
+
+
+def _has_declared_breaking(pr: Mapping[str, Any]) -> bool:
+    """Check if the PR's changelog declares breaking changes or deprecations.
+
+    Mirrors reconcile_adjudication._has_declared_breaking_section."""
+    import json as _json
+    det = pr.get("deterministic") or {}
+    sig = det.get("changelogSignal")
+    blob = ""
+    if isinstance(sig, str):
+        blob += sig
+    elif isinstance(sig, dict):
+        blob += _json.dumps(sig)
+    blob += " " + (det.get("changelogText") or "")
+    low = blob.lower()
+    return ("breaking change" in low) or ("### breaking" in low) or ("deprecat" in low)
+
+
+def _tests_ran_successfully(pr: Mapping[str, Any]) -> bool:
+    """True only when the candidate version's test suite actually ran and passed."""
+    t = pr.get("test") or {}
+    if not isinstance(t, Mapping):
+        return False
+    if not t.get("ran"):
+        return False
+    exit_code = t.get("exit")
+    if exit_code is None:
+        exit_code = t.get("main_test_exit")
+    return exit_code == 0
+
+
+def _breaking_changelog_reachable_floor(pr: Mapping[str, Any]) -> bool:
+    """Rule 4: changelog declares breaking + package is reachable + tests did not pass.
+
+    When all three hold, the PR must be at least REVIEW — a SAFE verdict here
+    is a false green (the declared break may manifest behaviorally or via code
+    paths a static grep misjudges)."""
+    if not _has_declared_breaking(pr):
+        return False
+    files_importing = pr.get("files_importing") or []
+    if not files_importing:
+        return False
+    if _tests_ran_successfully(pr):
+        return False
+    return True
 
 
 def assign_breakability_grade(pr: Mapping[str, Any], verdict_bucket: str, signals: Optional[Mapping] = None) -> str:
@@ -303,6 +376,18 @@ def authoritative_verdict(pr: Mapping[str, Any]) -> dict:
                 "breakability_grade": GRADE_SAFE,
             }
             return result
+
+    # Rule 4: breaking changelog + reachable code + no successful tests → REVIEW floor
+    if _breaking_changelog_reachable_floor(pr):
+        return {
+            "verdict": BUCKET_REVIEW,
+            "severity": "medium",
+            "confidence": "L3",
+            "priority": "P2",
+            "reason": "Breaking changelog + reachable code + no successful test execution (Rule 4)",
+            "source": "breaking_changelog_reachable_floor",
+            "breakability_grade": GRADE_MEDIUM_BREAKING,
+        }
 
     adj = pr.get("ai_adjudication")
     if isinstance(adj, Mapping):

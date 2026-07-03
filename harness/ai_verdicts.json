@@ -1,0 +1,39 @@
+{
+  "_note": "Replay of resolve-first + deterministic-audit AI adjudications (schema validated by validate_adjudication.py). #38 never reaches the AI — Tier-0 clears it deterministically (dep not imported in bumped module). #10: symbol_removed, AI grepped and found we never call the removed Search/SearchWithContext, so it RESOLVES to safe with proof (the deterministic REVIEW was over-conservative). #23: behavioral otel translator change AI could not resolve with a static probe in-budget, so it escalates ONE precise question (last resort).",
+  "10": {
+    "break_class": "symbol_removed",
+    "independent_verdict": "safe",
+    "proof": "grep -rn '.Search(|.SearchWithContext(|jira.Response' cicd --include=*.go -> no matches; grep for go-jira usage shows only Issue.Get at cicd/cmd/jira/jira.go:97, unaffected by the removal.",
+    "deterministic_agrees": false,
+    "deterministic_flaw": "deterministic stayed REVIEW because a '### Breaking Changes' section exists, but it never checked that the removed symbols (Search/SearchWithContext) have zero call sites in our code; the removal cannot affect us.",
+    "final_verdict": "safe",
+    "citation": "cicd/cmd/jira/jira.go:97",
+    "remediation": "",
+    "escalation_question": "",
+    "confidence": 0.93
+  },
+  "23": {
+    "break_class": "behavioral",
+    "independent_verdict": "escalate",
+    "proof": "metric.go:72 installs the otel prometheus exporter as the MeterProvider reader; grep confirms our scrape path uses the changed translator. A static read cannot prove whether our metrics hit the changed dropped-data path; a faithful probe needs a live scrape against real metric cardinality.",
+    "deterministic_agrees": true,
+    "deterministic_flaw": "",
+    "final_verdict": "escalate",
+    "citation": "utils/middleware/log/metric.go:72",
+    "remediation": "",
+    "escalation_question": "Do any exported metrics rely on the pre-1.x otel-prometheus name/label translation (unit suffixes or dropped invalid labels)? A runtime scrape diff is required because the change is purely behavioral on real metric data.",
+    "confidence": 0.7
+  },
+  "38": {
+    "break_class": "none",
+    "independent_verdict": "safe",
+    "proof": "grep -rn 'lib/pq' automations/tstctl --include=*.go -> no matches; the PR diff REMOVES github.com/lib/pq from automations/tstctl/go.mod. The Error.Code usages are in database/* which resolve lib/pq via the ROOT go.mod.",
+    "deterministic_agrees": false,
+    "deterministic_flaw": "cross-module miscount: deterministic cited Error.Code usages at database/metrics/persistance_store.go:357 and database/vcp/persistance_store.go:345, but those files are in the ROOT module, not the bumped automations/tstctl module. A bump in one go.mod cannot reach another.",
+    "final_verdict": "safe",
+    "citation": "automations/tstctl/go.mod",
+    "remediation": "",
+    "escalation_question": "",
+    "confidence": 0.97
+  }
+}

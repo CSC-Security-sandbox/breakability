@@ -88,10 +88,13 @@ def test_npm_both_entrypoints_throw_is_unavailable():
     assert "entrypoint" in grade["rationale"]
 
 
-def test_private_netapp_package_is_candidate_but_unavailable(monkeypatch):
-    pr = {"ecosystem": "npm", "package": "@netapp-cloud-datamigrate/private", "from": "1.0.0", "to": "1.0.1"}
+def test_private_scoped_package_is_candidate_but_unavailable(monkeypatch):
+    monkeypatch.setenv("BREAKABILITY_PRIVATE_SCOPES", "@myorg-internal")
+    dp._PRIVATE_SCOPES_CACHE = None
+    pr = {"ecosystem": "npm", "package": "@myorg-internal/private", "from": "1.0.0", "to": "1.0.1"}
     assert dp.is_npm_probe_candidate(pr) is True
     grade = dp.run_npm_differential_probe("1", pr)
     assert grade["grade"] == "medium"
     assert grade["same_behavior"] is None
     assert "private" in grade["rationale"]
+    dp._PRIVATE_SCOPES_CACHE = None

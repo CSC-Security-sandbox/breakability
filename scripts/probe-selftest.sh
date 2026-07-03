@@ -210,12 +210,12 @@ python3 -c "import json;json.load(open('$RESULTS'))"  # validate JSON
 log "running differential probe against the synthetic call-observable break ..."
 DP_RESULTS="$RESULTS" \
 DP_REPO_ROOT="$CON" \
-DP_PROMPT="$REPO_DIR/.github/differential-probe-prompt.md" \
-DP_REASON_PROMPT="$REPO_DIR/.github/differential-reasoning-prompt.md" \
+DP_PROMPT="$REPO_DIR/prompts/differential-probe-prompt.md" \
+DP_REASON_PROMPT="$REPO_DIR/prompts/differential-reasoning-prompt.md" \
 DP_MAX_PRS=2 \
 DP_CACHE_DIR="$WORK/dp-cache" \
 BREAKDEP_AUDIT_DIR="$AUDIT" \
-  python3 "$REPO_DIR/.github/scripts/differential-probe.py" || true
+  python3 "$REPO_DIR/scripts/differential-probe.py" || true
 
 # ── 6. assert the probe actually EXECUTED and proved/mapped the break ────────
 log "execution sentinels:"; ls -1 "$AUDIT" 2>/dev/null || true

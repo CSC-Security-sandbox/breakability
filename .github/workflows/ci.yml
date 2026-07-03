@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: pip install pytest --quiet
+
+      - name: Run unit tests
+        run: |
+          python3 -m pytest scripts/test_*.py -v --tb=short
+        env:
+          BRK_AGENT_MODE: replay
+
+      - name: Verify no org-specific hardcoding
+        run: |
+          if grep -rn "netapp\|datamigrate" scripts/*.py scripts/*.sh 2>/dev/null | grep -v test_; then
+            echo "FAIL: org-specific hardcoding found in production scripts"
+            exit 1
+          fi
+          echo "PASS: no org-specific references"
+
+      - name: Verify script structure
+        run: |
+          for f in build-check.sh merge-results.sh post-fallback-comments.sh run-local.sh; do
+            if [[ ! -f "scripts/$f" ]]; then
+              echo "FAIL: missing scripts/$f"
+              exit 1
+            fi
+          done
+          for f in breakability-prompt.md differential-probe-prompt.md differential-reasoning-prompt.md; do
+            if [[ ! -f "prompts/$f" ]]; then
+              echo "FAIL: missing prompts/$f"
+              exit 1
+            fi
+          done
+          echo "PASS: all expected files present"

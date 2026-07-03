@@ -9,6 +9,8 @@ set -u
 export LC_ALL=en_US.UTF-8
 unset GH_TOKEN
 
+BRK_SCRIPTS="${BREAKABILITY_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+
 _bc_cleanup() {
   if [[ -n "${BC_SCRATCH_DIR:-}" && -n "${REPO_ROOT:-}" && "$BC_SCRATCH_DIR" == "${REPO_ROOT}"/.breakability-scratch* ]]; then
     rm -rf "$BC_SCRATCH_DIR" 2>/dev/null || true
@@ -96,6 +98,7 @@ def in_range(tag):
         return False
     return lo < tv <= hi
 pat = re.compile(r"\b(BREAKING|breaking[\s-]?change|backward[\s-]?incompatible|migration[\s-]?required|removed?|incompatible|default(?:s| value)?\s+(?:change|changed|now)|deprecated|renamed|deleted|no longer|behavior change|API change)\b", re.I)
+neg = re.compile(r"\b(no|not|without|non[-\s]?breaking|does not|did not)\b.{0,80}\b(api change|breaking|incompatible|removed|behavior change)s?\b|\b(api change|breaking change)s?\b.{0,80}\b(no|not|without|none)\b", re.I)
 lines = []
 for rel in releases:
     tag = rel.get("tag_name") or rel.get("name") or ""
@@ -103,7 +106,7 @@ for rel in releases:
     text = "\n".join([str(rel.get("name") or tag), str(rel.get("body") or "")])
     for line in text.splitlines():
         line = line.strip(" -*\t")
-        if line and pat.search(line):
+        if line and pat.search(line) and not neg.search(line):
             lines.append(line[:300])
 # CHANGELOG.md: scope to the section between to and from headers to avoid stale matches.
 if changelog:
@@ -122,7 +125,7 @@ if changelog:
                 capture = any(v == tup(to_v) for v in vs)
         if capture:
             s = line.strip(" -*\t")
-            if s and pat.search(s):
+            if s and pat.search(s) and not neg.search(s):
                 sect.append(s[:300])
         if len(sect) >= 40: break
     lines.extend(sect)
@@ -142,7 +145,7 @@ print("\n".join(f"- {l}" for l in seen[:40]))
 fetch_npm_changelog_text() {
   local _pkg="$1" _from="$2" _to="$3"
   [[ -z "$_pkg" || -z "$_from" || -z "$_to" ]] && return 0
-  python3 "$REPO_ROOT/.github/scripts/npm_changelog.py" fetch \
+  python3 "$BRK_SCRIPTS/npm_changelog.py" fetch \
     --package "$_pkg" --from-version "$_from" --to-version "$_to" 2>/dev/null || true
 }
 
@@ -791,10 +794,6 @@ try:
 except:
     files = []
 
-if not files:
-    print('FALLBACK')
-    sys.exit(0)
-
 # Find all go.mod files to identify module boundaries
 mod_roots = []
 for root, dirs, fnames in os.walk('.'):
@@ -805,7 +804,13 @@ for root, dirs, fnames in os.walk('.'):
 # Sort by depth (deepest first) for longest-prefix matching
 mod_roots.sort(key=lambda x: -x.count('/'))
 if not mod_roots:
-    mod_roots = ['.']
+    print('FALLBACK')
+    sys.exit(0)
+
+if not files:
+    for mod in sorted(mod_roots):
+        print(f'{mod}|./...')
+    sys.exit(0)
 
 # Group import files by their owning module
 module_dirs = {}  # mod_root -> set of relative dirs
@@ -869,10 +874,6 @@ try:
 except:
     files = []
 
-if not files:
-    print('FALLBACK')
-    sys.exit(0)
-
 mod_roots = []
 for root, dirs, fnames in os.walk('.'):
     dirs[:] = [d for d in dirs if d not in ('vendor', '.git', 'node_modules')]
@@ -880,7 +881,13 @@ for root, dirs, fnames in os.walk('.'):
         mod_roots.append(os.path.normpath(root))
 mod_roots.sort(key=lambda x: -x.count('/'))
 if not mod_roots:
-    mod_roots = ['.']
+    print('FALLBACK')
+    sys.exit(0)
+
+if not files:
+    for mod in sorted(mod_roots):
+        print(f'{mod}|./...')
+    sys.exit(0)
 
 module_dirs = {}
 for f in files:
@@ -1018,10 +1025,6 @@ try:
 except:
     files = []
 
-if not files:
-    print('FALLBACK')
-    sys.exit(0)
-
 # Walk from workdir to find go.mod files
 workdir = os.environ.get('_BC_WORKDIR', '.')
 mod_roots = []
@@ -1033,7 +1036,13 @@ for root, dirs, fnames in os.walk(workdir):
 mod_roots = [os.path.normpath(m) for m in mod_roots]
 mod_roots.sort(key=lambda x: -x.count('/'))
 if not mod_roots:
-    mod_roots = ['.']
+    print('FALLBACK')
+    sys.exit(0)
+
+if not files:
+    for mod in sorted(mod_roots):
+        print(f'{mod}|./...')
+    sys.exit(0)
 
 module_dirs = {}
 for f in files:
@@ -1113,6 +1122,10 @@ build_workspace_dep_graph() {
   python3 - "$repo_dir" << 'GRAPHEOF'
 import json, os, glob, sys, re
 repo = sys.argv[1]
+_private_scopes = [s.strip().lower() for s in os.environ.get("BREAKABILITY_PRIVATE_SCOPES", "").split(",") if s.strip()]
+def _is_internal_dep(n):
+    n = (n or "").lower()
+    return any(scope in n for scope in _private_scopes) if _private_scopes else False
 pkgs = {}
 for pj in glob.glob(os.path.join(repo, "**/package.json"), recursive=True):
     if "node_modules" in pj: continue
@@ -1124,7 +1137,7 @@ for pj in glob.glob(os.path.join(repo, "**/package.json"), recursive=True):
     rel_path = os.path.relpath(os.path.dirname(pj), repo)
     deps = data.get("dependencies", {})
     dev_deps = data.get("devDependencies", {})
-    internal_deps = [d for d in deps if "netapp" in d.lower() or "datamigrate" in d.lower()]
+    internal_deps = [d for d in deps if _is_internal_dep(d)]
     nestjs_versions = {k: v for k, v in {**deps, **dev_deps}.items() if k.startswith("@nestjs/")}
     pkgs[name] = {"path": rel_path, "internal_deps": internal_deps, "nestjs_versions": nestjs_versions, "all_dep_names": list(deps.keys())}
 consumers = {}
@@ -1164,8 +1177,8 @@ GRAPHEOF
 build_npm_workspace_libs() {
   local worktree="${1:-.}"
   local timeout_s="${2:-300}"
-  # Topologically order internal libs (name contains netapp/datamigrate) from the
-  # workspace graph, deps first. Emits "relpath\tname" lines.
+  # Topologically order internal libs (matched by private_registries scopes from config)
+  # from the workspace graph, deps first. Emits "relpath\tname" lines.
   local order
   order=$(_BC_WT="$worktree" python3 - << 'TOPOEOF'
 import json, os, sys
@@ -1174,9 +1187,10 @@ try:
 except Exception:
     sys.exit(0)
 pkgs = g.get("packages", {})
+_private_scopes = [s.strip().lower() for s in os.environ.get("BREAKABILITY_PRIVATE_SCOPES", "").split(",") if s.strip()]
 def is_internal(n):
     n = (n or "").lower()
-    return "netapp" in n or "datamigrate" in n
+    return any(scope in n for scope in _private_scopes) if _private_scopes else False
 libs = {n: i for n, i in pkgs.items() if is_internal(n)}
 # Map lower(name)->canonical for resolving internal_deps regardless of case.
 by_lower = {n.lower(): n for n in libs}
@@ -1621,8 +1635,8 @@ if [[ -f "$MAIN_DIR/go.work" ]]; then
     echo "  go baseline cache-clean retry: exit=$main_go_exit"
   fi
   echo "  go baseline (workspace): exit=$main_go_exit"
-elif [[ -f "$MAIN_DIR/go.mod" ]]; then
-  # Check for multi-module layout (multiple go.mod without go.work)
+elif [[ -n "$(find "$MAIN_DIR" -name go.mod -not -path '*/vendor/*' -not -path '*/.git/*' -print -quit 2>/dev/null)" ]]; then
+  # Check for multi-module layout (one or more go.mod without go.work, including repos with no root go.mod)
   _GO_MODULES=$(find "$MAIN_DIR" -name go.mod -not -path '*/vendor/*' -not -path '*/.git/*' 2>/dev/null | sort)
   _MOD_COUNT=$(echo "$_GO_MODULES" | grep -c . || echo 0)
 
@@ -2351,14 +2365,58 @@ except Exception as e:
     sed -n '/^{/,$p' "$CLI_OUTPUT_FILE" > "$CLI_JSON_FILE"
 
     if python3 -c "import json; json.load(open('$CLI_JSON_FILE'))" 2>/dev/null; then
-      DETERMINISTIC=$(python3 -c "
-import json, sys
+      DETERMINISTIC=$(BC_FILES_IMPORTING="$FILES_IMPORTING" python3 -c "
+import json, sys, os, re
 with open('$CLI_JSON_FILE') as f:
     data = json.load(f)
+# ── Reconcile usages with the authoritative module-scoped import scan ──
+# scan_usage_npm/go/pip runs from PKG_DIR, so files_importing is scoped to the
+# bumped module. The bundled CLI computes usages repo-wide, which over-reports
+# callsites in sibling modules that this PR does not affect. A symbol cannot be
+# used without importing the package, so when zero files import it in scope the
+# package is NOT REACHED and there can be no reachable callsites. Clearing the
+# repo-wide usages here keeps deterministic.usages consistent with
+# deterministic.files_importing so the recommendation says 'review the changelog'
+# rather than inventing callsites to verify.
+try:
+    _files_importing = json.loads(os.environ.get('BC_FILES_IMPORTING') or '[]')
+except (ValueError, TypeError):
+    _files_importing = []
+_usages = data.get('usages') or []
+if not isinstance(_usages, list):
+    _usages = []
+# NOT REACHED gate: when the scoped import scan finds zero importing files in the
+# bumped module, the package is not reachable and there can be no reachable callsite.
+# Exception: @types/* packages can contribute ambient/global TypeScript declarations
+# without an explicit import, so zero direct imports is NOT proof of no reachability.
+if not _files_importing and not '$PKG'.startswith('@types/'):
+    _usages = []
+# Ambient @types packages: mark as reached with synthetic entry
+_ambient_types = {'@types/node', '@types/jest', '@types/mocha', '@types/chai'}
+if not _files_importing and '$PKG' in _ambient_types:
+    _files_importing = ['(ambient type declarations)']
+
+neg = re.compile(r'\b(no|not|without|non[-\s]?breaking|does not|did not)\b.{0,80}\b(api change|breaking|incompatible|removed|behavior change)s?\b|\b(api change|breaking change)s?\b.{0,80}\b(no|not|without|none)\b', re.I)
+sig = data.get('changelogSignal')
+if isinstance(sig, dict):
+    bullets = sig.get('bullets') or []
+    clean_bullets = []
+    for b in bullets:
+        if not isinstance(b, str):
+            continue
+        flat = re.sub(r'\s+', ' ', b).strip()
+        if flat and not neg.search(flat):
+            clean_bullets.append(b)
+    sig = dict(sig)
+    sig['bullets'] = clean_bullets
+    if str(sig.get('status') or '').lower() == 'breaking' and not clean_bullets:
+        sig['status'] = 'none'
+        sig['confidence'] = 'low'
+        sig['summary'] = 'No non-negated breaking-change evidence found in the analyzed changelog.'
 result = {
   'api_changes': len(data.get('apiChanges', [])),
   'api_changes_detail': data.get('apiChanges', []),
-  'usages': data.get('usages', []),
+  'usages': _usages,
   'verification': {
     'tier': data.get('verification', {}).get('tier', 0),
     'verified': data.get('verification', {}).get('verified', False),
@@ -2373,7 +2431,7 @@ result = {
   'api_diff_tool': data.get('apiDiffTool', None),
   'security': data.get('securityUpdate', None),
   'changelogText': data.get('changelogText', ''),
-  'changelogSignal': data.get('changelogSignal', None)
+  'changelogSignal': sig
 }
 print(json.dumps(result))
 " 2>/dev/null || echo "{}")
@@ -2399,7 +2457,7 @@ print(json.dumps(result))
   # a false "compatible". A clean compatible result only clears patch/minor bumps;
   # the evidence contract still gates major bumps on semver + changelog.
   if [[ "$ECOSYSTEM" == "npm" && -n "$PKG" && -n "$FROM_VER" && -n "$TO_VER" ]]; then
-    APIDIFF_SCRIPT="$REPO_ROOT/.github/scripts/npm_apidiff.mjs"
+    APIDIFF_SCRIPT="$BRK_SCRIPTS/npm_apidiff.mjs"
     if [[ -f "$APIDIFF_SCRIPT" ]] && command -v node >/dev/null 2>&1; then
       echo "  npm api-diff: $PKG $FROM_VER -> $TO_VER ..."
       APIDIFF_JSON=$(timeout -k 15 240 node "$APIDIFF_SCRIPT" "$PKG" "$FROM_VER" "$TO_VER" 2>/dev/null | tail -1 || echo "")
@@ -2516,14 +2574,18 @@ print(json.dumps(det))
               rewrite_private_deps_to_local "$BUILD_DIR" "$PR_WORKTREE"
               FALLBACK_OUT=$(cd "$BUILD_DIR" && timeout $TIMEOUT npm install --ignore-scripts --legacy-peer-deps 2>&1)
               _FALLBACK_RC=$?
-              BUILD_OUTPUT="$BUILD_OUTPUT
---- npm install fallback ---
-$FALLBACK_OUT"
               EVIDENCE_DEP_COMMAND="npm ci --ignore-scripts; npm install --ignore-scripts --legacy-peer-deps"
               if [[ "$_FALLBACK_RC" -eq 0 ]]; then
                 echo "  npm install fallback: SUCCESS"
                 PR_INSTALL_EXIT=0
                 INSTALL_METHOD="install_fallback"
+                BUILD_OUTPUT="npm ci failed with ${ERROR_CLASS}; npm install fallback succeeded.
+--- npm install fallback (successful) ---
+$FALLBACK_OUT"
+              else
+                BUILD_OUTPUT="$BUILD_OUTPUT
+--- npm install fallback (failed) ---
+$FALLBACK_OUT"
               fi
             elif [[ "$ERROR_CLASS" == "infra_error" ]]; then
               # ── Workspace-local fallback ──
@@ -2534,15 +2596,18 @@ $FALLBACK_OUT"
               rewrite_private_deps_to_local "$BUILD_DIR" "$PR_WORKTREE"
               FALLBACK_OUT=$(cd "$BUILD_DIR" && timeout $TIMEOUT npm install --ignore-scripts --legacy-peer-deps 2>&1)
               _FALLBACK_RC=$?
-              BUILD_OUTPUT="$BUILD_OUTPUT
---- npm install fallback ---
-$FALLBACK_OUT"
               EVIDENCE_DEP_COMMAND="npm ci --ignore-scripts; npm install --ignore-scripts --legacy-peer-deps"
               if [[ "$_FALLBACK_RC" -eq 0 ]]; then
                 echo "  workspace-local fallback: SUCCESS"
                 PR_INSTALL_EXIT=0
                 INSTALL_METHOD="local_fallback"
+                BUILD_OUTPUT="npm ci failed with ${ERROR_CLASS}; workspace-local npm install fallback succeeded.
+--- npm install fallback (successful) ---
+$FALLBACK_OUT"
               else
+                BUILD_OUTPUT="$BUILD_OUTPUT
+--- npm install fallback (failed) ---
+$FALLBACK_OUT"
                 INSTALL_METHOD="infra_error"
                 echo "  INFRA_ERROR: registry auth failure (workspace fallback also failed)"
               fi
@@ -3615,8 +3680,8 @@ except (IOError, OSError, json.JSONDecodeError, ValueError):
 # non-deterministic tsc output can produce "new" errors that are actually pre-existing.
 # We filter known patterns that are infrastructure artifacts, not genuine regressions.
 INFRA_ERROR_PATTERNS = [
-    # Private packages resolved via file: links (no .d.ts)
-    "Cannot find module '@netapp-cloud-datamigrate/",
+    # Private packages resolved via file: links (no .d.ts) — add org-specific
+    # patterns via extra_infra_patterns in breakability-config.yml
     "Cannot find module 'rxjs'",
     "Cannot find module './../../node_modules/",
     # Transitive deps missing when install degrades
@@ -3649,7 +3714,7 @@ if eco == "gomod":
 try:
     with open(f"/tmp/_bc_extra_infra_{pr_num}.txt") as f:
         extra_raw = f.read()
-except:
+except (IOError, OSError):
     extra_raw = ""
 for line in extra_raw.strip().split('\n'):
     line = line.strip()
@@ -4210,6 +4275,13 @@ def _resolve_declared_break_reachability(pr_data, deterministic, eco):
     mr = pr_data.get("merge_risk") or {}
     evidence_axis = (mr.get("evidenceAxis") or "").lower()
     sig = (deterministic or {}).get("changelogSignal") or {}
+    neg = _dbr_re.compile(r"\b(no|not|without|non[-\s]?breaking|does not|did not)\b.{0,80}\b(api change|breaking|incompatible|removed|behavior change)s?\b|\b(api change|breaking change)s?\b.{0,80}\b(no|not|without|none)\b", _dbr_re.I)
+    bullets = [b for b in (sig.get("bullets") or []) if isinstance(b, str) and not neg.search(b)]
+    if str(sig.get("status") or "").lower() == "breaking" and not bullets:
+        mr["tag"] = "Low"
+        mr["reason"] = "changelog only contained negated no-change language; no non-negated breaking-change evidence found"
+        mr["evidenceAxis"] = "changelog negation filtered"
+        return
     # Only the changelog-DECLARED-break High path (merge-risk evidenceAxis
     # "declared breaking change (changelog), behavior unverified") may be downgraded here. A High
     # driven by an independently CONFIRMED signal — "break-reachable API change", "runtime support
@@ -4218,7 +4290,6 @@ def _resolve_declared_break_reachability(pr_data, deterministic, eco):
     is_declared = mr.get("tag") == "High" and "declared breaking change" in evidence_axis
     if not is_declared:
         return
-    bullets = sig.get("bullets") or []
     # STRONG markers only: a genuine break, not a deprecation/additive note. This keeps us from
     # extracting incidental package names (e.g. an EMPTY-type deprecation) as the affected path.
     strong_re = _dbr_re.compile(r"breaking[\s-]?change|no longer|cardinalit|migration[\s-]?required|removed\s|signature|incompatible|default[s]?\s+(?:changed|now|of|to)", _dbr_re.I)

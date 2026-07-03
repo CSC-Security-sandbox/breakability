@@ -325,7 +325,7 @@ class TestUncertain(unittest.TestCase):
 
     def test_empty_pr_record_does_not_crash(self):
         """An empty (but valid) dict PR record should yield UNCERTAIN, not an exception."""
-        result = analyze({})
+        result = analyze({}, reachability_evidence=_reach("UNCERTAIN"))
         self.assertEqual(result["impact"], UNCERTAIN)
 
     def test_missing_verdict_in_reach_evidence_yields_uncertain(self):

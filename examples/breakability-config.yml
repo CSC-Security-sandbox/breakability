@@ -1,55 +1,48 @@
-# Breakability Configuration (Optional)
+# Breakability Configuration
 #
 # Place this file at .github/breakability-config.yml in your repo.
-# Only needed if you have private registries or custom build commands.
+# Only needed if you have private registries or custom infra patterns.
 # If this file doesn't exist, defaults work for public dependencies.
 
 # ─────────────────────────────────────────────────────────
-# Private Registry Authentication
+# Private npm Registries
 # ─────────────────────────────────────────────────────────
-# registries:
-#   npm:
+# The breakability tool needs to know which npm scopes are private
+# so it can skip public-registry API diff and use the right .npmrc.
+#
+# private_registries:
+#   - scope: "@your-org"
 #     registry_url: "https://npm.pkg.github.com"
-#     scope: "@your-org"
-#     # Token read from env var NPM_TOKEN (set as repo secret)
-#     token_env: "NPM_TOKEN"
-#   go:
-#     goprivate: "github.com/your-org/*"
-#     # Token read from env var GOPRIVATE_TOKEN
-#     token_env: "GOPRIVATE_TOKEN"
-#   python:
-#     index_url: "https://pypi.your-org.com/simple/"
-#     token_env: "PIP_TOKEN"
+#     auth_token_env: "GH_PACKAGES_TOKEN"
+#   - scope: "@your-internal"
+#     registry_url: "https://pkgs.dev.azure.com/your-org/_packaging/feed/npm/registry/"
+#     auth_token_env: "AZURE_ARTIFACTS_TOKEN"
 
 # ─────────────────────────────────────────────────────────
-# Build Overrides
+# Private Go Modules
 # ─────────────────────────────────────────────────────────
-# build_commands:
-#   # Override default build detection per directory
-#   "services/api":
-#     command: "npm run build:api"
-#     install: "npm ci --ignore-scripts"
-#   "modules/go-lib":
-#     command: "go build -tags=integration ./..."
+# go:
+#   goprivate: "github.com/your-org/*"
+#   token_env: "GOPRIVATE_TOKEN"
+
+# ─────────────────────────────────────────────────────────
+# Extra Infra Error Patterns
+# ─────────────────────────────────────────────────────────
+# Patterns that indicate infrastructure failures (not real build breaks).
+# These are treated as "skip" rather than "fail".
+#
+# extra_infra_patterns:
+#   - "Cannot find module '@your-org/"
+#   - "ETARGET No matching version found"
+#   - "your-private-registry.com: connection refused"
 
 # ─────────────────────────────────────────────────────────
 # Ignore Patterns
 # ─────────────────────────────────────────────────────────
 # ignore:
-#   # Skip these directories during analysis
 #   directories:
 #     - "legacy/"
 #     - "deprecated/"
-#   # Skip PRs updating these packages
 #   packages:
 #     - "@types/jest"
 #     - "eslint-plugin-*"
-
-# ─────────────────────────────────────────────────────────
-# Notification Settings
-# ─────────────────────────────────────────────────────────
-# notifications:
-#   # Slack webhook for summary (future feature)
-#   slack_webhook_env: "SLACK_WEBHOOK_URL"
-#   # Only notify on BUILD_FAILS
-#   on_fail_only: true

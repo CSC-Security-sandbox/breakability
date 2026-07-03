@@ -17,7 +17,7 @@ local Copilot / Cursor-in-CI / replay:
   BRK_AGENT_MODE   = live (default) | replay | record
   BRK_AGENT_CMD    = command template (default ``agent -p --force --model {model}``)
   BRK_AGENT_MODEL  = model name (default ``claude-4-sonnet``)
-  BRK_CASSETTE_DIR = cassette dir (default ``.github/breakability/harness/cassettes``)
+  BRK_CASSETTE_DIR = cassette dir (default ``harness/cassettes`` relative to repo root)
 
 Local validation with GitHub Copilot CLI (same model class, no Cursor/key) -- the
 pipeline is model-agnostic, so only env changes:
@@ -49,10 +49,18 @@ import subprocess
 from dataclasses import dataclass
 from typing import Optional
 
-DEFAULT_MODEL = "claude-4-sonnet"
+DEFAULT_MODEL = "claude-4.5-sonnet"
 DEFAULT_CMD_TEMPLATE = "agent -p --force --model {model}"
-DEFAULT_CASSETTE_DIR = ".github/breakability/harness/cassettes"
-DEFAULT_TIMEOUT = 300
+DEFAULT_CASSETTE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "harness", "cassettes")
+DEFAULT_TIMEOUT = 600
+
+_CURSOR_TO_ANTHROPIC: dict[str, str] = {
+    "claude-4.5-sonnet": "claude-sonnet-4-5-20250514",
+    "claude-4-sonnet": "claude-sonnet-4-5-20250514",
+    "claude-sonnet-4.5": "claude-sonnet-4-5-20250514",
+    "claude-4.6-sonnet": "claude-sonnet-4-6",
+    "claude-4.8-opus": "claude-opus-4-8",
+}
 
 MODE_LIVE = "live"
 MODE_REPLAY = "replay"
@@ -177,14 +185,106 @@ class Backend:
                 argv = argv + ["-p"]
         return argv
 
+    def _run_anthropic_sdk(self, prompt: str) -> str:
+        """Fallback: call Anthropic API directly when agent CLI is unavailable."""
+        import sys
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        if not api_key:
+            api_key = os.environ.get("CURSOR_API_KEY", "").strip()
+            if api_key:
+                print("[ai_backend] ANTHROPIC_API_KEY not set, using CURSOR_API_KEY for SDK fallback", file=sys.stderr)
+        if not api_key:
+            print("[ai_backend] Neither ANTHROPIC_API_KEY nor CURSOR_API_KEY set — skipping SDK fallback", file=sys.stderr)
+            return ""
+        try:
+            import anthropic
+        except ImportError:
+            print("[ai_backend] anthropic SDK not importable — pip install anthropic", file=sys.stderr)
+            return ""
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+            api_model = _CURSOR_TO_ANTHROPIC.get(self.model, self.model)
+            response = client.messages.create(
+                model=api_model,
+                max_tokens=16384,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return response.content[0].text.strip() if response.content else ""
+        except anthropic.AuthenticationError as e:
+            print(f"[ai_backend] API key invalid or missing: {e}", file=sys.stderr)
+            return ""
+        except anthropic.APIError as e:
+            print(f"[ai_backend] API error: {e.status_code} {e.message}", file=sys.stderr)
+            return ""
+        except Exception as e:
+            print(f"[ai_backend] Unexpected error: {type(e).__name__}: {e}", file=sys.stderr)
+            return ""
+
+    def preflight_check(self) -> tuple:
+        """Quick connectivity check. Returns (ok: bool, error: str).
+
+        Tests the agent CLI with a trivial prompt to verify end-to-end auth.
+        Falls back to Anthropic SDK validation only if ANTHROPIC_API_KEY is set.
+        """
+        import sys
+        cursor_key = os.environ.get("CURSOR_API_KEY", "").strip()
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        if not cursor_key and not anthropic_key:
+            return (False, "API key not set (neither CURSOR_API_KEY nor ANTHROPIC_API_KEY)")
+
+        if cursor_key:
+            argv = self.build_argv()
+            test_prompt = "Respond with exactly: OK"
+            try:
+                cp = subprocess.run(
+                    argv, input=test_prompt, capture_output=True, text=True, timeout=30,
+                )
+                out = (cp.stdout or "").strip()
+                if out:
+                    print(f"[ai_backend] preflight OK via agent CLI ({len(out)} chars)", file=sys.stderr)
+                    return (True, "")
+                err = (cp.stderr or "").strip()
+                return (False, f"agent CLI returned empty (exit={cp.returncode}, stderr={err[:200]})")
+            except subprocess.TimeoutExpired:
+                return (False, "agent CLI timed out after 30s")
+            except OSError as e:
+                if anthropic_key:
+                    print(f"[ai_backend] agent CLI not found ({e}), trying SDK", file=sys.stderr)
+                else:
+                    return (False, f"agent CLI not found: {e}")
+
+        try:
+            import anthropic
+        except ImportError:
+            return (False, "anthropic SDK not importable and agent CLI unavailable")
+        try:
+            client = anthropic.Anthropic(api_key=anthropic_key)
+            client.models.list(limit=1)
+            return (True, "")
+        except anthropic.AuthenticationError:
+            return (False, "ANTHROPIC_API_KEY invalid or unauthorized")
+        except anthropic.APIError as e:
+            return (False, f"API error: {getattr(e, 'status_code', '?')} {getattr(e, 'message', str(e))}")
+        except Exception as e:
+            return (False, f"Unexpected error: {type(e).__name__}: {e}")
+
     def _run_live(self, prompt: str, cwd: Optional[str], env: Optional[dict]) -> str:
+        import sys
         argv = self.build_argv()
         try:
-            cp = subprocess.run(argv + [prompt], cwd=cwd, env=env,
+            cp = subprocess.run(argv, input=prompt, cwd=cwd, env=env,
                                 timeout=self.timeout, capture_output=True, text=True)
-        except (subprocess.TimeoutExpired, OSError):
-            return ""
-        return (cp.stdout or "").strip()
+            result = (cp.stdout or "").strip()
+            if not result:
+                err_snippet = (cp.stderr or "")[-300:].strip()
+                print(f"[ai_backend] agent CLI empty output (exit={cp.returncode}, stderr=...{err_snippet})", file=sys.stderr)
+            if result:
+                return result
+        except subprocess.TimeoutExpired:
+            print(f"[ai_backend] agent CLI timed out after {self.timeout}s", file=sys.stderr)
+        except OSError as e:
+            print(f"[ai_backend] agent CLI not found: {e}", file=sys.stderr)
+        return self._run_anthropic_sdk(prompt)
 
     def invoke(self, prompt: str, *, namespace: str, key: Optional[str] = None,
                cwd: Optional[str] = None, env: Optional[dict] = None) -> str:

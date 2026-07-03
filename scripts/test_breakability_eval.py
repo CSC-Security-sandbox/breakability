@@ -49,7 +49,6 @@ def test_corpus_case_validation():
     valid, msg = case.validate()
     assert not valid, "Should reject invalid expected_label"
     
-    return True
 
 
 def test_corpus_validator():
@@ -80,7 +79,6 @@ def test_corpus_validator():
     valid, errors = CorpusValidator.validate_corpus(corpus)
     assert valid, f"Should accept valid corpus: {errors}"
     
-    return True
 
 
 def test_scorer_metrics():
@@ -135,7 +133,6 @@ def test_scorer_metrics():
     assert result["errors"]["false_green_count"] == 0, "Should have no false greens"
     assert result["errors"]["false_block_count"] == 0, "Should have no false blocks"
     
-    return True
 
 
 def test_false_green_detection():
@@ -175,7 +172,6 @@ def test_false_green_detection():
     assert result["per_case"][0]["error"] == "false_green"
     assert result["per_case"][1]["error"] == "false_green"
     
-    return True
 
 
 def test_false_block_detection():
@@ -204,7 +200,6 @@ def test_false_block_detection():
     assert result["errors"]["false_block_count"] == 1, "Should detect false-block"
     assert result["per_case"][0]["error"] == "false_block"
     
-    return True
 
 
 def test_false_none_detection():
@@ -244,7 +239,6 @@ def test_false_none_detection():
     assert result["per_case"][0]["error"] == "false_none"
     assert result["per_case"][1]["error"] == "false_none"
     
-    return True
 
 
 def test_false_safe_rate_combined():
@@ -304,7 +298,6 @@ def test_false_safe_rate_combined():
     assert result["errors"]["false_safe_count"] == 2, "false_safe should be sum of false_green + false_none"
     assert abs(result["errors"]["false_safe_pct"] - 50.0) < 0.1, f"false_safe_pct should be 50%, got {result['errors']['false_safe_pct']}"
     
-    return True
 
 
 def test_false_rates_percentages():
@@ -370,7 +363,6 @@ def test_false_rates_percentages():
     assert abs(result["errors"]["false_safe_pct"] - 50.0) < 0.1
     assert abs(result["errors"]["false_block_pct"] - 25.0) < 0.1
     
-    return True
 
 
 
@@ -434,7 +426,6 @@ def test_mixed_predictions():
     assert result["metrics"]["review_pct"] == 50
     assert result["metrics"]["fix_pct"] == 25
     
-    return True
 
 
 def test_human_review_pct():
@@ -485,7 +476,6 @@ def test_human_review_pct():
     assert abs(result["metrics"]["human_review_pct"] - 66.67) < 0.1, \
         f"human_review_pct should be ~66.7%, got {result['metrics']['human_review_pct']}"
     
-    return True
 
 
 def test_false_green_rate():
@@ -524,7 +514,6 @@ def test_false_green_rate():
     assert result["errors"]["false_green_rate"] == 100.0, \
         f"false_green_rate should be 100%, got {result['errors']['false_green_rate']}"
     
-    return True
 
 
 def test_false_block_rate():
@@ -563,7 +552,6 @@ def test_false_block_rate():
     assert result["errors"]["false_block_rate"] == 100.0, \
         f"false_block_rate should be 100%, got {result['errors']['false_block_rate']}"
     
-    return True
 
 
 def test_gates_pass_all():
@@ -602,7 +590,6 @@ def test_gates_pass_all():
     assert result["gates"]["zero_false_green"] == True, "Should pass zero_false_green gate"
     assert result["gates"]["pass"] == True, "Overall gates should pass"
     
-    return True
 
 
 def test_gates_fail_auto_clear():
@@ -651,7 +638,6 @@ def test_gates_fail_auto_clear():
     assert result["gates"]["auto_clear_gte_85pct"] == False, "Should fail auto_clear gate"
     assert result["gates"]["pass"] == False, "Overall gates should fail"
     
-    return True
 
 
 def test_gates_fail_false_green():
@@ -689,7 +675,6 @@ def test_gates_fail_false_green():
     assert result["gates"]["zero_false_green"] == False, "Should fail zero_false_green gate"
     assert result["gates"]["pass"] == False, "Overall gates should fail"
     
-    return True
 
 
 def test_report_shape():
@@ -740,67 +725,6 @@ def test_report_shape():
     assert "expected" in result["per_case"][0]
     assert "predicted" in result["per_case"][0]
     assert "error" in result["per_case"][0]
-    
-    return True
-
-    """Test mixed prediction scenario."""
-    cases = [
-        CorpusCase({
-            "pr_id": "18",
-            "ecosystem": "go",
-            "package": "github.com/example/api",
-            "from_version": "1.0.0",
-            "to_version": "2.0.0",
-            "expected_label": "true_fix",
-            "expected_evidence_class": "api_break",
-        }),
-        CorpusCase({
-            "pr_id": "2",
-            "ecosystem": "npm",
-            "package": "lodash",
-            "from_version": "4.17.0",
-            "to_version": "4.18.0",
-            "expected_label": "true_review",
-            "expected_evidence_class": "supply_chain",
-        }),
-        CorpusCase({
-            "pr_id": "28",
-            "ecosystem": "go",
-            "package": "github.com/security/fix",
-            "from_version": "1.0.0",
-            "to_version": "1.0.1",
-            "expected_label": "true_safe",
-            "expected_evidence_class": "none",
-        }),
-        CorpusCase({
-            "pr_id": "16",
-            "ecosystem": "python",
-            "package": "requests",
-            "from_version": "2.27.0",
-            "to_version": "2.28.0",
-            "expected_label": "true_review",
-            "expected_evidence_class": "test_coverage",
-        }),
-    ]
-    
-    # One false-green, one false-block, one correct
-    predictions = {
-        "18": "fix",           # correct
-        "2": "auto_clear",     # FALSE GREEN (should be review)
-        "28": "review",        # FALSE BLOCK (should be auto_clear)
-        "16": "review",        # correct
-    }
-    
-    scorer = Scorer(cases)
-    result = scorer.score(predictions)
-    
-    assert result["errors"]["false_green_count"] == 1
-    assert result["errors"]["false_block_count"] == 1
-    assert result["metrics"]["auto_clear_pct"] == 25, f"auto_clear_pct should be 25%, got {result['metrics']['auto_clear_pct']}"
-    assert result["metrics"]["review_pct"] == 50
-    assert result["metrics"]["fix_pct"] == 25
-    
-    return True
 
 
 def test_load_corpus_from_file():
@@ -832,7 +756,6 @@ def test_load_corpus_from_file():
     finally:
         os.unlink(temp_file)
     
-    return True
 
 
 def test_load_predictions_from_file():
@@ -854,7 +777,6 @@ def test_load_predictions_from_file():
     finally:
         os.unlink(temp_file)
     
-    return True
 
 
 def main():
@@ -882,11 +804,8 @@ def main():
     fails = 0
     for name, test_fn in tests:
         try:
-            if test_fn():
-                print(f"✓ {name}")
-            else:
-                print(f"✗ {name}")
-                fails += 1
+            test_fn()
+            print(f"✓ {name}")
         except AssertionError as e:
             print(f"✗ {name}: {e}")
             fails += 1

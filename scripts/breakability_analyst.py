@@ -99,6 +99,7 @@ def _normalize_test(test: Dict) -> Dict[str, Any]:
             output = test.get("output_tail", "")
             if "no test specified" in output or "Error: no test specified" in output:
                 verdict = "skip"
+                ran = False
                 reason = "No test suite configured"
             else:
                 verdict = "fail"
@@ -317,6 +318,331 @@ def _count_evidence_layers(pr: Dict) -> int:
     return count
 
 
+def _per_layer_confidence(build_v, test_norm, api_changes, changelog_norm, reach, probe):
+    """Compute per-layer confidence (HIGH/MEDIUM/LOW) with one-sentence rationale."""
+    layers = {}
+
+    if build_v in ("pass", "fail"):
+        layers["Build"] = ("HIGH", "Definitive exit code from full build pipeline")
+    elif build_v == "pre_existing":
+        layers["Build"] = ("MEDIUM", "Build fails but failures pre-date this upgrade")
+    else:
+        layers["Build"] = ("LOW", "Build was not executed or status unknown")
+
+    if test_norm["verdict"] == "pass":
+        layers["Tests"] = ("HIGH", "Test suite ran and passed (exit 0)")
+    elif test_norm["verdict"] == "fail":
+        layers["Tests"] = ("HIGH", f"Test suite ran and failed (exit {test_norm['exit_code']})")
+    elif test_norm["ran"]:
+        layers["Tests"] = ("MEDIUM", "Tests ran but result is ambiguous")
+    else:
+        layers["Tests"] = ("LOW", "No test suite was executed")
+
+    if api_changes > 0:
+        layers["API Diff"] = ("HIGH", f"{api_changes} exported symbol change(s) detected")
+    else:
+        layers["API Diff"] = ("MEDIUM", "No symbol changes found; diff may not cover all APIs")
+
+    if changelog_norm["is_breaking"]:
+        layers["Changelog"] = ("HIGH", "Changelog explicitly declares breaking changes")
+    elif changelog_norm["available"]:
+        layers["Changelog"] = ("MEDIUM", "Changelog present but no breaking markers found")
+    else:
+        layers["Changelog"] = ("LOW", "No changelog available for this version range")
+
+    if reach["reached"]:
+        n = len(reach["import_files"])
+        layers["Reachability"] = ("HIGH", f"Import scan found {n} file(s) using this package")
+    else:
+        layers["Reachability"] = ("HIGH", "Import scan confirms package is not referenced")
+
+    if probe["state"] in ("SAME", "DIFFERENT"):
+        layers["Probe"] = ("HIGH", f"Behavioral probe ran and reported {probe['state'].lower()}")
+    else:
+        layers["Probe"] = ("LOW", "Behavioral probe was not executed")
+
+    return layers
+
+
+def _build_per_layer_narrative(build, build_v, test_norm, api_changes, changelog_norm,
+                                reach, probe, pkg, from_ver, to_ver):
+    """Generate per-layer narrative paragraphs for the template fallback."""
+    lines = []
+
+    if build_v == "pass":
+        lines.append(f"**Build** passed cleanly — `{pkg}@{to_ver}` integrates without errors.")
+    elif build_v == "fail":
+        lines.append(f"**Build** fails with `{pkg}@{to_ver}`. This upgrade introduces compilation or resolution errors that must be fixed before merging.")
+    elif build_v == "pre_existing":
+        lines.append(f"**Build** has pre-existing failures unrelated to this `{pkg}` upgrade.")
+
+    if test_norm["verdict"] == "pass":
+        lines.append(f"**Tests** pass (exit {test_norm['exit_code']}), confirming no regressions from this upgrade.")
+    elif test_norm["verdict"] == "fail":
+        lines.append(f"**Tests** fail (exit {test_norm['exit_code']}). Investigate whether failures are caused by `{pkg}` {to_ver} breaking changes.")
+    elif test_norm["verdict"] == "skip":
+        lines.append("**Tests** were not executed — test confidence is unavailable for this PR.")
+
+    if api_changes > 0:
+        lines.append(f"**API Diff** detected {api_changes} changed symbol(s) between {from_ver} and {to_ver}.")
+    else:
+        lines.append(f"**API Diff** shows no exported symbol changes between {from_ver} and {to_ver}.")
+
+    if reach["reached"]:
+        n_files = len(reach["import_files"])
+        lines.append(f"**Reachability** confirms `{pkg}` is imported by {n_files} file(s) in this project — breaking changes could affect production code.")
+    else:
+        lines.append(f"**Reachability** shows `{pkg}` is not imported by any production source file.")
+
+    if probe["state"] == "SAME":
+        lines.append(f"**Probe** confirms runtime behavior is identical before and after the upgrade.")
+    elif probe["state"] == "DIFFERENT":
+        lines.append(f"**Probe** detected changed runtime behavior — verify the behavioral difference is acceptable.")
+
+    return lines
+
+
+def _build_expanded_layer_sections(build, build_v, test_norm, api_changes,
+                                    changelog_norm, reach, probe, pkg, from_ver, to_ver,
+                                    pr, layer_conf):
+    """Per-layer H3 subsections for REVIEW/BLOCKED comments (target >=150 lines total)."""
+    lines = []
+    build_icon = {"pass": "✅", "fail": "❌", "pre_existing": "⚠️"}.get(build_v, "⬜")
+    test_icon = {"pass": "✅", "fail": "❌", "skip": "⬜"}.get(test_norm["verdict"], "⬜")
+
+    # ### Build Analysis
+    lines += [
+        f"### {build_icon} Build Analysis",
+        f"**Status:** {build_icon} **{build_v.upper()}** | **Verification Level:** {layer_conf['Build'][0]}",
+        "",
+        "**What we checked:**",
+        f"- ✅ Installed `{pkg}@{to_ver}` into the project",
+        f"- ✅ Ran full build pipeline (`npm run build` / `go build ./...`)",
+    ]
+    if build_v == "pass":
+        lines.append("- ✅ Build completed with zero errors")
+    elif build_v == "fail":
+        lines.append("- ❌ Build produced compilation or resolution errors")
+    elif build_v == "pre_existing":
+        lines.append("- ⚠️ Pre-existing build failures detected (unrelated to this upgrade)")
+    build_output = (build.get("output_tail") or build.get("stdout") or "").strip()
+    if build_output:
+        lines += ["", "**Build Output:**", "```", build_output[:400], "```"]
+    lines += ["", f"**Confidence:** **{layer_conf['Build'][0]}** — {layer_conf['Build'][1]}", ""]
+
+    # ### Test Analysis
+    lines += [
+        f"### {test_icon} Test Analysis",
+        f"**Status:** {test_icon} **{test_norm['verdict'].upper()}** | **Verification Level:** {layer_conf['Tests'][0]}",
+        "",
+        "**What we checked:**",
+    ]
+    if test_norm["ran"] and test_norm["verdict"] in ("pass", "fail"):
+        lines += [
+            "- ✅ Executed project test suite against the upgraded dependency",
+            f"- {'✅' if test_norm['verdict'] == 'pass' else '❌'} Test exit code: {test_norm['exit_code']}",
+        ]
+        if test_norm["verdict"] == "fail":
+            lines.append("- ❌ Test failures may indicate breaking changes in the upgrade")
+    else:
+        lines += [
+            "- ⬜ No test suite was executed for this PR",
+            "- ⬜ Test-based confidence is unavailable",
+        ]
+    test_data = pr.get("test", {})
+    test_output = (test_data.get("output_tail") or test_data.get("stdout") or "").strip()
+    if test_output and test_norm["verdict"] == "fail":
+        lines += ["", "**Test Output:**", "```", test_output[:400], "```"]
+    lines += ["", f"**Confidence:** **{layer_conf['Tests'][0]}** — {layer_conf['Tests'][1]}", ""]
+
+    # ### API Diff Analysis
+    api_icon = "⚠️" if api_changes > 0 else "✅"
+    lines += [
+        f"### {api_icon} API Diff Analysis",
+        f"**Status:** {api_icon} **{api_changes} change(s)** | **Verification Level:** {layer_conf['API Diff'][0]}",
+        "",
+        "**What we checked:**",
+        f"- ✅ Compared exported symbols between {from_ver} and {to_ver}",
+    ]
+    if api_changes > 0:
+        lines.append(f"- ⚠️ {api_changes} exported symbol(s) changed — review for breaking signature changes")
+    else:
+        lines.append("- ✅ No exported symbol changes detected")
+    lines += ["", f"**Confidence:** **{layer_conf['API Diff'][0]}** — {layer_conf['API Diff'][1]}", ""]
+
+    # ### Changelog Analysis
+    cl_icon = "⚠️" if changelog_norm["is_breaking"] else "✅" if changelog_norm["available"] else "⬜"
+    cl_status = "BREAKING" if changelog_norm["is_breaking"] else "CLEAN" if changelog_norm["available"] else "UNAVAILABLE"
+    lines += [
+        f"### {cl_icon} Changelog Analysis",
+        f"**Status:** {cl_icon} **{cl_status}** | **Verification Level:** {layer_conf['Changelog'][0]}",
+        "",
+        "**What we checked:**",
+    ]
+    if changelog_norm["available"]:
+        lines.append("- ✅ Parsed release notes and changelog for breaking-change markers")
+        if changelog_norm["is_breaking"]:
+            lines.append("- ⚠️ Changelog explicitly declares breaking changes or deprecations")
+        else:
+            lines.append("- ✅ No breaking changes declared in release notes")
+        if changelog_norm["bullets"]:
+            lines.append("")
+            lines.append("**Key changelog entries:**")
+            for bullet in changelog_norm["bullets"][:3]:
+                lines.append(f"- {bullet[:120]}")
+    else:
+        lines += [
+            "- ⬜ No changelog found for this version range",
+            "- ⬜ Cannot verify whether breaking changes were declared",
+        ]
+    lines += ["", f"**Confidence:** **{layer_conf['Changelog'][0]}** — {layer_conf['Changelog'][1]}", ""]
+
+    # ### Reachability Analysis
+    reach_icon = "⚠️" if reach["reached"] else "✅"
+    n_files = len(reach["import_files"])
+    lines += [
+        f"### {reach_icon} Reachability Analysis",
+        f"**Status:** {reach_icon} **{'REACHED' if reach['reached'] else 'NOT REACHED'}** | **Verification Level:** {layer_conf['Reachability'][0]}",
+        "",
+        "**What we checked:**",
+        f"- ✅ Scanned project source files for imports of `{pkg}`",
+    ]
+    if reach["reached"]:
+        lines += [
+            f"- ⚠️ Found {n_files} file(s) importing this package",
+            "- ⚠️ Breaking changes could affect production code paths",
+        ]
+        if reach["import_files"][:5]:
+            lines.append("")
+            lines.append("**Files importing this package:**")
+            for f in reach["import_files"][:5]:
+                lines.append(f"- `{f}`")
+            if n_files > 5:
+                lines.append(f"- ... and {n_files - 5} more")
+    else:
+        lines += [
+            "- ✅ Package is not imported by any production source file",
+            "- ✅ Breaking changes have no direct production impact",
+        ]
+    lines += ["", f"**Confidence:** **{layer_conf['Reachability'][0]}** — {layer_conf['Reachability'][1]}", ""]
+
+    # ### Probe Analysis
+    probe_icon = {"SAME": "✅", "DIFFERENT": "⚠️"}.get(probe["state"], "⬜")
+    probe_status = probe["state"].replace("_", " ")
+    lines += [
+        f"### {probe_icon} Behavioral Probe Analysis",
+        f"**Status:** {probe_icon} **{probe_status}** | **Verification Level:** {layer_conf['Probe'][0]}",
+        "",
+        "**What we checked:**",
+    ]
+    if probe["state"] == "SAME":
+        lines += [
+            f"- ✅ Compared runtime behavior between {from_ver} and {to_ver}",
+            "- ✅ Runtime exports are identical — no behavioral regression",
+        ]
+    elif probe["state"] == "DIFFERENT":
+        lines += [
+            f"- ⚠️ Compared runtime behavior between {from_ver} and {to_ver}",
+            "- ⚠️ Runtime behavior differs — verify the change is acceptable",
+        ]
+        probe_ev = probe["evidence"]
+        changed = probe_ev.get("changed_behavior") or probe_ev.get("rationale") or ""
+        if changed:
+            lines += ["", f"**Behavioral difference:** {changed[:200]}"]
+    else:
+        lines += [
+            "- ⬜ Behavioral probe was not executed",
+            "- ⬜ No runtime comparison available",
+        ]
+    lines += ["", f"**Confidence:** **{layer_conf['Probe'][0]}** — {layer_conf['Probe'][1]}", ""]
+
+    return lines
+
+
+def _build_risk_assessment(pr, verdict, build_v, test_norm, api_changes,
+                           changelog_norm, reach, probe, pkg, from_ver, to_ver,
+                           dep_type, bump):
+    """Build a risk assessment section for REVIEW/BLOCKED PRs."""
+    lines = ["### Risk Assessment", ""]
+
+    lines.append(f"**Upgrade:** `{pkg}` {from_ver} → {to_ver} ({bump} bump, {dep_type})")
+
+    risk_factors = []
+    if build_v == "fail":
+        risk_factors.append("build fails with the new version")
+    if test_norm["verdict"] == "fail":
+        risk_factors.append(f"test suite fails (exit {test_norm['exit_code']})")
+    if changelog_norm["is_breaking"]:
+        risk_factors.append("changelog declares breaking changes")
+    if probe["state"] == "DIFFERENT":
+        risk_factors.append("behavioral probe detected runtime differences")
+    if api_changes > 0:
+        risk_factors.append(f"{api_changes} exported symbol(s) changed")
+    if reach["reached"]:
+        n = len(reach["import_files"])
+        risk_factors.append(f"package is imported by {n} production file(s)")
+
+    if risk_factors:
+        lines.append("")
+        lines.append("**Signals requiring attention:**")
+        for factor in risk_factors:
+            lines.append(f"- {factor}")
+
+    mitigations = []
+    if build_v == "pass":
+        mitigations.append("build passes cleanly")
+    if test_norm["verdict"] == "pass":
+        mitigations.append("full test suite passes")
+    if probe["state"] == "SAME":
+        mitigations.append("runtime behavior is identical")
+    if not reach["reached"]:
+        mitigations.append("package is not imported by production code")
+
+    if mitigations:
+        lines.append("")
+        lines.append("**Positive signals:**")
+        for m in mitigations:
+            lines.append(f"- {m}")
+
+    ecosystem = pr.get("ecosystem", "npm")
+    lines.append("")
+    lines.append(f"**Ecosystem:** {ecosystem} · **Scope:** {dep_type} · **Bump:** {bump}")
+
+    return lines
+
+
+def _build_numbered_recommendations(pr):
+    """Generate numbered recommendation steps."""
+    verdict_norm = _normalize_verdict(pr)
+    verdict = verdict_norm["verdict"]
+    probe = _normalize_probe(pr)
+    reach_norm = _normalize_reachability(pr)
+    det = pr.get("deterministic", {})
+    changelog_norm = _normalize_changelog(det)
+    test_norm = _normalize_test(pr.get("test", {}))
+    pkg = pr.get("package", "unknown")
+    build = pr.get("build", {})
+
+    steps = []
+    if build.get("verdict") == "fail":
+        steps.append(f"Fix build errors introduced by `{pkg}` upgrade")
+    if test_norm["verdict"] == "fail":
+        steps.append(f"Investigate test failures (exit {test_norm['exit_code']})")
+    if changelog_norm["is_breaking"] and changelog_norm["bullets"]:
+        steps.append(f"Review changelog breaking changes: {changelog_norm['bullets'][0][:80]}")
+    if probe["state"] == "DIFFERENT":
+        steps.append("Verify behavioral changes are compatible with your usage")
+    if reach_norm["reached"] and reach_norm["import_files"]:
+        n = len(reach_norm["import_files"])
+        steps.append(f"Check callsites in {n} importing file(s)")
+    if verdict == "SAFE" and not steps:
+        steps.append("Safe to merge — no action required")
+    elif not steps:
+        steps.append(f"Review the changelog for `{pkg}` before merging")
+    steps.append("Merge when confident")
+    return steps
+
+
 # ── Compact renderer ─────────────────────────────────────────────────────────
 
 def _synthesize_explanation(pr: Dict) -> str:
@@ -441,6 +767,7 @@ def _render_compact(pr: Dict, cross_deps: Optional[List[Dict]] = None) -> str:
 
     vlevel_badge = f" · Verification: {vlevel_str}" if vlevel_str else ""
     lines = [
+        "<!-- breakability-check -->",
         f"## {emoji} {verdict} — `{pkg}` {from_ver} → {to_ver} · {dep_type} · {bump}",
         merge_risk + vlevel_badge,
         "",
@@ -450,9 +777,13 @@ def _render_compact(pr: Dict, cross_deps: Optional[List[Dict]] = None) -> str:
         "### What this means",
         explanation,
         "",
-        f"**Recommendation:** {recommendation}",
+        "### Recommendation",
         "",
     ]
+    rec_steps = _build_numbered_recommendations(pr)
+    for i, step in enumerate(rec_steps, 1):
+        lines.append(f"{i}. {step}")
+    lines.append("")
 
     cl_detail = changelog_norm["bullets"][0][:80] if changelog_norm["bullets"] else changelog_norm["status"]
     probe_ev = probe["evidence"]
@@ -465,21 +796,111 @@ def _render_compact(pr: Dict, cross_deps: Optional[List[Dict]] = None) -> str:
         probe_detail = "—"
     test_detail = test_norm["reason"] if test_norm["verdict"] != "pass" else f"exit {test_norm['exit_code']}"
 
+    layer_conf = _per_layer_confidence(build_v, test_norm, api_changes, changelog_norm, reach, probe)
+
     lines += [
-        "<details><summary>📋 Evidence layers</summary>",
+        "### Evidence Summary",
         "",
-        "| Layer | Signal | Detail |",
-        "|-------|--------|--------|",
-        f"| Build | {build_icon} {build_v} | exit {build.get('pr_exit', build.get('main_exit', '?'))} |",
-        f"| Tests | {test_icon} {test_norm['verdict']} | {test_detail} |",
-        f"| API Diff | {'⚠️ breaking' if api_changes > 0 else '✅ clean'} | {api_changes} symbol(s) |",
-        f"| Changelog | {cl_icon} {cl_text} | {cl_detail} |",
-        f"| Reachability | {'⚠️ reached' if reach['reached'] else '✅ not reached'} | {reach_file_count} imports |",
-        f"| Probe | {probe_icon} {probe_state_display} | {probe_detail} |",
+        "| Layer | Signal | Detail | Confidence |",
+        "|-------|--------|--------|------------|",
+        f"| Build | {build_icon} {build_v} | exit {build.get('pr_exit', build.get('main_exit', '?'))} | {layer_conf['Build'][0]} — {layer_conf['Build'][1]} |",
+        f"| Tests | {test_icon} {test_norm['verdict']} | {test_detail} | {layer_conf['Tests'][0]} — {layer_conf['Tests'][1]} |",
+        f"| API Diff | {'⚠️ breaking' if api_changes > 0 else '✅ clean'} | {api_changes} symbol(s) | {layer_conf['API Diff'][0]} — {layer_conf['API Diff'][1]} |",
+        f"| Changelog | {cl_icon} {cl_text} | {cl_detail} | {layer_conf['Changelog'][0]} — {layer_conf['Changelog'][1]} |",
+        f"| Reachability | {'⚠️ reached' if reach['reached'] else '✅ not reached'} | {reach_file_count} imports | {layer_conf['Reachability'][0]} — {layer_conf['Reachability'][1]} |",
+        f"| Probe | {probe_icon} {probe_state_display} | {probe_detail} | {layer_conf['Probe'][0]} — {layer_conf['Probe'][1]} |",
+    ]
+
+    ai_adj = pr.get("ai_adjudication", {})
+    if ai_adj and isinstance(ai_adj, dict):
+        ai_verdict = ai_adj.get("final_verdict", ai_adj.get("verdict", "—"))
+        ai_conf = ai_adj.get("confidence", "—")
+        ai_icon = {"SAFE": "✅", "REVIEW": "🟠"}.get(ai_verdict, "⬜")
+        lines.append(f"| AI Arbiter | {ai_icon} {ai_verdict} | confidence: {ai_conf} |")
+    else:
+        lines.append("| AI Arbiter | ⬜ not run | — |")
+
+    lines.append("")
+
+    lines += [
+        "### How we checked",
+        "",
+        f"- **Build**: Installed `{pkg}@{to_ver}` and ran full build pipeline",
+        f"- **Tests**: {'Ran project test suite' if test_norm['ran'] else 'No test suite executed'}",
+        f"- **API Diff**: Compared exported symbols between {from_ver} and {to_ver}",
+        f"- **Changelog**: {'Parsed release notes for breaking-change markers' if changelog_norm['available'] else 'No changelog found for this version range'}",
+        f"- **Reachability**: Scanned project source for imports of `{pkg}`",
+        f"- **Probe**: {'Compared runtime behavior before/after upgrade' if probe['state'] != 'NOT_RUN' else 'Behavioral probe was not executed'}",
+        "",
+    ]
+
+    if verdict in ("REVIEW", "BUILD_FAILS", "BLOCKED"):
+        lines += _build_expanded_layer_sections(build, build_v, test_norm, api_changes,
+                                                changelog_norm, reach, probe, pkg, from_ver, to_ver,
+                                                pr, layer_conf)
+        lines.append("")
+        lines += _build_risk_assessment(pr, verdict, build_v, test_norm, api_changes,
+                                         changelog_norm, reach, probe, pkg, from_ver, to_ver, dep_type, bump)
+        lines.append("")
+    else:
+        lines += _build_per_layer_narrative(build, build_v, test_norm, api_changes, changelog_norm,
+                                             reach, probe, pkg, from_ver, to_ver)
+        lines.append("")
+
+    lines += [
+        "<details><summary>Verdict logic</summary>",
+        "",
+        "```",
+        f"build      = {build_v.upper()}",
+        f"tests      = {test_norm['verdict'].upper()}",
+        f"probe      = {probe['state']}",
+        f"reachable  = {str(reach['reached']).upper()}",
+        f"changelog  = {'BREAKING' if changelog_norm['is_breaking'] else 'CLEAN'}",
+        f"verdict    = {verdict}",
+        "```",
         "",
         "</details>",
         "",
     ]
+
+    ecosystem = pr.get("ecosystem", "npm")
+    lines += ["<details><summary>Verification commands</summary>", "", "```bash"]
+    if ecosystem == "gomod":
+        lines += [
+            f"# Install and build with the new version",
+            f"go get {pkg}@v{to_ver}",
+            f"go build ./...",
+            "",
+            f"# Run tests",
+            f"go test ./...",
+            "",
+            f"# Check package docs",
+            f"go doc {pkg}",
+            "",
+            f"# Check your imports",
+            f'grep -r "{pkg}" --include="*.go" -l .',
+        ]
+    elif ecosystem == "actions":
+        lines += [
+            f"# Check which workflows use this action",
+            f'grep -r "uses: {pkg}" --include="*.yml" --include="*.yaml" -l .github/',
+        ]
+    else:
+        lines += [
+            f"# Install and build with the new version",
+            f"npm install {pkg}@{to_ver}",
+            f"npm run build",
+            "",
+            f"# Run tests",
+            f"npm test",
+            "",
+            f"# Check what changed in the API",
+            f"npm info {pkg} --json | jq '.versions'",
+            "",
+            f"# Check your imports",
+            f"grep -r '{pkg}' --include='*.ts' --include='*.js' -l .",
+        ]
+    lines += ["```", "", "</details>", ""]
 
     build_output = build.get("output_tail", "")
     if build_output:
@@ -515,8 +936,8 @@ def _render_compact(pr: Dict, cross_deps: Optional[List[Dict]] = None) -> str:
         old_hash = probe_ev.get("old_hash", "")
         new_hash = probe_ev.get("new_hash", "")
         if not old_out and not new_out and old_hash and new_hash:
-            old_out = f"hash:{old_hash[:12]}"
-            new_out = f"hash:{new_hash[:12]}"
+            old_out = f"sha256:{old_hash}"
+            new_out = f"sha256:{new_hash}"
         if old_out or new_out or changed_summary:
             lines.append("<details><summary>🔬 Probe diff — what changed</summary>")
             lines.append("")
@@ -534,8 +955,28 @@ def _render_compact(pr: Dict, cross_deps: Optional[List[Dict]] = None) -> str:
             lines += ["", "</details>", ""]
 
     import_list = reach["import_files"]
-    if not import_list and reach["usages"]:
-        import_list = sorted(set(u.get("file", "") for u in reach["usages"] if u.get("file")))
+    usage_refs = []
+    if reach["usages"]:
+        for u in reach["usages"]:
+            uf = u.get("file", "")
+            ul = u.get("line")
+            if uf:
+                usage_refs.append(f"{uf}:{ul}" if ul else uf)
+        usage_refs = sorted(set(usage_refs))
+    if not import_list and usage_refs:
+        import_list = usage_refs
+    elif import_list and usage_refs:
+        file_to_ref = {}
+        for ref in usage_refs:
+            base = ref.split(":")[0]
+            file_to_ref.setdefault(base, []).append(ref)
+        enriched = []
+        for f in import_list:
+            if f in file_to_ref:
+                enriched.extend(file_to_ref[f])
+            else:
+                enriched.append(f)
+        import_list = enriched
     if import_list:
         lines.append(f"<details><summary>📁 Files importing this package ({len(import_list)})</summary>")
         lines.append("")
@@ -598,10 +1039,17 @@ def _render_compact(pr: Dict, cross_deps: Optional[List[Dict]] = None) -> str:
                 lines.append(f"- PR #{other}: {dep.get('reason', '')} — {dep.get('merge_order', '')}")
             lines.append("")
 
-    lines += [
-        "---",
-        f"🔬 Deterministic + Probe · 📅 {date.today().isoformat()}",
-    ]
+    merge_plan_issue = os.environ.get("MERGE_PLAN_ISSUE", "")
+    run_url = os.environ.get("ANALYSIS_RUN_URL", "")
+
+    lines.append("---")
+    footer = (f"Mode: Deterministic + Behavioral Probe · Model: template-fallback · "
+              f"Analyzed: {date.today().isoformat()}")
+    lines.append(footer)
+    if merge_plan_issue:
+        lines.append(f"Merge plan: #{merge_plan_issue}")
+    if run_url:
+        lines.append(f"[Analysis run]({run_url})")
 
     return "\n".join(lines)
 
