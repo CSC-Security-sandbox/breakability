@@ -63,7 +63,7 @@ jobs:
   breakability:
     needs: check
     if: needs.check.outputs.should_run == 'true'
-    uses: CSC-Security-sandbox/breakability/.github/workflows/breakability-reusable.yml@v1
+    uses: CSC-Security-sandbox/breakability/.github/workflows/breakability-reusable.yml@main
     with:
       pr_filter: ${{ github.event.inputs.pr_filter || '' }}
       batch_count: ${{ fromJson(github.event.inputs.batch_count || '4') }}
