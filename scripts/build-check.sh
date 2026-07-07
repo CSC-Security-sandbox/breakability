@@ -1288,7 +1288,7 @@ normalize_go_errors() {
     -e 's|go-build/[a-f0-9]*/[a-f0-9]*|go-build/HASH|g' \
     -e 's|[^ ]*/go/pkg/mod/|GOMODCACHE/|g' \
     -e 's|@v[0-9][0-9.]*[^/:]*/|@VERSION/|g' \
-    -e 's|\(\.go\):[0-9]*:[0-9]*: undefined:|\1:0:0: undefined:|g'
+    -e 's|\(\.go\):[0-9]*:[0-9]*:|\1:0:0:|g'
 }
 
 # Classify Go build failures. Detects cache corruption vs real compile errors.
@@ -3058,8 +3058,30 @@ $IMPORT_OUT"
           # Previous code fell through to error text comparison which could
           # false-positive match go vet warnings in baseline output against
           # go build errors in PR output, misclassifying as pre_existing.
-          BUILD_VERDICT="fail"
-          echo "  build: baseline exit=$MAIN_EXIT, PR exit=$BUILD_EXIT — genuine failure (not pre-existing)"
+          #
+          # F003 FIX: In multi-module repos, per-module baseline may pass (exit=0)
+          # while global main build fails with pre-existing errors from other modules
+          # (e.g. undefined: vcmserver.* from missing OpenAPI codegen). Check if ALL
+          # PR errors also exist in the global main build output before classifying.
+          if [[ "$_GO_MULTI_MODULE" == "true" && "$ECOSYSTEM" == "gomod" && "$main_go_exit" -ne 0 && -n "$BUILD_OUTPUT" ]]; then
+            MAIN_ERR_FILE="/tmp/_bc_main_go_errors_global.txt"
+            PR_ERR_FILE="/tmp/_bc_pr_go_errors_${PR_NUM}.txt"
+            echo "$main_go_output" | grep -E '^.*\.go:[0-9]+' | normalize_go_errors | sort -u > "$MAIN_ERR_FILE" 2>/dev/null || true
+            echo "$BUILD_OUTPUT" | grep -E '^.*\.go:[0-9]+' | normalize_go_errors | sort -u > "$PR_ERR_FILE" 2>/dev/null || true
+            NEW_ERRORS=$(comm -23 "$PR_ERR_FILE" "$MAIN_ERR_FILE" 2>/dev/null | head -10)
+            rm -f "$MAIN_ERR_FILE" "$PR_ERR_FILE"
+            if [[ -z "$NEW_ERRORS" ]]; then
+              BUILD_VERDICT="pre_existing"
+              echo "  build: per-module baseline passes but all PR errors exist in global main output — pre-existing"
+            else
+              BUILD_VERDICT="pre_existing_plus_new"
+              echo "  build: per-module baseline passes, PR has NEW errors not in main:"
+              echo "$NEW_ERRORS" | head -5 | sed 's/^/    /'
+            fi
+          else
+            BUILD_VERDICT="fail"
+            echo "  build: baseline exit=$MAIN_EXIT, PR exit=$BUILD_EXIT — genuine failure (not pre-existing)"
+          fi
         elif [[ "$MAIN_EXIT" -eq 124 ]]; then
           # Baseline timed out (A4-4). The timeout means we got PARTIAL output.
           # V9.6 FIX (P0-1): Still compare errors — if PR has NEW .go:NNN errors

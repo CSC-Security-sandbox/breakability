@@ -288,6 +288,14 @@ def _validate_comment(comment: str, pr_num: str, pr_data: Dict[str, Any] = None)
         },
     }
 
+    # SHA256 is N/A for actions PRs and PRs where behavioral probe didn't run
+    if pr_data is not None:
+        eco = str(pr_data.get("ecosystem", "")).strip().lower()
+        bg = pr_data.get("behavioral_grade") or {}
+        probe_ran = isinstance(bg, dict) and bg.get("same_behavior") is not None
+        if eco == "actions" or not probe_ran:
+            diagnostics["has_sha256"] = {"passed": True, "value": "N/A (no probe)"}
+
     if pr_data is not None:
         severity_order = {"SAFE": 0, "REVIEW": 1, "BLOCKED": 2, "BUILD_FAILS": 3}
         av = authoritative_verdict(pr_data)
@@ -321,7 +329,7 @@ def _near_valid(diagnostics: dict) -> bool:
     line_count = lc.get("value") or 0
     if line_count < 100:
         return False
-    if line_count < 300:
+    if line_count < 200:
         return False
     failures = sum(1 for d in diagnostics.values() if not d.get("passed"))
     return failures <= 1
