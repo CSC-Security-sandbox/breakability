@@ -10,11 +10,16 @@ from verdict_contract import (  # noqa: E402
     BUCKET_BLOCKED,
     BUCKET_REVIEW,
     BUCKET_SAFE,
+    GRADE_HIGH_BREAKING,
+    GRADE_LOW_BREAKING,
+    GRADE_MEDIUM_BREAKING,
+    GRADE_SAFE,
     PRED_AUTO_CLEAR,
     PRED_FIX,
     PRED_REVIEW,
     StageNoOpError,
     assert_stage_did_work,
+    assign_breakability_grade,
     authoritative_verdict,
     map_policy_decision,
     prediction_for_pr,
@@ -312,6 +317,65 @@ class TestStageAssertion(unittest.TestCase):
 
     def test_work_done_is_fine(self):
         assert_stage_did_work("reconcile", input_count=5, processed_count=3)
+
+
+class TestBreakabilityGradeWiring(unittest.TestCase):
+    def test_blocked_is_high(self):
+        self.assertEqual(assign_breakability_grade({}, BUCKET_BLOCKED), GRADE_HIGH_BREAKING)
+
+    def test_safe_is_safe(self):
+        self.assertEqual(assign_breakability_grade({}, BUCKET_SAFE), GRADE_SAFE)
+
+    def test_build_and_test_fail_reached_is_high(self):
+        pr = {
+            "build": {"verdict": "fail"},
+            "test": {"ran": True, "exit": 1},
+            "files_importing": ["src/index.ts"],
+        }
+        self.assertEqual(assign_breakability_grade(pr, BUCKET_REVIEW), GRADE_HIGH_BREAKING)
+
+    def test_probe_changed_reached_is_medium(self):
+        pr = {
+            "behavioral_grade": {"same_behavior": False},
+            "files_importing": ["src/index.ts"],
+        }
+        self.assertEqual(assign_breakability_grade(pr, BUCKET_REVIEW), GRADE_MEDIUM_BREAKING)
+
+    def test_major_breaking_changelog_reached_is_medium(self):
+        pr = {
+            "from": "1.0.0", "to": "2.0.0",
+            "deterministic": {"changelogSignal": "BREAKING CHANGE: removed API"},
+            "files_importing": ["src/index.ts"],
+        }
+        self.assertEqual(assign_breakability_grade(pr, BUCKET_REVIEW), GRADE_MEDIUM_BREAKING)
+
+    def test_api_changes_reached_probe_same_is_low(self):
+        pr = {
+            "deterministic": {"api_changes_detail": [{"name": "Foo"}]},
+            "behavioral_grade": {"same_behavior": True},
+            "files_importing": ["src/index.ts"],
+        }
+        self.assertEqual(assign_breakability_grade(pr, BUCKET_REVIEW), GRADE_LOW_BREAKING)
+
+    def test_no_signals_review_defaults_medium(self):
+        self.assertEqual(assign_breakability_grade({}, BUCKET_REVIEW), GRADE_MEDIUM_BREAKING)
+
+
+class TestTestsExecuted(unittest.TestCase):
+    def test_exit_none_not_accepted(self):
+        from reconcile_adjudication import _tests_executed
+        pr = {"test": {"ran": True, "exit": None}}
+        self.assertFalse(_tests_executed(pr))
+
+    def test_exit_zero_accepted(self):
+        from reconcile_adjudication import _tests_executed
+        pr = {"test": {"ran": True, "exit": 0}}
+        self.assertTrue(_tests_executed(pr))
+
+    def test_not_ran_rejected(self):
+        from reconcile_adjudication import _tests_executed
+        pr = {"test": {"ran": False, "exit": 0}}
+        self.assertFalse(_tests_executed(pr))
 
 
 if __name__ == "__main__":

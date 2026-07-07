@@ -270,51 +270,58 @@ def _breaking_changelog_reachable_floor(pr: Mapping[str, Any]) -> bool:
     return True
 
 
+def _is_major_bump(from_version: str, to_version: str) -> bool:
+    from_parts = (from_version or "").strip().lstrip("vV").split("+", 1)[0].split("-", 1)[0].split(".")
+    to_parts = (to_version or "").strip().lstrip("vV").split("+", 1)[0].split("-", 1)[0].split(".")
+    try:
+        return int(to_parts[0]) > int(from_parts[0])
+    except (ValueError, IndexError):
+        return False
+
+
 def assign_breakability_grade(pr: Mapping[str, Any], verdict_bucket: str, signals: Optional[Mapping] = None) -> str:
-    """Assign decisive breakability grade based on evidence.
-    
+    """Assign decisive breakability grade based on real PR evidence signals.
+
     Returns SAFE | LOW_BREAKING | MEDIUM_BREAKING | HIGH_BREAKING
-    
-    Grading logic:
-      HIGH: Build FAIL + test FAIL + reached (must fix before merge)
-      MEDIUM: Probe mismatch + reached OR major + changelog breaking + reached
-      LOW: API warnings + reached BUT probe same (quick review)
-      SAFE: NOT-REACHED OR all signals green
+
+    Reads directly from PR data fields (build.verdict, test.exit, behavioral_grade,
+    deterministic.api_changes_detail, files_importing, from/to versions) rather than
+    policy dict keys that were never populated.
     """
     if verdict_bucket == BUCKET_BLOCKED:
         return GRADE_HIGH_BREAKING
     if verdict_bucket == BUCKET_SAFE:
         return GRADE_SAFE
-    
-    # Extract signals from build_results or policy
-    policy = _policy_decision(pr)
-    if not signals:
-        signals = {}
-    
-    # Check for high breakability (multiple hard failures)
-    build_failed = policy.get("build_outcome") in ["FAIL", "FAILED"]
-    test_failed = policy.get("test_outcome") in ["FAIL", "FAILED"]
-    reached = policy.get("reachability", {}).get("relevant") is True
-    
+
+    build = pr.get("build") or {}
+    test = pr.get("test") or {}
+    behavioral = pr.get("behavioral_grade")
+    det = pr.get("deterministic") or {}
+
+    build_failed = build.get("verdict") in ("fail", "pre_existing_plus_new")
+    test_exit = test.get("exit")
+    test_failed = test.get("ran") and test_exit is not None and test_exit != 0
+    reached = bool(pr.get("files_importing"))
+
     if build_failed and test_failed and reached:
         return GRADE_HIGH_BREAKING
-    
-    # Check for medium breakability (behavioral changes or major breaking)
-    probe_mismatch = policy.get("probe_outcome") == "DIFFERENT"
-    bump_type = policy.get("bump_type", "")
-    changelog_breaking = "breaking" in policy.get("changelog_summary", "").lower()
-    
-    if (probe_mismatch and reached) or (bump_type == "major" and changelog_breaking and reached):
+
+    probe_changed = (
+        isinstance(behavioral, Mapping)
+        and (behavioral.get("same_behavior") is False or behavioral.get("behavior_changed") is True)
+    )
+    is_major = _is_major_bump(str(pr.get("from", "") or ""), str(pr.get("to", "") or ""))
+    changelog_breaking = _has_declared_breaking(pr)
+
+    if (probe_changed and reached) or (is_major and changelog_breaking and reached):
         return GRADE_MEDIUM_BREAKING
-    
-    # Check for low breakability (API warnings but behavior same)
-    apidiff_warned = policy.get("apidiff_grade") in ["WARN", "ERROR"]
-    probe_same = policy.get("probe_outcome") == "SAME"
-    
-    if apidiff_warned and reached and probe_same:
+
+    api_changes = det.get("api_changes_detail") or []
+    probe_same = isinstance(behavioral, Mapping) and behavioral.get("same_behavior") is True
+
+    if len(api_changes) > 0 and reached and probe_same:
         return GRADE_LOW_BREAKING
-    
-    # Default: MEDIUM for unclear cases (fail-closed, better than hiding)
+
     return GRADE_MEDIUM_BREAKING if verdict_bucket == BUCKET_REVIEW else GRADE_SAFE
 
 

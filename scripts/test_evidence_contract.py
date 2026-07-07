@@ -390,6 +390,64 @@ class EvidenceContractTests(unittest.TestCase):
         )
         self.assertEqual(decide(base).to_dict(), decide(injected).to_dict())
 
+    # ── Semver fast-path tests ─────────────────────────────────────────────────
+
+    def test_patch_bump_clean_core_glances(self):
+        decision = decide(bundle(
+            from_version="1.0.0", to_version="1.0.1",
+            signals={
+                SignalName.RELEASE_NOTES: record(SignalName.RELEASE_NOTES, relevant=None),
+            },
+        ))
+        self.assertEqual(decision.verdict, VerdictAction.GLANCE)
+        self.assertEqual(decision.reason_code, "glance:semver-safe")
+
+    def test_minor_bump_clean_core_glances(self):
+        decision = decide(bundle(
+            from_version="1.0.0", to_version="1.1.0",
+            signals={
+                SignalName.RELEASE_NOTES: record(SignalName.RELEASE_NOTES, relevant=None),
+            },
+        ))
+        self.assertEqual(decision.verdict, VerdictAction.GLANCE)
+        self.assertEqual(decision.reason_code, "glance:semver-safe")
+
+    def test_major_bump_clean_core_reviews(self):
+        decision = decide(bundle(
+            from_version="1.0.0", to_version="2.0.0", is_major=True,
+            signals={
+                SignalName.RELEASE_NOTES: record(SignalName.RELEASE_NOTES, relevant=None),
+            },
+        ))
+        self.assertEqual(decision.verdict, VerdictAction.REVIEW)
+        self.assertEqual(decision.reason_code, "review:residual-or-uncertain")
+
+    def test_patch_bump_relevant_release_notes_still_reviews(self):
+        decision = decide(bundle(
+            from_version="1.0.0", to_version="1.0.1",
+            signals={
+                SignalName.RELEASE_NOTES: record(SignalName.RELEASE_NOTES, relevant=True),
+            },
+        ))
+        self.assertEqual(decision.verdict, VerdictAction.REVIEW)
+        self.assertEqual(decision.reason_code, "review:residual-or-uncertain")
+
+    # ── CVE fast-track tests ──────────────────────────────────────────────────
+
+    def test_security_fix_with_pass_security_glances(self):
+        sec = record(SignalName.SECURITY, SignalStatus.PASS)
+        decision = decide(bundle(security_sensitive=True, signals={SignalName.SECURITY: sec}))
+        self.assertEqual(decision.verdict, VerdictAction.GLANCE)
+        self.assertEqual(decision.reason_code, "glance:security-fix")
+
+    def test_security_sensitive_not_applicable_still_reviews(self):
+        sec = record(SignalName.SECURITY, SignalStatus.NOT_APPLICABLE)
+        api = record(SignalName.API_DIFF, SignalStatus.UNAVAILABLE)
+        decision = decide(bundle(security_sensitive=True,
+                                 signals={SignalName.SECURITY: sec, SignalName.API_DIFF: api}))
+        self.assertEqual(decision.verdict, VerdictAction.REVIEW)
+        self.assertEqual(decision.reason_code, "review:security-sensitive")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

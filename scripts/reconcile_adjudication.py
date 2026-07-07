@@ -122,7 +122,7 @@ def _tests_executed(pr):
     t = pr.get("test") or {}
     if not isinstance(t, dict):
         return False
-    return bool(t.get("ran")) and (t.get("exit") in (0, None) or t.get("main_test_exit") == 0)
+    return bool(t.get("ran")) and t.get("exit") == 0
 
 
 def _declared_breaking_unverified_clear(pr):

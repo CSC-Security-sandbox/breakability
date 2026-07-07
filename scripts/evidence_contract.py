@@ -488,6 +488,12 @@ def decide(bundle: Union[EvidenceBundle, Mapping[str, Any]]) -> VerdictDecision:
         return _decision(VerdictAction.ABSTAIN, SafetySeverity.MEDIUM, Confidence.LOW, f"abstain:{abstain.value}")
 
     if _is_security_sensitive(bundle) and not _breakability_provably_safe(bundle):
+        # CVE-fix fast-track: when the security analysis positively confirmed no new
+        # vulns (status=PASS, not merely NOT_APPLICABLE/skipped) and the build
+        # compiles, delaying the security upgrade is worse than the residual
+        # breakability risk — GLANCE instead of blocking in REVIEW.
+        if _is_pass(build) and security is not None and security.status == SignalStatus.PASS:
+            return _decision(VerdictAction.GLANCE, SafetySeverity.LOW, Confidence.MEDIUM, "glance:security-fix")
         return _decision(VerdictAction.REVIEW, _at_least(_max_residual(bundle), SafetySeverity.MEDIUM), Confidence.MEDIUM, "review:security-sensitive")
 
     release_unavailable = release_notes is not None and release_notes.status == SignalStatus.UNAVAILABLE
@@ -551,6 +557,14 @@ def decide(bundle: Union[EvidenceBundle, Mapping[str, Any]]) -> VerdictDecision:
     if release_clean or probe_same:
         return _decision(VerdictAction.MERGE, SafetySeverity.NONE, Confidence.HIGH, _merge_reason("merge:hard-clean", bundle))
 
+    # Semver patch/minor fast-path: core signals are clean (guaranteed by the
+    # guard above), no positive break signal survived, and the bump is not major.
+    # Only engage when release notes don't flag the change as relevant — a
+    # "possible behavioral change" in a patch/minor still warrants review.
+    _rn_relevant = release_notes is not None and release_notes.relevant is True
+    if not bundle.is_major and not _rn_relevant:
+        return _decision(VerdictAction.GLANCE, SafetySeverity.LOW, Confidence.MEDIUM, "glance:semver-safe")
+
     return _decision(VerdictAction.REVIEW, _at_least(_max_residual(bundle), SafetySeverity.MEDIUM), Confidence.MEDIUM, "review:residual-or-uncertain")
 
 
@@ -582,6 +596,8 @@ def _decision(verdict: VerdictAction, severity: SafetySeverity, confidence: Conf
         "merge:hard-clean": "hard evidence is clean",
         "merge:probe-api-clean": "a behavioral probe installed both versions and observed identical runtime behavior, and a semantic apidiff proves the public API is backward-compatible — independent execution evidence proves safety even though the consumer build/test tooling was unavailable",
         "merge:probe-api-clean-security-relevant": "breakability-safe: a behavioral probe observed identical runtime behavior and a semantic apidiff proves the public API is backward-compatible (consumer build/test tooling unavailable). Security-relevant dependency — auto-cleared on the breakability axis; confirm the upgrade's security intent",
+        "glance:security-fix": "security-sensitive dependency upgrade with no new vulnerabilities and a passing build — fast-tracked; verify the security intent",
+        "glance:semver-safe": "patch/minor bump with clean build+test+API; only soft residual uncertainty remains — quick changelog glance",
         "review:residual-or-uncertain": "residual behavior or release-note uncertainty remains",
     }.get(reason_code, reason_code)
     return VerdictDecision(verdict=verdict, severity=severity, confidence=confidence, reason_code=reason_code, display_reason=display)
