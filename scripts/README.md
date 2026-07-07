@@ -60,8 +60,38 @@ scripts/
 - **Output:** Markdown comments (13 sections)
 - **CLI:** `python3 breakability_analyst.py <file>`
 
+## Pipeline Script Roles
+
+### Active in Reusable Workflow (`breakability-reusable.yml`)
+
+| Script | Workflow Step | Role |
+|--------|-------------|------|
+| `build-check.sh` | Run deterministic analysis | Per-PR build/test/reachability/API diff |
+| `merge-results.sh` | Merge batch results | Combines per-batch JSON into single results file |
+| `verdict_contract.py` | Generate/reconcile verdicts | Authoritative verdict (SAFE/REVIEW/BLOCKED) — called pre-probe and post-probe |
+| `differential-probe.py` | Run behavioral probe | Runtime SHA256 + export comparison between old/new versions |
+| `generate_ai_comments.py` | Generate AI comments | AI-powered PR comment generation with validation gate + template fallback |
+| `breakability_analyst.py` | Fallback to template renderer | Template-based PR comments when AI is unavailable |
+| `generate_ai_merge_plan.py` | Update merge plan | AI-enriched merge plan with template fallback |
+
+### Auxiliary Scripts (not called by reusable workflow)
+
+| Script | Status | Notes |
+|--------|--------|-------|
+| `reconcile_adjudication.py` | Auxiliary | AI arbiter reconciliation — verdict reconciliation is handled by `verdict_contract.py --write` in the reusable workflow. Kept for composite action path and future use. |
+| `generate_ai_verdicts.py` | Auxiliary | Standalone AI verdict generation — verdicts come from `verdict_contract.py` in the reusable workflow. Kept for composite action path. |
+
+### Support Libraries
+
+| Script | Role |
+|--------|------|
+| `ai_backend.py` | Unified AI backend (live/replay/record modes) |
+| `evidence_contract.py` | Evidence bundle validation dataclasses |
+| `policy_lowering.py` | Policy decision engine for verdict computation |
+| `ecosystem_adapters.py` | Multi-ecosystem support (npm, gomod, pip, actions, docker, maven) |
+
 ## Known Issues (from validation)
 
-1. **Probe contract mismatch:** Writes `behavioral_grade`, renderer expects `deterministic.probe`
-2. **AI workflow incomplete:** `reconcile_adjudication.py` needs `--verdicts` file, but workflow doesn't generate one
-3. **AI contract mismatch:** Writes `ai_adjudication`, renderer expects `ai_verdict`
+1. ~~**Probe contract mismatch:** Writes `behavioral_grade`, renderer expects `deterministic.probe`~~ (resolved — normalizer handles both)
+2. **AI workflow incomplete:** `reconcile_adjudication.py` needs `--verdicts` file, but workflow doesn't generate one (intentional — not used in reusable workflow)
+3. ~~**AI contract mismatch:** Writes `ai_adjudication`, renderer expects `ai_verdict`~~ (resolved — normalizer handles both)

@@ -36,12 +36,17 @@ SAMPLE_PR = {
 class TestValidateComment(unittest.TestCase):
     def _make_comment(self, lines=170, has_table=True, has_subsection=True,
                       has_footer=True, has_numbered=True, has_bash=True,
-                      has_reachability=True):
+                      has_reachability=True, has_sha256=True,
+                      has_policy=True, has_confidence=True,
+                      has_h3_sections=True, has_merge_plan=True):
         parts = ["<!-- breakability-check -->", "## SAFE — lodash"]
         if has_table:
             parts.append("| Layer | Signal | Detail |")
         if has_subsection:
             parts.append("### How we checked")
+        if has_h3_sections:
+            parts.append("### Build Analysis")
+            parts.append("### Test Analysis")
         if has_numbered:
             parts.append("1. Review the changelog")
         if has_bash:
@@ -50,6 +55,16 @@ class TestValidateComment(unittest.TestCase):
             parts.append("```")
         if has_reachability:
             parts.append("**Reachability** confirms the package is imported by 3 files")
+        if has_sha256:
+            parts.append("SHA256: abc123def456")
+        if has_policy:
+            parts.append("verdict = SAFE")
+            parts.append("build = PASS")
+            parts.append("tests = PASS")
+        if has_confidence:
+            parts.append("**Confidence:** HIGH — Build passed cleanly")
+        if has_merge_plan:
+            parts.append("Merge plan: #42")
         body_needed = lines - len(parts) - (1 if has_footer else 0)
         if body_needed > 0:
             parts.extend([f"Line {i}" for i in range(body_needed)])
@@ -76,7 +91,7 @@ class TestValidateComment(unittest.TestCase):
         self.assertFalse(diag["has_signal_table"]["passed"])
 
     def test_missing_subsection_fails(self):
-        comment = self._make_comment(has_subsection=False)
+        comment = self._make_comment(has_subsection=False, has_h3_sections=False)
         passed, diag = _validate_comment(comment, "42")
         self.assertFalse(passed)
         self.assertFalse(diag["has_h3"]["passed"])
@@ -105,12 +120,44 @@ class TestValidateComment(unittest.TestCase):
         self.assertFalse(passed)
         self.assertFalse(diag["has_reachability"]["passed"])
 
-    def test_diagnostics_has_all_eight_criteria(self):
+    def test_diagnostics_has_all_thirteen_criteria(self):
         comment = self._make_comment(lines=170)
         _, diag = _validate_comment(comment, "42")
         expected = {"line_count", "has_h2", "has_signal_table", "has_h3",
-                    "has_mode_footer", "has_numbered_list", "has_bash_block", "has_reachability"}
+                    "has_mode_footer", "has_numbered_list", "has_bash_block", "has_reachability",
+                    "has_sha256", "has_policy_pseudocode", "has_confidence_reasoning",
+                    "has_h3_narrative_sections", "has_merge_plan_link"}
         self.assertEqual(set(diag.keys()), expected)
+
+    def test_missing_sha256_fails(self):
+        comment = self._make_comment(has_sha256=False)
+        passed, diag = _validate_comment(comment, "42")
+        self.assertFalse(passed)
+        self.assertFalse(diag["has_sha256"]["passed"])
+
+    def test_missing_policy_pseudocode_fails(self):
+        comment = self._make_comment(has_policy=False)
+        passed, diag = _validate_comment(comment, "42")
+        self.assertFalse(passed)
+        self.assertFalse(diag["has_policy_pseudocode"]["passed"])
+
+    def test_missing_confidence_fails(self):
+        comment = self._make_comment(has_confidence=False)
+        passed, diag = _validate_comment(comment, "42")
+        self.assertFalse(passed)
+        self.assertFalse(diag["has_confidence_reasoning"]["passed"])
+
+    def test_missing_h3_sections_fails(self):
+        comment = self._make_comment(has_h3_sections=False, has_subsection=False)
+        passed, diag = _validate_comment(comment, "42")
+        self.assertFalse(passed)
+        self.assertFalse(diag["has_h3_narrative_sections"]["passed"])
+
+    def test_missing_merge_plan_link_fails(self):
+        comment = self._make_comment(has_merge_plan=False)
+        passed, diag = _validate_comment(comment, "42")
+        self.assertFalse(passed)
+        self.assertFalse(diag["has_merge_plan_link"]["passed"])
 
     def test_verdict_mismatch_detected(self):
         """When AI says SAFE but contract says REVIEW, validation fails with verdict_mismatch."""
@@ -146,11 +193,15 @@ class TestNearValid(unittest.TestCase):
     def _make_diag(self, line_count=350, failures=None):
         failures = failures or set()
         checks = ["line_count", "has_h2", "has_signal_table", "has_h3",
-                   "has_mode_footer", "has_numbered_list", "has_bash_block", "has_reachability"]
+                   "has_mode_footer", "has_numbered_list", "has_bash_block", "has_reachability",
+                   "has_sha256", "has_policy_pseudocode", "has_confidence_reasoning",
+                   "has_h3_narrative_sections", "has_merge_plan_link"]
         diag = {}
         for c in checks:
             if c == "line_count":
                 diag[c] = {"passed": c not in failures, "value": line_count}
+            elif c == "has_h3_narrative_sections":
+                diag[c] = {"passed": c not in failures, "value": 5 if c not in failures else 1}
             else:
                 diag[c] = {"passed": c not in failures, "value": c not in failures}
         return diag
@@ -427,11 +478,19 @@ class TestAllStubsDetection(unittest.TestCase):
         parts = ["<!-- breakability-check -->", "## SAFE — lodash"]
         parts.append("| Layer | Signal | Detail |")
         parts.append("### How we checked")
+        parts.append("### Build Analysis")
+        parts.append("### Test Analysis")
         parts.append("1. Review the changelog")
         parts.append("```bash")
         parts.append("npm test")
         parts.append("```")
         parts.append("**Reachability** confirms the package is imported by 3 files")
+        parts.append("SHA256: abc123def456")
+        parts.append("verdict = SAFE")
+        parts.append("build = PASS")
+        parts.append("tests = PASS")
+        parts.append("**Confidence:** HIGH — Build passed cleanly")
+        parts.append("Merge plan: #42")
         parts.extend([f"Line {i}" for i in range(150)])
         parts.append("Mode: Deterministic + Behavioral Probe")
         return "\n".join(parts)
@@ -545,6 +604,157 @@ class TestDiagnosticLogging(unittest.TestCase):
             self.assertGreater(len(records), 0)
             self.assertEqual(records[0]["pr_num"], "42")
             self.assertIn("gate_results", records[0])
+
+
+class TestGoldenFeatureValidation(unittest.TestCase):
+    """Validates all 13 golden features are present in a golden-standard comment."""
+
+    GOLDEN_COMMENT = "\n".join([
+        "<!-- breakability-check -->",
+        "## ✅ SAFE — `lodash` 4.17.20 → 4.17.21 · production · patch",
+        "",
+        "| Layer | Signal | Detail | Confidence |",
+        "|-------|--------|--------|------------|",
+        "| Build | ✅ pass | exit 0 | HIGH — Definitive exit code |",
+        "| Tests | ✅ pass | exit 0 | HIGH — Test suite passed |",
+        "| API Diff | ✅ clean | 0 symbols | MEDIUM — No changes found |",
+        "| Changelog | ✅ clean | clean | MEDIUM — No breaking markers |",
+        "| Reachability | ✅ not reached | 0 imports | HIGH — Not referenced |",
+        "| Probe | ✅ same | behavior unchanged | HIGH — Probe confirmed same |",
+        "| AI Arbiter | ⬜ not run | — |",
+        "",
+        "### How we checked",
+        "",
+        "- **Build**: Installed `lodash@4.17.21` and ran full build pipeline",
+        "- **Tests**: Ran project test suite",
+        "",
+        "### ✅ Build Analysis",
+        "**Status:** ✅ **PASS** | **Verification Level:** HIGH",
+        "**Confidence:** **HIGH** — Definitive exit code from full build pipeline",
+        "",
+        "### ✅ Test Analysis",
+        "**Status:** ✅ **PASS** | **Verification Level:** HIGH",
+        "**Confidence:** **HIGH** — Test suite ran and passed",
+        "",
+        "### ✅ API Diff Analysis",
+        "**Status:** ✅ **0 change(s)** | **Verification Level:** MEDIUM",
+        "",
+        "### ✅ Changelog Analysis",
+        "**Status:** ✅ **CLEAN** | **Verification Level:** MEDIUM",
+        "",
+        "### ✅ Reachability Analysis",
+        "**Status:** ✅ **NOT REACHED** | **Verification Level:** HIGH",
+        "- ✅ Scanned project source files for imports of `lodash`",
+        "",
+        "### ✅ Behavioral Probe Analysis",
+        "**Status:** ✅ **SAME** | **Verification Level:** HIGH",
+        "**Confidence:** **HIGH** — Behavioral probe ran and reported same",
+        "",
+        "### Recommendation",
+        "",
+        "1. Safe to merge — no action required",
+        "2. Merge when confident",
+        "",
+        "<details><summary>Verdict logic</summary>",
+        "",
+        "```",
+        "build      = PASS",
+        "tests      = PASS",
+        "probe      = SAME",
+        "reachable  = FALSE",
+        "changelog  = CLEAN",
+        "verdict    = SAFE",
+        "```",
+        "",
+        "</details>",
+        "",
+        "<details><summary>Verification commands</summary>",
+        "",
+        "```bash",
+        "npm install lodash@4.17.21",
+        "npm run build",
+        "",
+        "npm test",
+        "```",
+        "",
+        "</details>",
+        "",
+        "### Authoritative verdict",
+        "Breakability grade: A",
+        "",
+        "Old SHA256: abc123",
+        "New SHA256: abc123",
+        "",
+        "**Reachability** confirms the package is not imported by production code.",
+        "",
+        "Merge plan: #42",
+        "",
+    ] + [f"Padding line {i}" for i in range(80)] + [
+        "---",
+        "Mode: Deterministic + Behavioral Probe · Model: golden-test · Analyzed: 2026-01-01",
+    ])
+
+    def test_f01_signal_summary_table(self):
+        _, diag = _validate_comment(self.GOLDEN_COMMENT, "42")
+        self.assertTrue(diag["has_signal_table"]["passed"])
+
+    def test_f02_per_layer_narrative_sections(self):
+        _, diag = _validate_comment(self.GOLDEN_COMMENT, "42")
+        self.assertTrue(diag["has_h3_narrative_sections"]["passed"])
+        self.assertGreaterEqual(diag["has_h3_narrative_sections"]["value"], 3)
+
+    def test_f03_what_we_checked(self):
+        self.assertIn("How we checked", self.GOLDEN_COMMENT)
+
+    def test_f04_stdout_in_code_blocks(self):
+        _, diag = _validate_comment(self.GOLDEN_COMMENT, "42")
+        self.assertTrue(diag["has_bash_block"]["passed"])
+
+    def test_f05_confidence_reasoning(self):
+        _, diag = _validate_comment(self.GOLDEN_COMMENT, "42")
+        self.assertTrue(diag["has_confidence_reasoning"]["passed"])
+
+    def test_f06_sha256_hashes(self):
+        _, diag = _validate_comment(self.GOLDEN_COMMENT, "42")
+        self.assertTrue(diag["has_sha256"]["passed"])
+
+    def test_f07_reachability(self):
+        _, diag = _validate_comment(self.GOLDEN_COMMENT, "42")
+        self.assertTrue(diag["has_reachability"]["passed"])
+
+    def test_f08_policy_pseudocode(self):
+        _, diag = _validate_comment(self.GOLDEN_COMMENT, "42")
+        self.assertTrue(diag["has_policy_pseudocode"]["passed"])
+
+    def test_f09_numbered_recommendations(self):
+        _, diag = _validate_comment(self.GOLDEN_COMMENT, "42")
+        self.assertTrue(diag["has_numbered_list"]["passed"])
+
+    def test_f10_verification_commands(self):
+        self.assertIn("Verification commands", self.GOLDEN_COMMENT)
+        self.assertIn("npm install", self.GOLDEN_COMMENT)
+
+    def test_f11_merge_plan_link(self):
+        _, diag = _validate_comment(self.GOLDEN_COMMENT, "42")
+        self.assertTrue(diag["has_merge_plan_link"]["passed"])
+
+    def test_f12_analysis_run_link(self):
+        self.assertIn("Mode:", self.GOLDEN_COMMENT)
+        _, diag = _validate_comment(self.GOLDEN_COMMENT, "42")
+        self.assertTrue(diag["has_mode_footer"]["passed"])
+
+    def test_f13_model_attribution_footer(self):
+        self.assertIn("Model:", self.GOLDEN_COMMENT)
+        self.assertIn("Analyzed:", self.GOLDEN_COMMENT)
+
+    def test_all_13_features_pass(self):
+        passed, diag = _validate_comment(self.GOLDEN_COMMENT, "42")
+        self.assertTrue(passed, f"Failed checks: {[k for k, v in diag.items() if not v['passed']]}")
+
+    def test_minimal_comment_fails(self):
+        minimal = "## SAFE\nShort comment."
+        passed, _ = _validate_comment(minimal, "42")
+        self.assertFalse(passed)
 
 
 if __name__ == "__main__":

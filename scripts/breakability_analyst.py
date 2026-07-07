@@ -834,17 +834,13 @@ def _render_compact(pr: Dict, cross_deps: Optional[List[Dict]] = None) -> str:
         "",
     ]
 
+    lines += _build_expanded_layer_sections(build, build_v, test_norm, api_changes,
+                                            changelog_norm, reach, probe, pkg, from_ver, to_ver,
+                                            pr, layer_conf)
+    lines.append("")
     if verdict in ("REVIEW", "BUILD_FAILS", "BLOCKED"):
-        lines += _build_expanded_layer_sections(build, build_v, test_norm, api_changes,
-                                                changelog_norm, reach, probe, pkg, from_ver, to_ver,
-                                                pr, layer_conf)
-        lines.append("")
         lines += _build_risk_assessment(pr, verdict, build_v, test_norm, api_changes,
                                          changelog_norm, reach, probe, pkg, from_ver, to_ver, dep_type, bump)
-        lines.append("")
-    else:
-        lines += _build_per_layer_narrative(build, build_v, test_norm, api_changes, changelog_norm,
-                                             reach, probe, pkg, from_ver, to_ver)
         lines.append("")
 
     lines += [
@@ -935,15 +931,19 @@ def _render_compact(pr: Dict, cross_deps: Optional[List[Dict]] = None) -> str:
         changed_summary = probe_ev.get("changed_behavior", "") or probe_ev.get("summary", "") or probe_ev.get("rationale", "")
         old_hash = probe_ev.get("old_hash", "")
         new_hash = probe_ev.get("new_hash", "")
+        if old_hash and new_hash:
+            lines.append(f"**Old SHA256:** `{old_hash}`")
+            lines.append(f"**New SHA256:** `{new_hash}`")
+            lines.append("")
         if not old_out and not new_out and old_hash and new_hash:
             old_out = f"sha256:{old_hash}"
             new_out = f"sha256:{new_hash}"
-        if old_out or new_out or changed_summary:
+        if changed_summary:
+            lines.append(f"**Change:** {changed_summary[:300]}")
+            lines.append("")
+        if old_out or new_out:
             lines.append("<details><summary>🔬 Probe diff — what changed</summary>")
             lines.append("")
-            if changed_summary:
-                lines.append(f"**Change:** {changed_summary[:300]}")
-                lines.append("")
             if old_out:
                 lines.append(f"**Before:** `{old_out[:200]}`")
             if new_out:

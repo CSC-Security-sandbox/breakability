@@ -226,11 +226,12 @@ def _validate_comment(comment: str, pr_num: str, pr_data: Dict[str, Any] = None)
     Returns (passed: bool, diagnostics: dict) where diagnostics maps each
     criterion to {passed: bool, value: any}.
 
-    Checks 8 of 13 golden features plus verdict consistency against
+    Checks all 13 golden features plus verdict consistency against
     authoritative_verdict() when pr_data is provided.
     """
     line_count = len(comment.strip().splitlines())
     comment_lower = comment.lower()
+    h3_count = len(re.findall(r'^###\s', comment, re.MULTILINE))
 
     diagnostics = {
         "line_count": {"passed": line_count >= 150, "value": line_count},
@@ -252,6 +253,26 @@ def _validate_comment(comment: str, pr_num: str, pr_data: Dict[str, Any] = None)
         "has_reachability": {
             "passed": "reachab" in comment_lower or "import" in comment_lower,
             "value": "reachab" in comment_lower or "import" in comment_lower,
+        },
+        "has_sha256": {
+            "passed": "sha256" in comment_lower or "hash" in comment_lower,
+            "value": "sha256" in comment_lower or "hash" in comment_lower,
+        },
+        "has_policy_pseudocode": {
+            "passed": "verdict" in comment_lower and ("build" in comment_lower and "tests" in comment_lower),
+            "value": bool(re.search(r'verdict\s*=', comment_lower)),
+        },
+        "has_confidence_reasoning": {
+            "passed": bool(re.search(r'\b(HIGH|MEDIUM|LOW)\b', comment)),
+            "value": bool(re.search(r'\b(HIGH|MEDIUM|LOW)\b', comment)),
+        },
+        "has_h3_narrative_sections": {
+            "passed": h3_count >= 3,
+            "value": h3_count,
+        },
+        "has_merge_plan_link": {
+            "passed": bool(re.search(r'#\d+', comment)),
+            "value": bool(re.search(r'#\d+', comment)),
         },
     }
 
