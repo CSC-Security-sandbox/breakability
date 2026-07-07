@@ -144,8 +144,11 @@ def _policy_decision(pr: Mapping[str, Any]) -> dict:
 
 
 def _is_preexisting_test_failure(pr: Mapping[str, Any]) -> bool:
-    """True when the test failure exists on main with the same exit code."""
+    """True when the test failure exists on main — content-level verdict preferred."""
     test = pr.get("test") or {}
+    verdict = test.get("verdict")
+    if verdict is not None:
+        return verdict == "pre_existing"
     test_exit = test.get("exit")
     main_exit = test.get("main_test_exit")
     if test_exit is None or main_exit is None:

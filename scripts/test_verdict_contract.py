@@ -229,6 +229,52 @@ class TestPreExistingTestFailure(unittest.TestCase):
         self.assertEqual(v["source"], "hard_fix_floor")
 
 
+class TestContentLevelPreExistingTestFailure(unittest.TestCase):
+    """Content-level test verdict from build-check.sh (T002): when test.verdict
+    field is present, _is_preexisting_test_failure uses it instead of exit codes."""
+
+    def test_verdict_pre_existing_returns_review(self):
+        """test.verdict='pre_existing' → pre-existing → REVIEW, not BLOCKED."""
+        pr = _pr({"verdict": "REVIEW"},
+                 build={"verdict": "pass"},
+                 test={"ran": True, "exit": 1, "main_test_exit": 1,
+                        "verdict": "pre_existing", "new_failures": [],
+                        "output_tail": "FAILED"})
+        v = authoritative_verdict(pr)
+        self.assertNotEqual(v["verdict"], BUCKET_BLOCKED)
+        self.assertNotEqual(v["source"], "hard_fix_floor")
+
+    def test_verdict_fail_with_new_failures_returns_blocked(self):
+        """test.verdict='fail' with new_failures → BLOCKED even if exit codes match."""
+        pr = _pr({"verdict": "MERGE"},
+                 build={"verdict": "pass"},
+                 test={"ran": True, "exit": 1, "main_test_exit": 1,
+                        "verdict": "fail",
+                        "new_failures": ["TestNewBroken"],
+                        "output_tail": "--- FAIL: TestNewBroken"})
+        v = authoritative_verdict(pr)
+        self.assertEqual(v["verdict"], BUCKET_BLOCKED)
+        self.assertEqual(v["source"], "hard_fix_floor")
+
+    def test_verdict_absent_same_exit_backward_compat(self):
+        """No test.verdict field, same exit codes → exit-code fallback → pre-existing."""
+        pr = _pr({"verdict": "REVIEW"},
+                 build={"verdict": "pass"},
+                 test={"ran": True, "exit": 1, "main_test_exit": 1,
+                        "output_tail": "FAILED"})
+        v = authoritative_verdict(pr)
+        self.assertNotEqual(v["verdict"], BUCKET_BLOCKED)
+
+    def test_verdict_absent_different_exits_new_failure(self):
+        """No test.verdict field, different exit codes → new failure → BLOCKED."""
+        pr = _pr({"verdict": "MERGE"},
+                 build={"verdict": "pass"},
+                 test={"ran": True, "exit": 1, "main_test_exit": 0,
+                        "output_tail": "FAILED"})
+        v = authoritative_verdict(pr)
+        self.assertEqual(v["verdict"], BUCKET_BLOCKED)
+
+
 class TestAIDowngradeBreakingChangelog(unittest.TestCase):
     """Rule 4+6 via _probe_escalation: AI downgrade_to_safe must not bypass
     breaking changelog + reachable + no passing tests."""

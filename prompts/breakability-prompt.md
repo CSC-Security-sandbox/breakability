@@ -848,6 +848,40 @@ comments with 12/13 golden features using data from the verdict contract:
 12. **Reachability** — file:line references showing where the package is imported
 13. **Footer** — Mode, Model, Date, Merge plan link, Analysis run link
 
+**Your comment MUST be at least 150 lines long. Comments under 150 lines will be REJECTED.** Aim for 200-300 lines. Maximum 350 lines.
+
+### Signal Summary Table format (4 columns)
+
+Use exactly this 4-column format:
+
+```markdown
+| Layer | Result | Confidence | Evidence |
+|-------|--------|------------|----------|
+| 🔧 Build | ✅ PASS | HIGH | TypeScript compilation successful |
+| 🧪 Tests | ✅ PASS | HIGH | 47 tests pass (exit 0) |
+| 📡 API Diff | ✅ No changes | HIGH | No exported symbols changed |
+| 📋 Changelog | ⚠️ Minor | MEDIUM | No breaking changes declared |
+| 🔍 Reachability | ✅ 3 files | HIGH | Direct import in src/auth.ts:14 |
+| 🔬 Probe | ✅ SAME | HIGH | SHA256 match across versions |
+| 🤖 AI Arbiter | ✅ SAFE | HIGH | All signals converge |
+```
+
+### Section outline with approximate line counts
+
+1. Headline + merge risk (5-8 lines)
+2. Signal summary table (10-12 lines)
+3. What this means (3-5 lines)
+4. Recommendation with numbered steps (8-15 lines)
+5. Build Analysis narrative (15-25 lines)
+6. Test Analysis narrative (15-25 lines)
+7. Behavioral Probe narrative with SHA256 (15-25 lines)
+8. Reachability with file:line refs (10-15 lines)
+9. Verdict Logic pseudocode (8-12 lines)
+10. Verification bash commands (10-15 lines)
+11. Build/test output (collapsible, 15-30 lines)
+12. How we checked checklist (8-12 lines)
+13. Footer (5-8 lines)
+
 ### Per-layer narrative format
 
 For REVIEW/BLOCKED PRs, each evidence layer gets its own H3 section:

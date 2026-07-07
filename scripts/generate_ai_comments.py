@@ -131,7 +131,7 @@ def _build_per_pr_prompt(
         "on the first line. Follow the visual format templates from Section 4/5 of the prompt.\n\n"
         "MANDATORY REQUIREMENTS:\n"
         "- The comment MUST be at least 150 lines long. Aim for 200-300 lines.\n"
-        "- Include ALL sections: headline, signal summary table (7 rows), per-layer narrative "
+        "- Include ALL sections: headline, signal summary table (7 rows, 4-column: | Layer | Result | Confidence | Evidence |), per-layer narrative "
         "(Build Analysis, Test Analysis, etc. with 'What we checked' bullets and actual "
         "stdout/stderr in code blocks), behavioral probe with SHA256 hashes, reachability "
         "with file:line references, policy decision pseudocode, final recommendation with "
@@ -220,6 +220,18 @@ def _ensure_marker(comment: str) -> str:
     return stripped
 
 
+def _signal_table_ok(comment: str) -> str:
+    """Check signal table presence and column count. Returns status string or ''."""
+    for marker in ("| Layer ", "| Check ", "| Signal "):
+        if marker in comment:
+            header_line = next((l for l in comment.splitlines() if marker in l), "")
+            pipes = header_line.count("|")
+            if pipes >= 4:
+                return "4-col"
+            return f"present-{pipes - 1}col"
+    return ""
+
+
 def _validate_comment(comment: str, pr_num: str, pr_data: Dict[str, Any] = None) -> tuple:
     """Validate that the AI output meets golden standard quality bars.
 
@@ -237,8 +249,8 @@ def _validate_comment(comment: str, pr_num: str, pr_data: Dict[str, Any] = None)
         "line_count": {"passed": line_count >= 150, "value": line_count},
         "has_h2": {"passed": "##" in comment, "value": "##" in comment},
         "has_signal_table": {
-            "passed": "| Layer " in comment or "| Check " in comment or "| Signal " in comment,
-            "value": "| Layer " in comment or "| Check " in comment or "| Signal " in comment,
+            "passed": bool(_signal_table_ok(comment)),
+            "value": _signal_table_ok(comment),
         },
         "has_h3": {"passed": "###" in comment, "value": "###" in comment},
         "has_mode_footer": {"passed": "Mode:" in comment, "value": "Mode:" in comment},
@@ -259,8 +271,8 @@ def _validate_comment(comment: str, pr_num: str, pr_data: Dict[str, Any] = None)
             "value": "sha256" in comment_lower or "hash" in comment_lower,
         },
         "has_policy_pseudocode": {
-            "passed": "verdict" in comment_lower and ("build" in comment_lower and "tests" in comment_lower),
-            "value": bool(re.search(r'verdict\s*=', comment_lower)),
+            "passed": bool(re.search(r'verdict\s*[:=]\s*(?:SAFE|REVIEW|BLOCKED)', comment)),
+            "value": bool(re.search(r'verdict\s*[:=]\s*(?:SAFE|REVIEW|BLOCKED)', comment)),
         },
         "has_confidence_reasoning": {
             "passed": bool(re.search(r'\b(HIGH|MEDIUM|LOW)\b', comment)),
@@ -306,7 +318,10 @@ def _validate_comment(comment: str, pr_num: str, pr_data: Dict[str, Any] = None)
 def _near_valid(diagnostics: dict) -> bool:
     """Accept a comment without retry when it is long enough and nearly passes."""
     lc = diagnostics.get("line_count", {})
-    if (lc.get("value") or 0) < 300:
+    line_count = lc.get("value") or 0
+    if line_count < 100:
+        return False
+    if line_count < 300:
         return False
     failures = sum(1 for d in diagnostics.values() if not d.get("passed"))
     return failures <= 1
@@ -373,14 +388,14 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
         "",
         "### Signal Summary",
         "",
-        "| Layer | Signal | Detail |",
-        "|-------|--------|--------|",
-        f"| Build | {b_emoji} {build_verdict.upper()} | Exit: {build.get('pr_exit', 'N/A')} |",
-        f"| Tests | {t_status} | {'Exit: ' + str(test_exit) if test_exit is not None else 'N/A'} |",
-        f"| Behavioral Probe | {p_status} | — |",
-        f"| Reachability | {r_status} | {'Direct import' if reach_count > 0 else 'Not reached'} |",
-        f"| Changelog | {cl_short} | — |",
-        f"| API Diff | {a_status} | — |",
+        "| Layer | Result | Confidence | Evidence |",
+        "|-------|--------|------------|----------|",
+        f"| Build | {b_emoji} {build_verdict.upper()} | HIGH | Exit: {build.get('pr_exit', 'N/A')} |",
+        f"| Tests | {t_status} | {'HIGH' if test_exit == 0 else 'MEDIUM'} | {'Exit: ' + str(test_exit) if test_exit is not None else 'N/A'} |",
+        f"| Behavioral Probe | {p_status} | MEDIUM | — |",
+        f"| Reachability | {r_status} | {'HIGH' if reach_count > 0 else 'LOW'} | {'Direct import' if reach_count > 0 else 'Not reached'} |",
+        f"| Changelog | {cl_short} | MEDIUM | — |",
+        f"| API Diff | {a_status} | MEDIUM | — |",
         "",
         "### Verdict Logic",
         "",

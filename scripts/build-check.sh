@@ -1287,7 +1287,8 @@ normalize_go_errors() {
     -e "s|${WORKTREE_BASE}[^/]*/|./|g" \
     -e 's|go-build/[a-f0-9]*/[a-f0-9]*|go-build/HASH|g' \
     -e 's|[^ ]*/go/pkg/mod/|GOMODCACHE/|g' \
-    -e 's|@v[0-9][0-9.]*[^/:]*/|@VERSION/|g'
+    -e 's|@v[0-9][0-9.]*[^/:]*/|@VERSION/|g' \
+    -e 's|\(\.go\):[0-9]*:[0-9]*: undefined:|\1:0:0: undefined:|g'
 }
 
 # Classify Go build failures. Detects cache corruption vs real compile errors.
@@ -4124,9 +4125,14 @@ else:
             if is_preexisting_test:
                 steps.append({"step": "test_suite", "status": "pre_existing",
                               "detail": preexisting_detail})
+                pr_data["test"]["verdict"] = "pre_existing"
+                pr_data["test"]["new_failures"] = []
             else:
                 detail = preexisting_detail if preexisting_detail else f"exit={test_exit_val}"
                 steps.append({"step": "test_suite", "status": "fail", "detail": detail})
+                pr_data["test"]["verdict"] = "fail"
+                new_fails_list = sorted(new_test_fails) if eco == "gomod" and new_test_fails else (sorted(new_npm_test_fails) if eco == "npm" and 'new_npm_test_fails' in dir() and new_npm_test_fails else [])
+                pr_data["test"]["new_failures"] = new_fails_list
     else:
         steps.append({"step": "test_suite", "status": "skip", "detail": "not triggered"})
 
