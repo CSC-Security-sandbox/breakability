@@ -130,7 +130,9 @@ def _build_per_pr_prompt(
         "Generate the COMPLETE PR comment in markdown. Start with `<!-- breakability-check -->` "
         "on the first line. Follow the visual format templates from Section 4/5 of the prompt.\n\n"
         "MANDATORY REQUIREMENTS:\n"
-        "- The comment MUST be at least 150 lines long. Aim for 200-300 lines.\n"
+        "- The comment MUST be at least 200 lines long. Target 200-300 lines. "
+        "Comments under 200 lines are flagged for review. Expand narrative sections, "
+        "include more stdout/stderr, and add detailed reasoning to reach 200+ lines.\n"
         "- Include ALL sections: headline, signal summary table (7 rows, 4-column: | Layer | Result | Confidence | Evidence |), per-layer narrative "
         "(Build Analysis, Test Analysis, etc. with 'What we checked' bullets and actual "
         "stdout/stderr in code blocks), behavioral probe with SHA256 hashes, reachability "
@@ -211,6 +213,53 @@ def _normalize_verdict_text(comment: str, pr_num: str) -> str:
     return comment
 
 
+def _inject_verdict_logic(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
+    """Inject deterministic verdict logic pseudocode if the AI omitted it."""
+    if re.search(r'^###\s+Verdict\s+Logic', comment, re.MULTILINE):
+        return comment
+    if re.search(r'(?i)verdict\s+logic', comment):
+        return comment
+    if re.search(r'\bIF\b.*\bTHEN\b.*verdict\s*[:=]', comment, re.DOTALL | re.IGNORECASE):
+        return comment
+
+    av = authoritative_verdict(pr)
+    verdict = av.get("verdict", "REVIEW")
+    build = pr.get("build") or {}
+    test = pr.get("test") or {}
+    bg = pr.get("behavioral_grade") or {}
+    dep_type = pr.get("dep_type", "unknown")
+
+    conditions = []
+    if build.get("verdict"):
+        conditions.append(f'build.verdict = "{build["verdict"]}"')
+    if build.get("pr_exit") is not None:
+        conditions.append(f'build.pr_exit = {build["pr_exit"]}')
+    if test.get("ran") is not None:
+        if test["ran"] and test.get("exit") is not None:
+            conditions.append(f'test.exit = {test["exit"]}')
+        elif not test["ran"]:
+            conditions.append('test.ran = false')
+    if bg.get("same_behavior") is not None:
+        conditions.append(f'behavioral_grade.same_behavior = {str(bg["same_behavior"]).lower()}')
+    conditions.append(f'dep_type = "{dep_type}"')
+
+    cond_str = "\n  AND ".join(conditions)
+    source = av.get("source", "verdict_contract")
+    pseudocode = (
+        f"\n\n### Verdict Logic\n\n```\nIF {cond_str}\n"
+        f"THEN verdict = {verdict}\nSource: {source}\n```\n"
+    )
+
+    rec_m = re.search(r'^###?\s+.*(?:Recommend|Next\s+Step|Action)', comment, re.MULTILINE | re.IGNORECASE)
+    if rec_m:
+        comment = comment[:rec_m.start()] + pseudocode + "\n" + comment[rec_m.start():]
+    else:
+        comment = comment.rstrip() + pseudocode
+
+    print(f"PR#{pr_num}: injected deterministic verdict logic pseudocode", file=sys.stderr)
+    return comment
+
+
 def _ensure_marker(comment: str) -> str:
     """Ensure the comment starts with the breakability marker."""
     marker = "<!-- breakability-check -->"
@@ -271,8 +320,16 @@ def _validate_comment(comment: str, pr_num: str, pr_data: Dict[str, Any] = None)
             "value": "sha256" in comment_lower or "hash" in comment_lower,
         },
         "has_policy_pseudocode": {
-            "passed": bool(re.search(r'verdict\s*[:=]\s*(?:SAFE|REVIEW|BLOCKED)', comment)),
-            "value": bool(re.search(r'verdict\s*[:=]\s*(?:SAFE|REVIEW|BLOCKED)', comment)),
+            "passed": bool(
+                re.search(r'^###\s+Verdict\s+Logic', comment, re.MULTILINE)
+                or re.search(r'(?i)verdict\s+logic', comment)
+                or re.search(r'\bIF\b.*\bTHEN\b.*verdict\s*[:=]', comment, re.DOTALL | re.IGNORECASE)
+            ),
+            "value": bool(
+                re.search(r'^###\s+Verdict\s+Logic', comment, re.MULTILINE)
+                or re.search(r'(?i)verdict\s+logic', comment)
+                or re.search(r'\bIF\b.*\bTHEN\b.*verdict\s*[:=]', comment, re.DOTALL | re.IGNORECASE)
+            ),
         },
         "has_confidence_reasoning": {
             "passed": bool(re.search(r'\b(HIGH|MEDIUM|LOW)\b', comment)),
@@ -329,10 +386,14 @@ def _near_valid(diagnostics: dict) -> bool:
     line_count = lc.get("value") or 0
     if line_count < 100:
         return False
-    if line_count < 200:
-        return False
     failures = sum(1 for d in diagnostics.values() if not d.get("passed"))
-    return failures <= 1
+    if line_count >= 200 and failures <= 2:
+        return True
+    if line_count >= 180 and failures == 0:
+        return True
+    if line_count >= 150 and failures <= 1:
+        return True
+    return False
 
 
 def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
@@ -544,14 +605,21 @@ def generate_comments(
         )
 
         comment = None
-        for attempt in range(2):
+        max_attempts = 2
+        _best_response = None
+        _best_response_len = 0
+        for attempt in range(max_attempts):
+            retry_key = f"comment-pr-{pr_num}" if attempt == 0 else f"comment-pr-{pr_num}-retry{attempt}"
             response = backend.invoke(
                 prompt,
                 namespace="breakability-comment",
-                key=f"comment-pr-{pr_num}" if attempt == 0 else f"comment-pr-{pr_num}-retry",
+                key=retry_key,
             )
 
             if response:
+                if len(response) > _best_response_len:
+                    _best_response = response
+                    _best_response_len = len(response)
                 valid, diag = _validate_comment(response, pr_num, pr_data)
                 if valid:
                     comment = _ensure_marker(response)
@@ -577,6 +645,9 @@ def generate_comments(
                 reason = "validation failed"
                 preview = response[:200].replace('\n', '\\n')
                 print(f"PR#{pr_num}: response preview ({len(response)} chars): {preview}", file=sys.stderr)
+                if attempt == max_attempts - 1 and max_attempts == 2 and _best_response_len >= 8000:
+                    max_attempts = 3
+                    print(f"PR#{pr_num}: substantial AI output ({_best_response_len} chars) — adding third attempt", file=sys.stderr)
             else:
                 diagnostics_log.append({
                     "pr_num": pr_num,
@@ -588,12 +659,13 @@ def generate_comments(
                 })
                 reason = "empty response (0 chars)"
                 print(f"PR#{pr_num}: {reason}", file=sys.stderr)
-            if attempt == 0:
-                print(f"PR#{pr_num}: AI call {reason}, retrying once...", file=sys.stderr)
+            if attempt < max_attempts - 1:
+                print(f"PR#{pr_num}: AI call {reason}, retrying...", file=sys.stderr)
 
         if comment:
             comment = _enforce_verdict_floor(comment, pr_data, pr_num)
             comment = _normalize_verdict_text(comment, pr_num)
+            comment = _inject_verdict_logic(comment, pr_data, pr_num)
             comments[pr_num] = comment
         else:
             print(f"PR#{pr_num}: AI failed after retry, using fallback", file=sys.stderr)

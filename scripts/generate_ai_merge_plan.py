@@ -232,10 +232,42 @@ def _build_merge_plan_prompt(base_prompt: str, data: Dict[str, Any],
         "Output ONLY the markdown — do NOT wrap in ```markdown``` fences.\n"
     )
 
+    sections.append(
+        "\n### MANDATORY VERDICT COUNTS (use these EXACT numbers)\n"
+        f"Safe: {summary.get('safe', 0)} | "
+        f"Review: {summary.get('review', 0)} | "
+        f"Blocked: {summary.get('blocked', 0)} | "
+        f"Unverified: {summary.get('unverified', 0)}\n"
+        "Your Summary section MUST use these exact counts. Do NOT recount from the PR data — "
+        "these are the authoritative verdicts computed by the analysis pipeline.\n"
+    )
+
     return "\n".join(sections)
 
 
 import re as _re
+
+
+def _fix_summary_counts(text: str, data: Dict[str, Any]) -> str:
+    """Post-process AI output to ensure summary verdict counts match authoritative verdicts."""
+    cats = _categorize_prs(data.get("prs", {}))
+    correct = {
+        "Safe": len(cats["safe"]),
+        "Review": len(cats["review"]),
+        "Blocked": len(cats["blocked"]),
+        "Unverified": len(cats["unverified"]),
+    }
+    correct_line = (
+        f"- **Safe:** {correct['Safe']} | **Review:** {correct['Review']} | "
+        f"**Blocked:** {correct['Blocked']} | **Unverified:** {correct['Unverified']}"
+    )
+    pat = _re.compile(
+        r'^- \*\*Safe:?\*\*:?\s*\d+\s*\|.*\*\*(?:Review|Blocked).*$',
+        _re.MULTILINE,
+    )
+    if pat.search(text):
+        text = pat.sub(correct_line, text)
+    return text
 
 
 def _strip_preamble(text: str) -> str:
@@ -268,6 +300,7 @@ def generate_merge_plan(data: Dict[str, Any], prompt_path: Optional[str] = None,
 
             if response and "# " in response and len(response.splitlines()) > 20:
                 response = _strip_preamble(response)
+                response = _fix_summary_counts(response, data)
                 print(f"AI merge plan generated ({len(response.splitlines())} lines)", file=sys.stderr)
                 return response.strip()
             print("AI merge plan insufficient, using template fallback", file=sys.stderr)

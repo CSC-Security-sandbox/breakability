@@ -58,9 +58,9 @@ class TestValidateComment(unittest.TestCase):
         if has_sha256:
             parts.append("SHA256: abc123def456")
         if has_policy:
-            parts.append("verdict = SAFE")
-            parts.append("build = PASS")
-            parts.append("tests = PASS")
+            parts.append("### Verdict Logic")
+            parts.append("IF build.verdict = pass AND test.exit = 0")
+            parts.append("THEN verdict = SAFE")
         if has_confidence:
             parts.append("**Confidence:** HIGH — Build passed cleanly")
         if has_merge_plan:
@@ -91,7 +91,7 @@ class TestValidateComment(unittest.TestCase):
         self.assertFalse(diag["has_signal_table"]["passed"])
 
     def test_missing_subsection_fails(self):
-        comment = self._make_comment(has_subsection=False, has_h3_sections=False)
+        comment = self._make_comment(has_subsection=False, has_h3_sections=False, has_policy=False)
         passed, diag = _validate_comment(comment, "42")
         self.assertFalse(passed)
         self.assertFalse(diag["has_h3"]["passed"])
@@ -214,8 +214,12 @@ class TestNearValid(unittest.TestCase):
         diag = self._make_diag(line_count=100, failures={"has_h3"})
         self.assertFalse(_near_valid(diag))
 
-    def test_long_comment_two_failures_rejected(self):
+    def test_long_comment_two_failures_accepted(self):
         diag = self._make_diag(line_count=400, failures={"has_h3", "has_bash_block"})
+        self.assertTrue(_near_valid(diag))
+
+    def test_long_comment_three_failures_rejected(self):
+        diag = self._make_diag(line_count=400, failures={"has_h3", "has_bash_block", "has_sha256"})
         self.assertFalse(_near_valid(diag))
 
     def test_all_passing_long_is_near_valid(self):

@@ -3122,8 +3122,31 @@ $IMPORT_OUT"
                 BUILD_VERDICT="pre_existing"
                 echo "  build: per-module baseline passes but targeted build errors from other failing modules — pre-existing"
               else
-                BUILD_VERDICT="fail"
-                echo "  build: baseline exit=$MAIN_EXIT, PR exit=$BUILD_EXIT — genuine failure (not pre-existing)"
+                # F003 FALLBACK: Per-module baselines all pass (exit=0) but targeted build
+                # crosses module boundaries and fails. Run the same targeted build on main —
+                # if it also fails with the same errors, these are pre-existing cross-module errors.
+                echo "  build: per-module baselines pass for error modules — running targeted build on main for comparison..."
+                _MAIN_TARGETED_EXIT=0
+                _MAIN_TARGETED_OUTPUT=$(cd "$MAIN_DIR" && go_targeted_build "$FILES_IMPORTING" 2>&1) || _MAIN_TARGETED_EXIT=$?
+                if [[ "$_MAIN_TARGETED_EXIT" -ne 0 ]]; then
+                  _MAIN_T_ERR="/tmp/_bc_main_targeted_errs_${PR_NUM}.txt"
+                  _PR_T_ERR="/tmp/_bc_pr_targeted_errs_${PR_NUM}.txt"
+                  echo "$_MAIN_TARGETED_OUTPUT" | grep -E '^.*\.go:[0-9]+' | normalize_go_errors | sort -u > "$_MAIN_T_ERR" 2>/dev/null || true
+                  echo "$BUILD_OUTPUT" | grep -E '^.*\.go:[0-9]+' | normalize_go_errors | sort -u > "$_PR_T_ERR" 2>/dev/null || true
+                  _NEW_T_ERRORS=$(comm -23 "$_PR_T_ERR" "$_MAIN_T_ERR" 2>/dev/null | head -10)
+                  rm -f "$_MAIN_T_ERR" "$_PR_T_ERR"
+                  if [[ -z "$_NEW_T_ERRORS" ]]; then
+                    BUILD_VERDICT="pre_existing"
+                    echo "  build: targeted build also fails on main with same errors — pre-existing"
+                  else
+                    BUILD_VERDICT="pre_existing_plus_new"
+                    echo "  build: targeted build fails on main but PR introduces new errors:"
+                    echo "$_NEW_T_ERRORS" | head -5 | sed 's/^/    /'
+                  fi
+                else
+                  BUILD_VERDICT="fail"
+                  echo "  build: targeted build passes on main (exit=0) but fails on PR (exit=$BUILD_EXIT) — genuine failure"
+                fi
               fi
             else
               BUILD_VERDICT="fail"
