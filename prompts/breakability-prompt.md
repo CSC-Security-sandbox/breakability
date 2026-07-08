@@ -1213,4 +1213,45 @@ Do this for EVERY PR. No exceptions. Both markers must be searched.
 **Monorepo awareness:** This is a monorepo with multiple `package.json` files in subdirectories (`services/*/package.json`, `lib/*/package.json`), a Go module (`ndm-api-tests/go.mod`), a Maven project (`services/keycloak-customizations/pom.xml`), and Dockerfiles per service. The `pkg_dir` field in the JSON tells you which subdirectory this dependency lives in. Use this context when describing build results and usage scans. Shared libraries in `lib/` are consumed by services in `services/` — the `workspace_graph.consumers` map shows these relationships.
 
 **Repository:** Use `gh` CLI. Token is `GH_TOKEN`.
+
+---
+
+### **REQUIRED: Verdict Logic Section**
+
+**Every PR comment MUST include a `### Verdict Logic` section** with IF/THEN pseudocode showing exactly how the verdict was derived. This is mandatory — comments without it are rejected.
+
+The pseudocode must reference concrete signal values from the data (exit codes, test counts, verification level) and conclude with `verdict = SAFE|REVIEW|BLOCKED`.
+
+**Example 1 — SAFE path:**
+```
+### Verdict Logic
+IF build.verdict = "pass"
+  AND test.exit = 0 (14 passed, 0 failed)
+  AND behavioral_grade.same_behavior = true
+  AND dep_type = "dev"
+THEN verdict = SAFE
+```
+
+**Example 2 — REVIEW path:**
+```
+### Verdict Logic
+IF build.verdict = "pre_existing"
+  AND install_ok = true
+  AND test.ran = false (no test suite)
+  AND files_importing count = 3 (production paths)
+THEN verdict = REVIEW
+Reason: No test coverage for production dependency — cannot confirm behavioral compatibility.
+```
+
+**Example 3 — BLOCKED path:**
+```
+### Verdict Logic
+IF build.verdict = "fail"
+  AND build.pr_exit = 2 (new compilation errors)
+  AND build.main_exit = 0 (baseline passes)
+THEN verdict = BLOCKED
+Reason: PR introduces new build failures not present on main branch.
+```
+
+Include the actual values from the PR data — do NOT use placeholder values. The pseudocode must be traceable to the JSON input.
 ````

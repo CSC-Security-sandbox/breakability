@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from generate_ai_merge_plan import (
     _categorize_prs,
+    _get_verdict,
     _pr_row,
     _parse_all_open_prs,
     _strip_preamble,
@@ -45,6 +46,16 @@ class TestStripPreamble(unittest.TestCase):
         text = "This response has no heading at all"
         result = _strip_preamble(text)
         self.assertEqual(result, text)
+
+    def test_strips_preamble_with_hash_in_text(self):
+        text = "Perfect! I now have all the data for PR #11.\n\n# Breakability Merge Plan\nContent"
+        result = _strip_preamble(text)
+        self.assertTrue(result.startswith("# Breakability Merge Plan"))
+
+    def test_strips_preamble_before_h2(self):
+        text = "Here is the plan:\n## Summary\nContent"
+        result = _strip_preamble(text)
+        self.assertTrue(result.startswith("## Summary"))
 
 
 class TestCategorizePrs(unittest.TestCase):
@@ -114,6 +125,31 @@ class TestCategorizePrs(unittest.TestCase):
         result = _categorize_prs(prs)
         nums = [n for n, _ in result["safe"]]
         self.assertEqual(nums, ["3", "15", "20"])
+
+    def test_authoritative_verdict_overrides_raw(self):
+        """authoritative_verdict() should override raw verdict_v2 when build signals differ."""
+        pr = {
+            "package": "foo",
+            "build": {"verdict": "fail", "pr_exit": 1, "main_exit": 0},
+            "test": {"ran": False},
+            "verdict_v2": {"verdict": "SAFE"},
+        }
+        verdict = _get_verdict(pr)
+        self.assertEqual(verdict, "BLOCKED")
+
+    def test_categorize_uses_authoritative_verdict(self):
+        """Categorize should use authoritative verdict, not raw verdict_v2."""
+        prs = {
+            "11": {
+                "package": "go-jose",
+                "build": {"verdict": "fail", "pr_exit": 1, "main_exit": 0},
+                "test": {"ran": False},
+                "verdict_v2": {"verdict": "SAFE"},
+            },
+        }
+        result = _categorize_prs(prs)
+        self.assertEqual(len(result["blocked"]), 1)
+        self.assertEqual(len(result["safe"]), 0)
 
 
 class TestPrRow(unittest.TestCase):

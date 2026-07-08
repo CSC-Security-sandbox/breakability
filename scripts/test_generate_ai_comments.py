@@ -159,8 +159,8 @@ class TestValidateComment(unittest.TestCase):
         self.assertFalse(passed)
         self.assertFalse(diag["has_merge_plan_link"]["passed"])
 
-    def test_verdict_mismatch_detected(self):
-        """When AI says SAFE but contract says REVIEW, validation fails with verdict_mismatch."""
+    def test_verdict_mismatch_detected_as_warning(self):
+        """When AI says SAFE but contract says REVIEW, verdict_mismatch is a warning (passed=True)."""
         comment = self._make_comment(lines=170)
         pr = {
             "package": "jwks-rsa", "build": {"verdict": "pass"},
@@ -170,10 +170,10 @@ class TestValidateComment(unittest.TestCase):
             "policy_lowering": {"decision": {"verdict": "MERGE"}},
         }
         passed, diag = _validate_comment(comment, "42", pr)
-        self.assertFalse(passed)
         self.assertIn("verdict_mismatch", diag)
-        self.assertFalse(diag["verdict_mismatch"]["passed"])
+        self.assertTrue(diag["verdict_mismatch"]["passed"])
         self.assertIn("AI=SAFE", diag["verdict_mismatch"]["value"])
+        self.assertIn("warning", diag["verdict_mismatch"]["value"])
 
     def test_no_verdict_mismatch_when_agreement(self):
         """When AI and contract agree, no verdict_mismatch diagnostic."""

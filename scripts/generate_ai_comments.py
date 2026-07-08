@@ -304,8 +304,8 @@ def _validate_comment(comment: str, pr_num: str, pr_data: Dict[str, Any] = None)
         ai_verdict = m.group(1) if m else None
         if ai_verdict and severity_order.get(ai_verdict, 1) < severity_order.get(contract_verdict, 1):
             diagnostics["verdict_mismatch"] = {
-                "passed": False,
-                "value": f"AI={ai_verdict} contract={contract_verdict} (source={av.get('source', '?')})",
+                "passed": True,
+                "value": f"AI={ai_verdict} contract={contract_verdict} (source={av.get('source', '?')}) [warning — contract overrides]",
             }
 
     all_passed = all(d["passed"] for d in diagnostics.values())

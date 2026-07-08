@@ -22,16 +22,30 @@ from typing import Any, Dict, List, Optional, Tuple
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from ai_backend import Backend
+from verdict_contract import authoritative_verdict as _authoritative_verdict
+
+
+def _get_verdict(pr: Dict) -> str:
+    """Get the authoritative verdict for a PR, falling back to verdict_v2 or build verdict."""
+    has_signals = bool(pr.get("build") or pr.get("test"))
+    if has_signals:
+        try:
+            av = _authoritative_verdict(pr)
+            return av.get("verdict", "REVIEW").upper()
+        except Exception:
+            pass
+    v2 = pr.get("verdict_v2", {})
+    return v2.get("verdict", pr.get("build", {}).get("verdict", "REVIEW")).upper()
 
 
 def _categorize_prs(prs: Dict[str, Dict]) -> Dict[str, List[Tuple[str, Dict]]]:
     safe, review, blocked, unverified, skipped = [], [], [], [], []
     for num, pr in sorted(prs.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0):
-        v2 = pr.get("verdict_v2", {})
-        verdict = v2.get("verdict", pr.get("build", {}).get("verdict", "REVIEW")).upper()
         if pr.get("build", {}).get("verdict") == "skipped":
             skipped.append((num, pr))
-        elif verdict == "SAFE":
+            continue
+        verdict = _get_verdict(pr)
+        if verdict == "SAFE":
             safe.append((num, pr))
         elif verdict in ("BLOCKED", "BUILD_FAILS"):
             blocked.append((num, pr))
@@ -225,10 +239,12 @@ import re as _re
 
 
 def _strip_preamble(text: str) -> str:
-    """Remove conversational preamble before the first '# ' heading and strip code fences."""
+    """Remove conversational preamble before the first markdown heading and strip code fences."""
     text = _re.sub(r'^```(?:markdown)?\s*\n', '', text)
     text = _re.sub(r'\n```\s*$', '', text)
-    text = _re.sub(r"^[^#]*(?=# )", "", text, count=1, flags=_re.DOTALL)
+    m = _re.search(r'^#{1,3}\s', text, flags=_re.MULTILINE)
+    if m and m.start() > 0:
+        text = text[m.start():]
     return text
 
 

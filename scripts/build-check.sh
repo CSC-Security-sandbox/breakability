@@ -3078,6 +3078,57 @@ $IMPORT_OUT"
               echo "  build: per-module baseline passes, PR has NEW errors not in main:"
               echo "$NEW_ERRORS" | head -5 | sed 's/^/    /'
             fi
+          elif [[ "$_GO_MULTI_MODULE" == "true" && "$ECOSYSTEM" == "gomod" && -n "$BUILD_OUTPUT" ]]; then
+            # T01 FIX: Per-module baseline passes (MAIN_EXIT=0) but targeted build
+            # crosses module boundaries and hits pre-existing errors in other modules
+            # (e.g. vcm-proxy OpenAPI codegen). Extract error file paths, map to their
+            # module roots, check if those modules have failing per-module baselines.
+            _err_paths=$(echo "$BUILD_OUTPUT" | grep -oP '[^ ]*\.go:[0-9]+' | sed 's/:[0-9]*$//' | sort -u)
+            if [[ -n "$_err_paths" ]]; then
+              _all_preexisting="true"
+              _checked_mods=""
+              while IFS= read -r _epath; do
+                [[ -z "$_epath" ]] && continue
+                _edir=$(dirname "$_epath" 2>/dev/null || echo ".")
+                # Walk up to find go.mod (module root) for this error file
+                _emr="."
+                _check="$_edir"
+                while [[ "$_check" != "." && "$_check" != "/" ]]; do
+                  if [[ -f "$_check/go.mod" ]]; then
+                    _emr="$_check"
+                    break
+                  fi
+                  _check=$(dirname "$_check")
+                done
+                # Skip if already checked this module
+                echo "$_checked_mods" | grep -qF "|${_emr}|" && continue
+                _checked_mods="${_checked_mods}|${_emr}|"
+                # Look up per-module baseline exit
+                _emr_key=$(echo "$_emr" | tr '/' '_')
+                _emr_exit_file="/tmp/_bc_main_go_mod_exit_${_emr_key}.txt"
+                if [[ -f "$_emr_exit_file" ]]; then
+                  _emr_exit=$(cat "$_emr_exit_file" 2>/dev/null || echo "0")
+                  if [[ "$_emr_exit" -eq 0 ]]; then
+                    _all_preexisting="false"
+                    break
+                  fi
+                  echo "  multi-module cross-check: errors from module $_emr (baseline exit=$_emr_exit)"
+                else
+                  _all_preexisting="false"
+                  break
+                fi
+              done <<< "$_err_paths"
+              if [[ "$_all_preexisting" == "true" && -n "$_checked_mods" ]]; then
+                BUILD_VERDICT="pre_existing"
+                echo "  build: per-module baseline passes but targeted build errors from other failing modules — pre-existing"
+              else
+                BUILD_VERDICT="fail"
+                echo "  build: baseline exit=$MAIN_EXIT, PR exit=$BUILD_EXIT — genuine failure (not pre-existing)"
+              fi
+            else
+              BUILD_VERDICT="fail"
+              echo "  build: baseline exit=$MAIN_EXIT, PR exit=$BUILD_EXIT — genuine failure (not pre-existing)"
+            fi
           else
             BUILD_VERDICT="fail"
             echo "  build: baseline exit=$MAIN_EXIT, PR exit=$BUILD_EXIT — genuine failure (not pre-existing)"
