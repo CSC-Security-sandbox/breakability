@@ -39,7 +39,7 @@ def _get_verdict(pr: Dict) -> str:
 
 
 def _categorize_prs(prs: Dict[str, Dict]) -> Dict[str, List[Tuple[str, Dict]]]:
-    safe, review, blocked, unverified, skipped = [], [], [], [], []
+    safe, glance, review, blocked, unverified, skipped = [], [], [], [], [], []
     for num, pr in sorted(prs.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0):
         if pr.get("build", {}).get("verdict") == "skipped":
             skipped.append((num, pr))
@@ -47,6 +47,8 @@ def _categorize_prs(prs: Dict[str, Dict]) -> Dict[str, List[Tuple[str, Dict]]]:
         verdict = _get_verdict(pr)
         if verdict == "SAFE":
             safe.append((num, pr))
+        elif verdict == "GLANCE":
+            glance.append((num, pr))
         elif verdict in ("BLOCKED", "BUILD_FAILS"):
             blocked.append((num, pr))
         elif verdict == "UNVERIFIED":
@@ -54,7 +56,7 @@ def _categorize_prs(prs: Dict[str, Dict]) -> Dict[str, List[Tuple[str, Dict]]]:
         else:
             review.append((num, pr))
     return {
-        "safe": safe, "review": review, "blocked": blocked,
+        "safe": safe, "glance": glance, "review": review, "blocked": blocked,
         "unverified": unverified, "skipped": skipped,
     }
 
@@ -109,6 +111,34 @@ def generate_template_plan(data: Dict[str, Any], run_url: Optional[str] = None,
         lines.append(f"> ℹ️ {len(not_analyzed)} PR(s) not analyzed in this run — listed below under \"Not Yet Analyzed\"")
     lines.append("")
 
+    auto_clear = len(cats["safe"]) + len(cats["glance"])
+    lines.append("## Developer Action Summary")
+    lines.append("")
+    lines.append(f"| Action | Count | What to do |")
+    lines.append(f"|--------|-------|------------|")
+    if cats["safe"]:
+        lines.append(f"| ✅ Safe to merge | {len(cats['safe'])} | Merge immediately — no breaking changes detected |")
+    if cats["glance"]:
+        lines.append(f"| 👀 Likely safe | {len(cats['glance'])} | Quick glance, then merge — low-risk changes |")
+    if cats["review"]:
+        lines.append(f"| ⚠️ Needs review | {len(cats['review'])} | Review the analysis comment before merging |")
+    if cats["blocked"]:
+        lines.append(f"| ❌ Fix required | {len(cats['blocked'])} | Do not merge — breaking changes or build failures |")
+    if cats["unverified"]:
+        lines.append(f"| ⚙️ Unverified | {len(cats['unverified'])} | Analysis incomplete — re-run or investigate |")
+    lines.append(f"| **Total** | **{len(prs)}** | **{auto_clear} auto-clearable** ({auto_clear * 100 // max(len(prs), 1)}% of analyzed) |")
+    lines.append("")
+
+    sec = data.get("security_posture", {})
+    cve_alerts = sec.get("total_open_alerts", 0)
+    cve_critical = sec.get("severity_counts", {}).get("critical", 0)
+    cve_high = sec.get("severity_counts", {}).get("high", 0)
+    if cve_critical > 0 or cve_high > 0:
+        lines.append("## 🚨 CVE Alert")
+        lines.append(f"> **{cve_critical} critical** and **{cve_high} high** severity Dependabot alerts are open on this repository.")
+        lines.append("> PRs that address these CVEs should be prioritized.")
+        lines.append("")
+
     if cross_deps:
         lines.append("## ⚠️ Coordinated Upgrades")
         lines.append("| PRs | Relationship | Merge Order |")
@@ -125,9 +155,10 @@ def generate_template_plan(data: Dict[str, Any], run_url: Optional[str] = None,
 
     for label, emoji, key in [
         ("Safe to Merge", "✅", "safe"),
+        ("Likely Safe", "👀", "glance"),
         ("Review Needed", "⚠️", "review"),
         ("Unverified", "⚙️", "unverified"),
-        ("Blocked / Fix Required", "❌", "blocked"),
+        ("Fix Required", "❌", "blocked"),
     ]:
         bucket = cats[key]
         if bucket:
@@ -165,10 +196,12 @@ def generate_template_plan(data: Dict[str, Any], run_url: Optional[str] = None,
                 lines.append(f"- \U0001f6a8 PRs introducing NEW vulnerabilities: {govuln['prs_with_new_vulns']}")
         lines.append("")
 
-    lines.append("## Summary")
+    lines.append("## Merge Risk Summary")
     lines.append(f"- **Total open PRs:** {total_open} | Analyzed: {len(prs)} | Not analyzed: {len(not_analyzed)}")
-    lines.append(f"- **Safe:** {len(cats['safe'])} | **Review:** {len(cats['review'])} | "
+    lines.append(f"- **Safe:** {len(cats['safe'])} | **Likely safe:** {len(cats['glance'])} | "
+                 f"**Review:** {len(cats['review'])} | "
                  f"**Blocked:** {len(cats['blocked'])} | **Unverified:** {len(cats['unverified'])}")
+    lines.append(f"- **Auto-clearable:** {auto_clear} of {len(prs)} ({auto_clear * 100 // max(len(prs), 1)}%)")
     lines.append("")
 
     lines.append("---")
@@ -225,9 +258,18 @@ def _build_merge_plan_prompt(base_prompt: str, data: Dict[str, Any],
         "Start your response with `# Breakability Merge Plan` — no preamble, "
         "no code fences, no conversational text before the heading. "
         "Generate the COMPLETE merge plan body in markdown. "
-        "Include: repo/date header, coordinated upgrades, "
-        "Safe/Review/Blocked/Unverified tables, security posture, "
-        "summary stats, and footer. "
+        "Required sections IN ORDER:\n"
+        "1. Header (repo, date, PR count)\n"
+        "2. Developer Action Summary table (action / count / what to do)\n"
+        "3. CVE Alert (if critical/high alerts exist)\n"
+        "4. Coordinated Upgrades (if cross-PR deps exist)\n"
+        "5. Safe to Merge table\n"
+        "6. Likely Safe table (GLANCE verdicts — quick review, low risk)\n"
+        "7. Review Needed table\n"
+        "8. Fix Required table\n"
+        "9. Security Posture\n"
+        "10. Merge Risk Summary (counts + auto-clearable percentage)\n"
+        "11. Footer\n"
         "Order tables by merge priority. "
         "Output ONLY the markdown — do NOT wrap in ```markdown``` fences.\n"
     )
@@ -235,10 +277,11 @@ def _build_merge_plan_prompt(base_prompt: str, data: Dict[str, Any],
     sections.append(
         "\n### MANDATORY VERDICT COUNTS (use these EXACT numbers)\n"
         f"Safe: {summary.get('safe', 0)} | "
+        f"Likely safe (GLANCE): {summary.get('glance', 0)} | "
         f"Review: {summary.get('review', 0)} | "
         f"Blocked: {summary.get('blocked', 0)} | "
         f"Unverified: {summary.get('unverified', 0)}\n"
-        "Your Summary section MUST use these exact counts. Do NOT recount from the PR data — "
+        "Your Merge Risk Summary MUST use these exact counts. Do NOT recount from the PR data — "
         "these are the authoritative verdicts computed by the analysis pipeline.\n"
     )
 
@@ -253,12 +296,14 @@ def _fix_summary_counts(text: str, data: Dict[str, Any]) -> str:
     cats = _categorize_prs(data.get("prs", {}))
     correct = {
         "Safe": len(cats["safe"]),
+        "Likely safe": len(cats["glance"]),
         "Review": len(cats["review"]),
         "Blocked": len(cats["blocked"]),
         "Unverified": len(cats["unverified"]),
     }
     correct_line = (
-        f"- **Safe:** {correct['Safe']} | **Review:** {correct['Review']} | "
+        f"- **Safe:** {correct['Safe']} | **Likely safe:** {correct['Likely safe']} | "
+        f"**Review:** {correct['Review']} | "
         f"**Blocked:** {correct['Blocked']} | **Unverified:** {correct['Unverified']}"
     )
     pat = _re.compile(

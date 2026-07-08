@@ -156,6 +156,13 @@ def _test_record(pr: Mapping[str, Any], global_test_exit: Optional[int] = None) 
                 confidence=Confidence.MEDIUM,
                 rationale="test failure also occurs on main; not introduced by this PR",
             )
+        if test.get("verdict") == "pre_existing":
+            return _record(
+                SignalName.TEST,
+                SignalStatus.PASS,
+                confidence=Confidence.MEDIUM,
+                rationale="build-check classified test failure as pre-existing (main tests unavailable)",
+            )
         if baseline_unreliable:
             return _record(
                 SignalName.TEST,
