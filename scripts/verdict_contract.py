@@ -39,7 +39,8 @@ from typing import Any, Mapping, Optional, Tuple
 BUCKET_SAFE = "SAFE"
 BUCKET_REVIEW = "REVIEW"
 BUCKET_BLOCKED = "BLOCKED"
-VALID_BUCKETS = {BUCKET_SAFE, BUCKET_REVIEW, BUCKET_BLOCKED}
+BUCKET_GLANCE = "GLANCE"
+VALID_BUCKETS = {BUCKET_SAFE, BUCKET_REVIEW, BUCKET_BLOCKED, BUCKET_GLANCE}
 
 # ── Gate prediction vocabulary (corpus / run_gate) ───────────────────────────
 PRED_AUTO_CLEAR = "auto_clear"
@@ -74,7 +75,7 @@ _ACTION_TO_BUCKET = {
     "FIX": BUCKET_BLOCKED,
     "REVIEW": BUCKET_REVIEW,
     "ABSTAIN": BUCKET_REVIEW,
-    "GLANCE": BUCKET_SAFE,
+    "GLANCE": BUCKET_GLANCE,
     "MERGE": BUCKET_SAFE,
 }
 
@@ -90,6 +91,7 @@ _BUCKET_TO_PREDICTION = {
     BUCKET_BLOCKED: PRED_FIX,
     BUCKET_REVIEW: PRED_REVIEW,
     BUCKET_SAFE: PRED_AUTO_CLEAR,
+    BUCKET_GLANCE: PRED_AUTO_CLEAR,
 }
 
 
@@ -166,6 +168,11 @@ def _hard_fix_floor(pr: Mapping[str, Any]) -> bool:
     """
     build_verdict = (pr.get("build") or {}).get("verdict", "")
     if build_verdict in ("fail", "pre_existing_plus_new"):
+        if build_verdict == "fail":
+            bg = pr.get("behavioral_grade") or {}
+            fi = pr.get("files_importing")
+            if bg.get("same_behavior") is True and isinstance(fi, list) and len(fi) == 0:
+                return False
         return True
     test = pr.get("test") or {}
     test_ran = test.get("ran", False)

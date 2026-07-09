@@ -13,6 +13,8 @@ from generate_ai_merge_plan import (
     _pr_row,
     _parse_all_open_prs,
     _strip_preamble,
+    _is_meta_description,
+    _fix_section_membership,
     _build_merge_plan_prompt,
     generate_template_plan,
     generate_merge_plan,
@@ -322,6 +324,95 @@ class TestGenerateMergePlan(unittest.TestCase):
             self.assertIn("fallback/repo", result)
         finally:
             os.unlink(prompt_path)
+
+
+class TestFixSectionMembership(unittest.TestCase):
+    """T003: _fix_section_membership moves PRs to correct sections."""
+
+    def _make_data(self, verdicts):
+        prs = {}
+        for num, v in verdicts.items():
+            prs[num] = {"verdict_v2": {"verdict": v}, "build": {"verdict": "pass"}}
+        return {"prs": prs}
+
+    def test_moves_review_pr_from_safe_section(self):
+        text = (
+            "## ✅ Safe to Merge\n"
+            "| PR | Package |\n|---|---|\n"
+            "| #1 | lodash |\n"
+            "| #66 | express |\n\n"
+            "## ⚠️ Review Needed\n"
+            "| PR | Package |\n|---|---|\n"
+            "| #3 | chalk |\n"
+        )
+        data = self._make_data({"1": "SAFE", "66": "REVIEW", "3": "REVIEW"})
+        result = _fix_section_membership(text, data)
+        safe_idx = result.index("Safe to Merge")
+        review_idx = result.index("Review Needed")
+        pr66_idx = result.index("#66")
+        self.assertGreater(pr66_idx, review_idx)
+
+    def test_moves_blocked_pr_from_safe_section(self):
+        text = (
+            "## ✅ Safe to Merge\n"
+            "| PR | Package |\n|---|---|\n"
+            "| #1 | lodash |\n"
+            "| #68 | axios |\n\n"
+            "## ❌ Fix Required\n"
+            "| PR | Package |\n|---|---|\n"
+            "| #5 | chalk |\n"
+        )
+        data = self._make_data({"1": "SAFE", "68": "BLOCKED", "5": "BLOCKED"})
+        result = _fix_section_membership(text, data)
+        fix_idx = result.index("Fix Required")
+        pr68_idx = result.index("#68")
+        self.assertGreater(pr68_idx, fix_idx)
+
+    def test_correct_placement_unchanged(self):
+        text = (
+            "## ✅ Safe to Merge\n"
+            "| PR | Package |\n|---|---|\n"
+            "| #1 | lodash |\n\n"
+            "## ⚠️ Review Needed\n"
+            "| PR | Package |\n|---|---|\n"
+            "| #2 | express |\n"
+        )
+        data = self._make_data({"1": "SAFE", "2": "REVIEW"})
+        result = _fix_section_membership(text, data)
+        self.assertEqual(result, text)
+
+
+class TestMetaDescriptionDetection(unittest.TestCase):
+    """T008: _is_meta_description detects AI responses that describe the plan."""
+
+    def test_meta_description_with_key_sections_detected(self):
+        response = (
+            "## Key Sections:\n1. Header with repo info\n2. Developer Action Summary\n"
+            "3. Safe to Merge table\n\nThe file is saved at merge-plan.md and is ready to be posted.\n"
+            + "\n".join(f"Line {i}" for i in range(25))
+        )
+        data = {"prs": {"1": {}, "2": {}, "3": {}, "4": {}}}
+        self.assertTrue(_is_meta_description(response, data))
+
+    def test_valid_response_with_pr_tables_not_detected(self):
+        response = (
+            "# Breakability Merge Plan\n\n## Safe to Merge\n"
+            "| PR | Package | From | To |\n|---|---|---|---|\n"
+            "| #1 | lodash | 4.17.20 | 4.17.21 |\n"
+            "| #2 | express | 4.18.0 | 4.18.1 |\n"
+            "| #3 | chalk | 5.0.0 | 5.1.0 |\n"
+            "| #4 | axios | 1.0.0 | 1.1.0 |\n"
+        )
+        data = {"prs": {"1": {}, "2": {}, "3": {}, "4": {}}}
+        self.assertFalse(_is_meta_description(response, data))
+
+    def test_response_with_insufficient_pr_refs_detected(self):
+        response = (
+            "# Breakability Merge Plan\n\n## Safe to Merge\n"
+            "| PR | Package |\n|---|---|\n| #1 | lodash |\n"
+        )
+        data = {"prs": {"1": {}, "2": {}, "3": {}, "4": {}, "5": {}, "6": {}}}
+        self.assertTrue(_is_meta_description(response, data))
 
 
 if __name__ == "__main__":

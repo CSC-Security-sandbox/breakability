@@ -158,11 +158,11 @@ def _enforce_verdict_floor(comment: str, pr: Dict[str, Any], pr_num: str) -> str
     """
     av = authoritative_verdict(pr)
     contract_verdict = av.get("verdict", "REVIEW")
-    m = re.search(r'^(##\s+[^\n]*?\b)(SAFE|REVIEW|BLOCKED|BUILD_FAILS)\b', comment, re.MULTILINE)
+    m = re.search(r'^(##\s+[^\n]*?\b)(SAFE|GLANCE|REVIEW|BLOCKED|BUILD_FAILS)\b', comment, re.MULTILINE)
     if not m:
         return comment
     ai_verdict = m.group(2)
-    severity_order = {"SAFE": 0, "REVIEW": 1, "BLOCKED": 2, "BUILD_FAILS": 3}
+    severity_order = {"SAFE": 0, "GLANCE": 0, "REVIEW": 1, "BLOCKED": 2, "BUILD_FAILS": 3}
     ai_sev = severity_order.get(ai_verdict, 1)
     contract_sev = severity_order.get(contract_verdict, 1)
     if ai_sev < contract_sev:
@@ -171,7 +171,7 @@ def _enforce_verdict_floor(comment: str, pr: Dict[str, Any], pr_num: str) -> str
             f"contract says {contract_verdict} (source={av.get('source', '?')}). Overriding.",
             file=sys.stderr,
         )
-        emoji_map = {"SAFE": "✅", "REVIEW": "⚠️", "BLOCKED": "🚫", "BUILD_FAILS": "❌"}
+        emoji_map = {"SAFE": "✅", "REVIEW": "⚠️", "BLOCKED": "🚫", "BUILD_FAILS": "❌", "GLANCE": "👀"}
         old_emoji = emoji_map.get(ai_verdict, "")
         new_emoji = emoji_map.get(contract_verdict, "⚠️")
         comment = comment.replace(m.group(0), m.group(0).replace(ai_verdict, contract_verdict))
@@ -186,12 +186,12 @@ def _normalize_verdict_text(comment: str, pr_num: str) -> str:
 
     UNVERIFIED → REVIEW, BUILD_FAILS → BLOCKED, any other unknown → REVIEW.
     """
-    VALID = {"SAFE", "REVIEW", "BLOCKED"}
+    VALID = {"SAFE", "REVIEW", "BLOCKED", "GLANCE"}
     KNOWN_MAP = {"UNVERIFIED": "REVIEW", "BUILD_FAILS": "BLOCKED", "INCONCLUSIVE": "REVIEW"}
     EMOJI = {"SAFE": "✅", "REVIEW": "⚠️", "BLOCKED": "🚫"}
 
     m = re.search(
-        r'^(##\s+[^\n]*?\b)(SAFE|REVIEW|BLOCKED|BUILD_FAILS|UNVERIFIED|INCONCLUSIVE|[A-Z][A-Z_]{3,})\b',
+        r'^(##\s+[^\n]*?\b)(SAFE|GLANCE|REVIEW|BLOCKED|BUILD_FAILS|UNVERIFIED|INCONCLUSIVE|[A-Z][A-Z_]{3,})\b',
         comment, re.MULTILINE,
     )
     if not m:
@@ -250,7 +250,7 @@ def _inject_verdict_logic(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
         f"THEN verdict = {verdict}\nSource: {source}\n```\n"
     )
 
-    rec_m = re.search(r'^###?\s+.*(?:Recommend|Next\s+Step|Action)', comment, re.MULTILINE | re.IGNORECASE)
+    rec_m = re.search(r'^###?\s+.*(?:Recommend|Next\s+Step|Action|Step|Verification|How\s+to|Developer|What\s+to)', comment, re.MULTILINE | re.IGNORECASE)
     if rec_m:
         comment = comment[:rec_m.start()] + pseudocode + "\n" + comment[rec_m.start():]
     else:
@@ -385,6 +385,9 @@ def _near_valid(diagnostics: dict) -> bool:
     lc = diagnostics.get("line_count", {})
     line_count = lc.get("value") or 0
     if line_count < 100:
+        return False
+    h3_check = diagnostics.get("has_h3_narrative_sections", {})
+    if not h3_check.get("passed", True):
         return False
     failures = sum(1 for d in diagnostics.values() if not d.get("passed"))
     if line_count >= 200 and failures <= 2:

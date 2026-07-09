@@ -16,6 +16,7 @@ from generate_ai_comments import (
     _extract_pr_data,
     _enforce_verdict_floor,
     _normalize_verdict_text,
+    _inject_verdict_logic,
 )
 
 
@@ -234,6 +235,45 @@ class TestNearValid(unittest.TestCase):
         diag = self._make_diag(line_count=300, failures=set())
         diag["line_count"] = {"passed": False, "value": 300}
         self.assertTrue(_near_valid(diag))
+
+    def test_h3_failure_rejects_even_with_long_comment(self):
+        """T005: H3 narrative sections must be non-bypassable."""
+        diag = self._make_diag(line_count=350, failures={"has_h3_narrative_sections"})
+        diag["has_h3_narrative_sections"] = {"passed": False, "value": 1}
+        self.assertFalse(_near_valid(diag))
+
+    def test_h3_passing_still_allows_near_valid(self):
+        """T005: H3 passing with other failure still accepted."""
+        diag = self._make_diag(line_count=350, failures={"has_bash_block"})
+        self.assertTrue(_near_valid(diag))
+
+
+class TestInjectVerdictLogicRegex(unittest.TestCase):
+    """T006: _inject_verdict_logic insertion point regex covers VCP Go PR headings."""
+
+    def test_inserts_before_steps_heading(self):
+        comment = "## REVIEW — test-pkg\n\nSome analysis.\n\n### Steps\n1. Do something"
+        pr = {"build": {"verdict": "pass"}, "dep_type": "production",
+              "policy_lowering": {"decision": {"verdict": "REVIEW"}}}
+        result = _inject_verdict_logic(comment, pr, "99")
+        self.assertIn("### Verdict Logic", result)
+        self.assertLess(result.index("### Verdict Logic"), result.index("### Steps"))
+
+    def test_inserts_before_what_to_do_next(self):
+        comment = "## REVIEW — test-pkg\n\nAnalysis.\n\n### What To Do Next\n1. Check"
+        pr = {"build": {"verdict": "pass"}, "dep_type": "production",
+              "policy_lowering": {"decision": {"verdict": "REVIEW"}}}
+        result = _inject_verdict_logic(comment, pr, "99")
+        self.assertIn("### Verdict Logic", result)
+        self.assertLess(result.index("### Verdict Logic"), result.index("### What To Do Next"))
+
+    def test_inserts_before_developer_actions(self):
+        comment = "## REVIEW — test-pkg\n\nAnalysis.\n\n### Developer Actions\n1. Review"
+        pr = {"build": {"verdict": "pass"}, "dep_type": "production",
+              "policy_lowering": {"decision": {"verdict": "REVIEW"}}}
+        result = _inject_verdict_logic(comment, pr, "99")
+        self.assertIn("### Verdict Logic", result)
+        self.assertLess(result.index("### Verdict Logic"), result.index("### Developer Actions"))
 
 
 class TestFallbackComment(unittest.TestCase):

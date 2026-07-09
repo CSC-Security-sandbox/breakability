@@ -315,6 +315,119 @@ def _fix_summary_counts(text: str, data: Dict[str, Any]) -> str:
     return text
 
 
+def _is_meta_description(response: str, data: Dict[str, Any]) -> bool:
+    """Detect AI meta-description responses that describe the plan instead of being the plan."""
+    meta_patterns = [
+        "The file is saved at", "The plan adheres to", "ready to be posted",
+        "Key Sections:", "I have created", "I've created", "The plan includes",
+    ]
+    for pat in meta_patterns:
+        if pat.lower() in response.lower():
+            return True
+    if not _re.search(r'\|.*#\d+', response):
+        return True
+    pr_nums = set(data.get("prs", {}).keys())
+    if pr_nums:
+        refs = set(_re.findall(r'#(\d+)', response))
+        matched = pr_nums & refs
+        if len(matched) < len(pr_nums) * 0.5:
+            return True
+    return False
+
+
+_SECTION_VERDICT_MAP = {
+    "safe": "SAFE", "likely safe": "GLANCE", "review": "REVIEW",
+    "fix required": "BLOCKED", "blocked": "BLOCKED", "unverified": "UNVERIFIED",
+}
+
+_VERDICT_SECTION_NAME = {
+    "SAFE": "Safe to Merge", "GLANCE": "Likely Safe", "REVIEW": "Review Needed",
+    "BLOCKED": "Fix Required", "UNVERIFIED": "Unverified",
+}
+
+
+def _fix_section_membership(text: str, data: Dict[str, Any]) -> str:
+    """Move misplaced PRs to their correct section based on authoritative verdicts."""
+    cats = _categorize_prs(data.get("prs", {}))
+    pr_to_verdict: Dict[str, str] = {}
+    for verdict_key, pr_list in cats.items():
+        mapped = {"safe": "SAFE", "glance": "GLANCE", "review": "REVIEW",
+                  "blocked": "BLOCKED", "unverified": "UNVERIFIED"}.get(verdict_key)
+        if mapped:
+            for num, _ in pr_list:
+                pr_to_verdict[num] = mapped
+
+    if not pr_to_verdict:
+        return text
+
+    section_pat = _re.compile(r'^##\s+[^\n]*$', _re.MULTILINE)
+    sections = []
+    for m in section_pat.finditer(text):
+        sections.append((m.start(), m.group(0)))
+
+    if not sections:
+        return text
+
+    section_ranges = []
+    for i, (start, heading) in enumerate(sections):
+        end = sections[i + 1][0] if i + 1 < len(sections) else len(text)
+        section_ranges.append((start, end, heading))
+
+    def _classify_heading(heading: str) -> Optional[str]:
+        h_lower = heading.lower()
+        for key, verdict in _SECTION_VERDICT_MAP.items():
+            if key in h_lower:
+                return verdict
+        return None
+
+    row_pat = _re.compile(r'^\|[^\n]*#(\d+)[^\n]*\|[^\n]*$', _re.MULTILINE)
+    misplaced = []
+
+    for start, end, heading in section_ranges:
+        section_verdict = _classify_heading(heading)
+        if section_verdict is None:
+            continue
+        chunk = text[start:end]
+        for rm in row_pat.finditer(chunk):
+            pr_num = rm.group(1)
+            correct = pr_to_verdict.get(pr_num)
+            if correct and correct != section_verdict:
+                row_text = rm.group(0)
+                row_abs_start = start + rm.start()
+                row_abs_end = start + rm.end()
+                misplaced.append((pr_num, row_text, row_abs_start, row_abs_end,
+                                  section_verdict, correct))
+
+    if not misplaced:
+        return text
+
+    remove_ranges = [(s, e) for _, _, s, e, _, _ in misplaced]
+    remove_ranges.sort(reverse=True)
+    result = text
+    for s, e in remove_ranges:
+        line_start = result.rfind('\n', 0, s)
+        line_start = line_start if line_start >= 0 else s
+        line_end = result.find('\n', e)
+        line_end = line_end if line_end >= 0 else len(result)
+        result = result[:line_start] + result[line_end:]
+
+    for _, row_text, _, _, _, correct_verdict in misplaced:
+        target_name = _VERDICT_SECTION_NAME.get(correct_verdict, correct_verdict)
+        target_pat = _re.compile(
+            r'^(##\s+[^\n]*' + _re.escape(target_name) + r'[^\n]*\n(?:.*\n)*?)'
+            r'(\n##|\n*$)', _re.MULTILINE)
+        tm = target_pat.search(result)
+        if tm:
+            insert_pos = tm.end(1)
+            result = result[:insert_pos] + row_text + "\n" + result[insert_pos:]
+        else:
+            heading_line = f"\n## {target_name}\n"
+            table_hdr = "| PR | Package | Version | Bump | Type | Verification |\n|----|---------|---------|------|------|-------------|\n"
+            result = result.rstrip() + "\n" + heading_line + table_hdr + row_text + "\n"
+
+    return result
+
+
 def _strip_preamble(text: str) -> str:
     """Remove conversational preamble before the first markdown heading and strip code fences."""
     text = _re.sub(r'^```(?:markdown)?\s*\n', '', text)
@@ -345,9 +458,13 @@ def generate_merge_plan(data: Dict[str, Any], prompt_path: Optional[str] = None,
 
             if response and "# " in response and len(response.splitlines()) > 20:
                 response = _strip_preamble(response)
-                response = _fix_summary_counts(response, data)
-                print(f"AI merge plan generated ({len(response.splitlines())} lines)", file=sys.stderr)
-                return response.strip()
+                if _is_meta_description(response, data):
+                    print("AI merge plan is meta-description, using template fallback", file=sys.stderr)
+                else:
+                    response = _fix_section_membership(response, data)
+                    response = _fix_summary_counts(response, data)
+                    print(f"AI merge plan generated ({len(response.splitlines())} lines)", file=sys.stderr)
+                    return response.strip()
             print("AI merge plan insufficient, using template fallback", file=sys.stderr)
         except Exception as e:
             print(f"AI merge plan failed ({e}), using template fallback", file=sys.stderr)

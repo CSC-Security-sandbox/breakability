@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from verdict_contract import (  # noqa: E402
     BUCKET_BLOCKED,
+    BUCKET_GLANCE,
     BUCKET_REVIEW,
     BUCKET_SAFE,
     GRADE_HIGH_BREAKING,
@@ -46,10 +47,9 @@ class TestActionToBucketMapping(unittest.TestCase):
     def test_merge_maps_to_safe(self):
         self.assertEqual(map_policy_decision({"verdict": "MERGE"})["verdict"], BUCKET_SAFE)
 
-    def test_glance_maps_to_safe_THE_FIX(self):
-        # The #121->#128 regression: GLANCE must be SAFE, not REVIEW.
+    def test_glance_maps_to_glance_bucket(self):
         out = map_policy_decision({"verdict": "GLANCE"})
-        self.assertEqual(out["verdict"], BUCKET_SAFE)
+        self.assertEqual(out["verdict"], BUCKET_GLANCE)
         self.assertEqual(out["severity"], "low")
 
     def test_unknown_action_returns_none(self):
@@ -107,7 +107,7 @@ class TestAuthoritativeVerdictPrecedence(unittest.TestCase):
         # The exact "0 PRs at reconcile time" scenario: v2 absent, policy present.
         pr = _pr({"verdict": "GLANCE"})
         v = authoritative_verdict(pr)
-        self.assertEqual(v["verdict"], BUCKET_SAFE)
+        self.assertEqual(v["verdict"], BUCKET_GLANCE)
         self.assertEqual(v["source"], "policy_lowering")
 
     def test_fail_closed_to_review_when_nothing(self):
@@ -422,6 +422,51 @@ class TestTestsExecuted(unittest.TestCase):
         from reconcile_adjudication import _tests_executed
         pr = {"test": {"ran": False, "exit": 0}}
         self.assertFalse(_tests_executed(pr))
+
+
+class TestGlanceBucket(unittest.TestCase):
+    """T004: GLANCE must be a real verdict bucket, not collapsed to SAFE."""
+
+    def test_valid_buckets_includes_glance(self):
+        from verdict_contract import VALID_BUCKETS
+        self.assertEqual(VALID_BUCKETS, {"SAFE", "REVIEW", "BLOCKED", "GLANCE"})
+
+    def test_glance_prediction_is_auto_clear(self):
+        pr = _pr({"verdict": "GLANCE", "severity": "low", "confidence": "medium"})
+        self.assertEqual(prediction_for_pr(pr), PRED_AUTO_CLEAR)
+
+    def test_glance_verdict_propagates(self):
+        pr = _pr({"verdict": "GLANCE", "severity": "low", "confidence": "medium"})
+        v = authoritative_verdict(pr)
+        self.assertEqual(v["verdict"], BUCKET_GLANCE)
+
+
+class TestHardFixFloorTransitiveDepException(unittest.TestCase):
+    """T007: _hard_fix_floor must NOT block transitive deps with identical probe."""
+
+    def test_build_fail_empty_imports_same_behavior_returns_false(self):
+        from verdict_contract import _hard_fix_floor
+        pr = {"build": {"verdict": "fail"}, "behavioral_grade": {"same_behavior": True},
+              "files_importing": []}
+        self.assertFalse(_hard_fix_floor(pr))
+
+    def test_build_fail_empty_imports_different_behavior_returns_true(self):
+        from verdict_contract import _hard_fix_floor
+        pr = {"build": {"verdict": "fail"}, "behavioral_grade": {"same_behavior": False},
+              "files_importing": []}
+        self.assertTrue(_hard_fix_floor(pr))
+
+    def test_build_fail_nonempty_imports_same_behavior_returns_true(self):
+        from verdict_contract import _hard_fix_floor
+        pr = {"build": {"verdict": "fail"}, "behavioral_grade": {"same_behavior": True},
+              "files_importing": ["src/main.go"]}
+        self.assertTrue(_hard_fix_floor(pr))
+
+    def test_pre_existing_plus_new_empty_imports_same_behavior_returns_true(self):
+        from verdict_contract import _hard_fix_floor
+        pr = {"build": {"verdict": "pre_existing_plus_new"},
+              "behavioral_grade": {"same_behavior": True}, "files_importing": []}
+        self.assertTrue(_hard_fix_floor(pr))
 
 
 if __name__ == "__main__":
