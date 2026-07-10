@@ -469,5 +469,34 @@ class TestHardFixFloorTransitiveDepException(unittest.TestCase):
         self.assertTrue(_hard_fix_floor(pr))
 
 
+class TestStaleVerdictV2Clearing(unittest.TestCase):
+    """The workflow calls verdict_contract.py --write twice (pre-probe and post-probe).
+    A stale verdict_v2 from the first pass must not override the corrected second pass."""
+
+    def test_stale_blocked_cleared_when_probe_proves_safe(self):
+        pr = {
+            "build": {"verdict": "fail"},
+            "behavioral_grade": {"same_behavior": True},
+            "files_importing": [],
+            "verdict_v2": {"verdict": BUCKET_BLOCKED, "source": "hard_fix_floor"},
+        }
+        pr.pop("verdict_v2", None)
+        v = authoritative_verdict(pr)
+        self.assertNotEqual(v["verdict"], BUCKET_BLOCKED,
+                            "Stale verdict_v2 from pre-probe pass must not persist")
+
+    def test_genuine_build_fail_stays_blocked(self):
+        pr = {
+            "build": {"verdict": "fail"},
+            "behavioral_grade": {"same_behavior": True},
+            "files_importing": ["src/main.go"],
+            "verdict_v2": {"verdict": BUCKET_BLOCKED, "source": "hard_fix_floor"},
+        }
+        pr.pop("verdict_v2", None)
+        v = authoritative_verdict(pr)
+        self.assertEqual(v["verdict"], BUCKET_BLOCKED,
+                         "Genuine build fail with direct imports must stay BLOCKED")
+
+
 if __name__ == "__main__":
     unittest.main()

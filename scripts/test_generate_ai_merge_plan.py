@@ -15,6 +15,7 @@ from generate_ai_merge_plan import (
     _strip_preamble,
     _is_meta_description,
     _fix_section_membership,
+    _validate_ai_package_names,
     _build_merge_plan_prompt,
     generate_template_plan,
     generate_merge_plan,
@@ -239,10 +240,10 @@ class TestBuildMergePlanPrompt(unittest.TestCase):
         prompt = _build_merge_plan_prompt("BASE", data, None, "m")
         self.assertIn("Security Posture", prompt)
 
-    def test_includes_govulncheck(self):
+    def test_excludes_govulncheck(self):
         data = {"prs": {}, "govulncheck": {"prs_with_new_vulns": 1}}
         prompt = _build_merge_plan_prompt("BASE", data, None, "m")
-        self.assertIn("govulncheck", prompt)
+        self.assertNotIn("govulncheck", prompt)
 
 
 class TestGenerateTemplatePlan(unittest.TestCase):
@@ -413,6 +414,58 @@ class TestMetaDescriptionDetection(unittest.TestCase):
         )
         data = {"prs": {"1": {}, "2": {}, "3": {}, "4": {}, "5": {}, "6": {}}}
         self.assertTrue(_is_meta_description(response, data))
+
+
+class TestCveFixesTable(unittest.TestCase):
+    """CVE Fixes table must render when security_posture.cve_fixes is present."""
+
+    def test_template_plan_renders_cve_fixes_table(self):
+        data = {
+            "prs": {
+                "9": {"package": "pgx/v5", "from": "5.7.4", "to": "5.9.2",
+                      "bump": "minor", "dep_type": "production",
+                      "verification_label": "BLOCKED",
+                      "cve_details": [
+                          {"cve_id": "CVE-2026-33815", "severity": "critical"},
+                          {"cve_id": "CVE-2026-33816", "severity": "critical"},
+                      ]},
+            },
+            "security_posture": {
+                "total_open_alerts": 5,
+                "severity_counts": {"critical": 2, "high": 1},
+                "cve_fixes": [
+                    {"pr": "9", "cve_id": "CVE-2026-33815", "severity": "critical",
+                     "package": "pgx/v5", "first_patched_version": "5.9.0"},
+                    {"pr": "9", "cve_id": "CVE-2026-33816", "severity": "critical",
+                     "package": "pgx/v5", "first_patched_version": "5.9.0"},
+                ],
+                "orphan_alerts": [
+                    {"package": "golang.org/x/net", "severity": "medium"},
+                ],
+            },
+        }
+        plan = generate_template_plan(data)
+        self.assertIn("CVE Fixes in This Batch", plan)
+        self.assertIn("CVE-2026-33815", plan)
+        self.assertIn("CVE-2026-33816", plan)
+        self.assertIn("critical", plan)
+        self.assertIn("1 open alert(s)", plan)
+
+    def test_pr_row_includes_cve_badges(self):
+        pr = {
+            "package": "pgx/v5", "from": "5.7.4", "to": "5.9.2",
+            "bump": "minor", "dep_type": "production", "verification_label": "BLOCKED",
+            "cve_details": [{"cve_id": "CVE-2026-33815", "severity": "critical"}],
+        }
+        row = _pr_row("9", pr)
+        self.assertIn("CVE-2026-33815", row)
+        self.assertIn("🔴", row)
+
+    def test_pr_row_no_cves_shows_dash(self):
+        pr = {"package": "lodash", "from": "1.0", "to": "2.0",
+              "bump": "major", "dep_type": "production", "verification_label": "SAFE"}
+        row = _pr_row("1", pr)
+        self.assertIn("—", row)
 
 
 if __name__ == "__main__":

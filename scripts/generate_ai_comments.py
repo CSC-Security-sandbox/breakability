@@ -87,11 +87,13 @@ def _build_per_pr_prompt(
             f"{json.dumps(nestjs_skew, indent=2)}\n```\n"
         )
 
-    govulncheck = top_level.get("govulncheck")
-    if govulncheck:
+    cve_details = pr.get("cve_details") or []
+    if cve_details:
         sections.append(
-            f"\n### govulncheck Summary\n```json\n"
-            f"{json.dumps(govulncheck, indent=2)}\n```\n"
+            f"\n### CVE/Vulnerability Data for This PR\n"
+            f"This PR fixes the following CVEs. You MUST include a '### Security Impact' "
+            f"section listing each CVE with severity, summary, and advisory link.\n"
+            f"```json\n{json.dumps(cve_details, indent=2)}\n```\n"
         )
 
     security_posture = top_level.get("security_posture")
@@ -365,6 +367,12 @@ def _validate_comment(comment: str, pr_num: str, pr_data: Dict[str, Any] = None)
                 "value": f"AI={ai_verdict} contract={contract_verdict} (source={av.get('source', '?')}) [warning — contract overrides]",
             }
 
+    if pr_data is not None:
+        cve_details = pr_data.get("cve_details") or []
+        if cve_details:
+            has_cve = bool(re.search(r'CVE-\d{4}|GHSA-|[Ss]ecurity\s+[Ii]mpact|[Vv]ulnerabilit', comment))
+            diagnostics["has_cve_section"] = {"passed": has_cve, "value": has_cve}
+
     all_passed = all(d["passed"] for d in diagnostics.values())
 
     if not all_passed:
@@ -477,6 +485,23 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
         f"- **Reason:** {av.get('reason', 'N/A')}",
         "",
     ]
+
+    cve_details = pr.get("cve_details") or []
+    if cve_details:
+        lines.append("### Security Impact")
+        lines.append("")
+        lines.append("This PR addresses the following vulnerabilities:")
+        lines.append("")
+        for cve in cve_details:
+            sev = cve.get("severity", "unknown")
+            sev_emoji = "🔴" if sev in ("critical", "high") else "🟡"
+            cve_id = cve.get("cve_id") or cve.get("id", "?")
+            summary = cve.get("summary", "")
+            lines.append(f"- {sev_emoji} **{cve_id}** ({sev}){': ' + summary if summary else ''}")
+            advisory = cve.get("advisory_url")
+            if advisory:
+                lines.append(f"  - Advisory: {advisory}")
+        lines.append("")
 
     probe_hashes = bg.get("hashes") or bg.get("sha256")
     if isinstance(probe_hashes, dict) and probe_hashes:

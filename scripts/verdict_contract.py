@@ -533,6 +533,7 @@ if __name__ == "__main__":
     
     processed = 0
     for pr in results:
+        pr.pop("verdict_v2", None)
         verdict = authoritative_verdict(pr)
         pr["verdict_v2"] = verdict
         processed += 1

@@ -68,7 +68,17 @@ def _pr_row(num: str, pr: Dict) -> str:
     bump = pr.get("bump", "?")
     dep = pr.get("dep_type", "?")
     vl = pr.get("verification_label", "?")
-    return f"| #{num} | `{pkg}` | {frm} → {to} | {bump} | {dep} | {vl} |"
+    cve_details = pr.get("cve_details") or []
+    if cve_details:
+        badges = ", ".join(
+            f"{'🔴' if d.get('severity') in ('critical', 'high') else '🟡'} {d.get('cve_id') or d.get('id', '?')}"
+            for d in cve_details[:3]
+        )
+        if len(cve_details) > 3:
+            badges += f" +{len(cve_details) - 3}"
+    else:
+        badges = "—"
+    return f"| #{num} | `{pkg}` | {frm} → {to} | {bump} | {dep} | {vl} | {badges} |"
 
 
 def _parse_all_open_prs() -> Dict[str, str]:
@@ -130,14 +140,33 @@ def generate_template_plan(data: Dict[str, Any], run_url: Optional[str] = None,
     lines.append("")
 
     sec = data.get("security_posture", {})
-    cve_alerts = sec.get("total_open_alerts", 0)
-    cve_critical = sec.get("severity_counts", {}).get("critical", 0)
-    cve_high = sec.get("severity_counts", {}).get("high", 0)
-    if cve_critical > 0 or cve_high > 0:
-        lines.append("## 🚨 CVE Alert")
-        lines.append(f"> **{cve_critical} critical** and **{cve_high} high** severity Dependabot alerts are open on this repository.")
-        lines.append("> PRs that address these CVEs should be prioritized.")
+    cve_fixes = sec.get("cve_fixes", [])
+    orphan_alerts = sec.get("orphan_alerts", [])
+    if cve_fixes:
+        lines.append("## 🚨 CVE Fixes in This Batch")
         lines.append("")
+        lines.append("| PR | CVE | Severity | Package | Fixed In |")
+        lines.append("|----|-----|----------|---------|----------|")
+        for fix in sorted(cve_fixes, key=lambda f: {"critical": 0, "high": 1, "medium": 2, "low": 3}.get(f.get("severity", ""), 4)):
+            sev = fix.get("severity", "?")
+            sev_emoji = "🔴" if sev in ("critical", "high") else "🟡" if sev == "medium" else "🟢"
+            cve_id = fix.get("cve_id") or fix.get("ghsa_id", "?")
+            lines.append(
+                f"| #{fix.get('pr', '?')} | {cve_id} | {sev_emoji} {sev} "
+                f"| `{fix.get('package', '?')}` | {fix.get('first_patched_version', '?')} |"
+            )
+        lines.append("")
+        if orphan_alerts:
+            lines.append(f"> ⚠️ **{len(orphan_alerts)} open alert(s)** have no corresponding Dependabot PR in this batch.")
+            lines.append("")
+    else:
+        cve_critical = sec.get("severity_counts", {}).get("critical", 0)
+        cve_high = sec.get("severity_counts", {}).get("high", 0)
+        if cve_critical > 0 or cve_high > 0:
+            lines.append("## 🚨 CVE Alert")
+            lines.append(f"> **{cve_critical} critical** and **{cve_high} high** severity Dependabot alerts are open on this repository.")
+            lines.append("> PRs that address these CVEs should be prioritized.")
+            lines.append("")
 
     if cross_deps:
         lines.append("## ⚠️ Coordinated Upgrades")
@@ -150,8 +179,8 @@ def generate_template_plan(data: Dict[str, Any], run_url: Optional[str] = None,
             lines.append(f"| #{a}, #{b} | {reason} | {order} |")
         lines.append("")
 
-    table_hdr = ("| PR | Package | Version | Bump | Type | Verification |",
-                 "|----|---------|---------|------|------|-------------|")
+    table_hdr = ("| PR | Package | Version | Bump | Type | Verification | CVEs |",
+                 "|----|---------|---------|------|------|-------------|------|")
 
     for label, emoji, key in [
         ("Safe to Merge", "✅", "safe"),
@@ -179,21 +208,20 @@ def generate_template_plan(data: Dict[str, Any], run_url: Optional[str] = None,
             lines.append(f"| #{num} | {title} |")
         lines.append("")
 
-    sec = data.get("security_posture", {})
-    govuln = data.get("govulncheck", {})
-    if sec or govuln:
+    sec_posture = data.get("security_posture", {})
+    if sec_posture:
         lines.append("## \U0001f512 Security Posture")
-        if sec.get("total_open_alerts"):
-            lines.append(f"- Open Dependabot alerts: {sec['total_open_alerts']}")
-            sev = sec.get("severity_counts", {})
+        if sec_posture.get("total_open_alerts"):
+            lines.append(f"- Open Dependabot alerts: {sec_posture['total_open_alerts']}")
+            sev = sec_posture.get("severity_counts", {})
             if sev:
-                lines.append(f"  - Critical: {sev.get('critical', 0)}, High: {sev.get('high', 0)}")
-        if govuln:
-            baseline = govuln.get("main_baseline", {})
-            if baseline.get("findings"):
-                lines.append(f"- Pre-existing govulncheck findings on main: {len(baseline['findings'])}")
-            if govuln.get("prs_with_new_vulns", 0) > 0:
-                lines.append(f"- \U0001f6a8 PRs introducing NEW vulnerabilities: {govuln['prs_with_new_vulns']}")
+                lines.append(f"  - Critical: {sev.get('critical', 0)}, High: {sev.get('high', 0)}, Medium: {sev.get('medium', 0)}, Low: {sev.get('low', 0)}")
+        cve_fix_count = len(sec_posture.get("cve_fixes", []))
+        orphan_count = len(sec_posture.get("orphan_alerts", []))
+        if cve_fix_count:
+            lines.append(f"- PRs resolving alerts: **{cve_fix_count}** (see CVE Fixes table above)")
+        if orphan_count:
+            lines.append(f"- Unaddressed alerts: **{orphan_count}** (no Dependabot PR yet)")
         lines.append("")
 
     lines.append("## Merge Risk Summary")
@@ -216,8 +244,6 @@ def _build_merge_plan_prompt(base_prompt: str, data: Dict[str, Any],
     cross_deps = data.get("cross_pr_deps", [])
     meta = data.get("metadata", {})
     security_posture = data.get("security_posture", {})
-    govuln = data.get("govulncheck", {})
-
     cats = _categorize_prs(prs)
     summary = {k: len(v) for k, v in cats.items()}
 
@@ -234,9 +260,6 @@ def _build_merge_plan_prompt(base_prompt: str, data: Dict[str, Any],
 
     if security_posture:
         sections.append(f"\n### Security Posture\n```json\n{json.dumps(security_posture, indent=2)}\n```\n")
-
-    if govuln:
-        sections.append(f"\n### govulncheck\n```json\n{json.dumps(govuln, indent=2)}\n```\n")
 
     if meta:
         sections.append(
@@ -336,8 +359,10 @@ def _is_meta_description(response: str, data: Dict[str, Any]) -> bool:
 
 
 _SECTION_VERDICT_MAP = {
-    "safe": "SAFE", "likely safe": "GLANCE", "review": "REVIEW",
-    "fix required": "BLOCKED", "blocked": "BLOCKED", "unverified": "UNVERIFIED",
+    "safe": "SAFE", "likely safe": "GLANCE", "quick review": "GLANCE",
+    "auto-merge": "SAFE", "review": "REVIEW",
+    "fix required": "BLOCKED", "blocked": "BLOCKED", "do not merge": "BLOCKED",
+    "needs fix": "BLOCKED", "unverified": "UNVERIFIED",
 }
 
 _VERDICT_SECTION_NAME = {
@@ -422,7 +447,7 @@ def _fix_section_membership(text: str, data: Dict[str, Any]) -> str:
             result = result[:insert_pos] + row_text + "\n" + result[insert_pos:]
         else:
             heading_line = f"\n## {target_name}\n"
-            table_hdr = "| PR | Package | Version | Bump | Type | Verification |\n|----|---------|---------|------|------|-------------|\n"
+            table_hdr = "| PR | Package | Version | Bump | Type | Verification | CVEs |\n|----|---------|---------|------|------|-------------|------|\n"
             result = result.rstrip() + "\n" + heading_line + table_hdr + row_text + "\n"
 
     return result
@@ -438,9 +463,52 @@ def _strip_preamble(text: str) -> str:
     return text
 
 
+def _validate_ai_package_names(text: str, data: Dict[str, Any]) -> Optional[str]:
+    """Validate AI-generated PR-to-package mappings against actual data.
+
+    Returns corrected text if fixable, or None if >25% are wrong (caller
+    should fall back to template plan).
+    """
+    prs = data.get("prs", {})
+    if not prs:
+        return text
+
+    row_pat = re.compile(r'\|\s*#(\d+)\s*\|\s*`([^`]+)`\s*\|')
+    matches = row_pat.findall(text)
+    if not matches:
+        return text
+
+    wrong = 0
+    replacements = []
+    for pr_num, ai_pkg in matches:
+        actual_pr = prs.get(str(pr_num))
+        if not actual_pr:
+            continue
+        actual_pkg = actual_pr.get("package", "")
+        if actual_pkg and ai_pkg != actual_pkg:
+            wrong += 1
+            replacements.append((pr_num, ai_pkg, actual_pkg))
+
+    if not matches:
+        return text
+
+    error_rate = wrong / len(matches)
+    if error_rate > 0.25:
+        print(f"AI merge plan has {wrong}/{len(matches)} wrong package names ({error_rate:.0%}), discarding", file=sys.stderr)
+        return None
+
+    for pr_num, ai_pkg, actual_pkg in replacements:
+        text = text.replace(f"`{ai_pkg}`", f"`{actual_pkg}`")
+        print(f"  Fixed PR#{pr_num}: `{ai_pkg}` → `{actual_pkg}`", file=sys.stderr)
+
+    return text
+
+
 def generate_merge_plan(data: Dict[str, Any], prompt_path: Optional[str] = None,
                         model: str = "claude-4.5-sonnet",
                         run_url: Optional[str] = None) -> str:
+    template = generate_template_plan(data, run_url=run_url, model_name=model)
+
     if prompt_path and os.path.exists(prompt_path):
         try:
             with open(prompt_path) as f:
@@ -460,16 +528,20 @@ def generate_merge_plan(data: Dict[str, Any], prompt_path: Optional[str] = None,
                 response = _strip_preamble(response)
                 if _is_meta_description(response, data):
                     print("AI merge plan is meta-description, using template fallback", file=sys.stderr)
-                else:
-                    response = _fix_section_membership(response, data)
-                    response = _fix_summary_counts(response, data)
-                    print(f"AI merge plan generated ({len(response.splitlines())} lines)", file=sys.stderr)
-                    return response.strip()
+                    return template
+                response = _fix_section_membership(response, data)
+                response = _fix_summary_counts(response, data)
+                validated = _validate_ai_package_names(response, data)
+                if validated is None:
+                    print("AI merge plan has too many hallucinated package names, using template", file=sys.stderr)
+                    return template
+                print(f"AI merge plan generated ({len(validated.splitlines())} lines)", file=sys.stderr)
+                return validated.strip()
             print("AI merge plan insufficient, using template fallback", file=sys.stderr)
         except Exception as e:
             print(f"AI merge plan failed ({e}), using template fallback", file=sys.stderr)
 
-    return generate_template_plan(data, run_url=run_url, model_name=model)
+    return template
 
 
 def main() -> int:
