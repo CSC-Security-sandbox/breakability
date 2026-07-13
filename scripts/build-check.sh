@@ -474,33 +474,7 @@ build_workspace_dep_graph "$REPO_ROOT"
 
 echo ""
 echo "════════════ DYNAMIC PEER DEPENDENCY DISCOVERY ════════════"
-python3 << 'PEERDEPS_SCRIPT'
-import json, os, glob
-peer_groups = {}
-for pj_path in glob.glob(os.path.join(os.environ.get("REPO_ROOT", "."), "**/package.json"), recursive=True):
-    if "node_modules" not in pj_path: continue
-    try:
-        with open(pj_path) as f: data = json.load(f)
-    except: continue
-    name = data.get("name", "")
-    peers = data.get("peerDependencies", {})
-    if name and peers: peer_groups[name] = list(peers.keys())
-nestjs_group = set()
-for pkg, peers in peer_groups.items():
-    if pkg.startswith("@nestjs/"):
-        nestjs_group.add(pkg)
-        nestjs_group.update(p for p in peers if p.startswith("@nestjs/"))
-react_group = set()
-for pkg, peers in peer_groups.items():
-    if "react" in pkg.lower():
-        react_group.add(pkg)
-        react_group.update(p for p in peers if "react" in p.lower())
-result = {"peer_groups": peer_groups, "nestjs_group": sorted(nestjs_group), "react_group": sorted(react_group)}
-with open("/tmp/_bc_peer_groups.json", "w") as f: json.dump(result, f, indent=2)
-if nestjs_group: print(f"  NestJS peer group: {len(nestjs_group)} packages")
-if react_group: print(f"  React peer group: {len(react_group)} packages")
-print(f"  Total packages with peer deps: {len(peer_groups)}")
-PEERDEPS_SCRIPT
+REPO_ROOT="$REPO_ROOT" python3 "$BRK_SCRIPTS/discover_peer_groups.py"
 
 
 # ── Pre-fetch Dependabot alerts for per-PR CVE enrichment ────────────────────
@@ -587,63 +561,7 @@ for i in $(seq 0 $(( PR_COUNT - 1 )) ); do
     _SKIP_TITLE="$PR_TITLE"
     # Write user-derived PR title to temp file to avoid shell injection in heredoc (Finding-4.1)
     printf '%s' "$_SKIP_TITLE" > "/tmp/_bc_skip_title_${PR_NUM}.txt"
-    python3 << SKIPEOF
-import json, os
-results_file = "$RESULTS_FILE"
-pr_num = "$PR_NUM"
-try:
-    with open(f"/tmp/_bc_skip_title_{pr_num}.txt") as f:
-        pr_title = f.read().strip()
-except:
-    pr_title = "unknown"
-pr_branch = "$_SKIP_BRANCH"
-with open(results_file) as f:
-    data = json.load(f)
-data["prs"][pr_num] = {
-    "package": pr_title,
-    "from": "",
-    "to": "",
-    "ecosystem": "unknown",
-    "bump": "unknown",
-    "dep_type": "unknown",
-    "dep_relation": "unknown",
-    "cves": [],
-    "build": {"verdict": "skipped", "main_exit": -1, "pr_exit": -1, "output_tail": "", "new_errors": [], "install_method": "none", "error_class": ""},
-    "test": {"ran": False, "exit": None, "output_tail": ""},
-    "smoke": {"ran": False, "exit": None},
-    "files_importing": [],
-    "additional_imports": [],
-    "diff_lines": 0,
-    "diff_truncated": False,
-    "pkg_dir": "/",
-    "cascade_impact": [],
-    "nestjs_peer_warning": "",
-    "install_ok": False,
-    "additional_packages": "",
-    "mergeable_status": "UNKNOWN",
-    "npm_audit": {"critical": 0, "high": 0},
-    "ownership_class": "unknown",
-    "verification_level": -1,
-    "verification_label": "NA_not_applicable",
-    "verification_steps": [],
-    "evidence": [{
-        "signal": "dependency_resolution",
-        "label": "Dependency resolution",
-        "status": "skipped",
-        "command": "",
-        "stdout": "",
-        "exit_code": None,
-        "summary": "PR skipped by breakability:skip label",
-        "na_reason": "breakability:skip label"
-    }],
-    "skip_reason": "breakability:skip label"
-}
-_tmp = results_file + ".tmp"
-with open(_tmp, "w") as f:
-    json.dump(data, f, indent=2)
-os.rename(_tmp, results_file)
-print(f"  ✓ PR #{pr_num} written (skipped)")
-SKIPEOF
+    RESULTS_FILE="$RESULTS_FILE" PR_NUM="$PR_NUM" _SKIP_BRANCH="$_SKIP_BRANCH" python3 "$BRK_SCRIPTS/write_skip_entry.py"
     continue
   fi
 
@@ -3309,25 +3227,7 @@ git worktree remove "$MAIN_DIR" --force 2>/dev/null || { chmod -R u+w "$MAIN_DIR
 # ── In batch mode, skip cross-PR / security / cleanup (merge script handles those) ──
 if [[ -n "$BATCH_ID" ]]; then
   # Embed main baseline vuln scan into batch JSON so merge-results.sh can aggregate it
-  RESULTS_FILE="$RESULTS_FILE" python3 <<'BATCHVULN'
-import json, os
-rf = os.environ["RESULTS_FILE"]
-try:
-    with open(rf) as f: d = json.load(f)
-except Exception: d = {}
-mb = {"status": "unknown", "findings": []}
-try:
-    if os.path.exists("/tmp/_bc_main_vuln_status.txt"):
-        mb["status"] = open("/tmp/_bc_main_vuln_status.txt").read().strip() or "unknown"
-    if os.path.exists("/tmp/_bc_main_vuln_findings.txt"):
-        mb["findings"] = sorted(set(l.strip() for l in open("/tmp/_bc_main_vuln_findings.txt") if l.strip()))
-except Exception as e:
-    mb["error"] = str(e)
-d["main_baseline_vuln"] = mb
-with open(rf + ".tmp", "w") as f: json.dump(d, f, indent=2)
-os.rename(rf + ".tmp", rf)
-print(f"  [batch] main_baseline_vuln: status={mb['status']} findings={len(mb['findings'])}")
-BATCHVULN
+  RESULTS_FILE="$RESULTS_FILE" python3 "$BRK_SCRIPTS/batch_vuln_summary.py"
   echo ""
   echo "═══════════════════════════════════════════════════════════════════"
   echo "  BATCH $BATCH_ID COMPLETE"

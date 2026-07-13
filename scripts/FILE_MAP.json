@@ -4,14 +4,14 @@
   "bash": {
     "entry_points": {
       "scripts/build-check.sh": {
-        "lines": 5055,
+        "lines": 3381,
         "domain": "deterministic-analysis",
         "purpose": "Main deterministic analysis orchestrator - discovers PRs, runs baseline builds, per-PR ecosystem builds, CVE extraction, verdict determination",
         "called_by": ["breakability-reusable.yml", "action.yml", "breakability-agent.yml"],
-        "status": "needs-split"
+        "status": "in-progress-split"
       },
       "scripts/post-fallback-comments.sh": {
-        "lines": 4379,
+        "lines": 4053,
         "domain": "comment-rendering",
         "purpose": "Legacy comment renderer + merge plan generator - reads build-results.json, posts PR comments, creates merge plan issue",
         "called_by": ["action.yml"],
@@ -85,7 +85,10 @@
       "scripts/agent_adjudicator.py": { "lines": 235, "domain": "analysis", "purpose": "Deterministic reachability adjudication" },
       "scripts/ci_classifier.py": { "lines": 48, "domain": "analysis", "purpose": "CI dependency sensitivity classifier" },
       "scripts/cve_security_posture.py": { "lines": 134, "domain": "security", "purpose": "Precise Dependabot alert attribution" },
-      "scripts/reconcile_adjudication.py": { "lines": 431, "domain": "analysis", "purpose": "Reconciles deterministic + AI verdicts" }
+      "scripts/reconcile_adjudication.py": { "lines": 431, "domain": "analysis", "purpose": "Reconciles deterministic + AI verdicts" },
+      "scripts/cross_pr_deps.py": { "lines": 100, "domain": "analysis", "purpose": "Cross-PR dependency detection (K8s, OTel, NestJS, React, workspace graph) — extracted from build-check.sh CROSSDEPS heredoc", "status": "new" },
+      "scripts/security_posture_scan.py": { "lines": 193, "domain": "security", "purpose": "Dependabot alert attribution, CVE fix matching, govulncheck aggregation — extracted from build-check.sh SECURITYEOF heredoc", "status": "new" },
+      "scripts/core/build_results_schema.py": { "lines": 430, "domain": "core", "purpose": "Typed schema contract for build-results.json — dataclasses, normalization, validation. Prevents key-name drift (12 known aliases)", "status": "new" }
     },
     "rendering": {
       "scripts/generate_ai_comments.py": {
@@ -131,9 +134,10 @@
     }
   },
   "tests": {
-    "count": 25,
-    "total_lines": 6800,
-    "baseline": "555 passed, 1 skipped (2026-07-13)"
+    "count": 26,
+    "total_lines": 7000,
+    "baseline": "588 passed, 1 skipped (2026-07-13)",
+    "note": "33 new schema contract tests added"
   },
   "workflows": {
     ".github/workflows/breakability-reusable.yml": { "lines": 423, "purpose": "Main reusable workflow - 3 jobs: discover, deterministic, finalize" },
