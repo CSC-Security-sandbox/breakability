@@ -4,18 +4,18 @@
   "bash": {
     "entry_points": {
       "scripts/build-check.sh": {
-        "lines": 3381,
+        "lines": 2926,
         "domain": "deterministic-analysis",
         "purpose": "Main deterministic analysis orchestrator - discovers PRs, runs baseline builds, per-PR ecosystem builds, CVE extraction, verdict determination",
         "called_by": ["breakability-reusable.yml", "action.yml", "breakability-agent.yml"],
         "status": "in-progress-split"
       },
       "scripts/post-fallback-comments.sh": {
-        "lines": 4053,
+        "lines": 2995,
         "domain": "comment-rendering",
         "purpose": "Legacy comment renderer + merge plan generator - reads build-results.json, posts PR comments, creates merge plan issue",
         "called_by": ["action.yml"],
-        "status": "needs-split"
+        "status": "in-progress-split"
       },
       "scripts/merge-results.sh": {
         "lines": 596,
@@ -32,6 +32,19 @@
         "status": "ok"
       }
     },
+    "libraries": {
+      "scripts/lib/common.sh": { "lines": 138, "domain": "shared", "purpose": "Cleanup trap, json_escape, tail_output, retry_cmd" },
+      "scripts/lib/config.sh": { "lines": 266, "domain": "config", "purpose": "Config parsing, private registry setup" },
+      "scripts/lib/detection.sh": { "lines": 191, "domain": "detection", "purpose": "Ecosystem detection, CVE extraction" },
+      "scripts/lib/ecosystem_go.sh": { "lines": 462, "domain": "ecosystem", "purpose": "Go build/test/vet functions" },
+      "scripts/lib/ecosystem_npm.sh": { "lines": 331, "domain": "ecosystem", "purpose": "npm build/test/audit functions" },
+      "scripts/lib/ecosystem_pip.sh": { "lines": 11, "domain": "ecosystem", "purpose": "pip usage scan" },
+      "scripts/lib/baseline_builds.sh": { "lines": 320, "domain": "builds", "purpose": "Branch fetch, baseline builds, vuln scan" },
+      "scripts/lib/post_loop.sh": { "lines": 65, "domain": "aggregation", "purpose": "Post-loop cross-PR deps, security scan, cleanup" },
+      "scripts/lib/comment_helpers.sh": { "lines": 331, "domain": "comments", "purpose": "gh_pr_comment, gh_delete_comment, get_verdict_v2, etc." },
+      "scripts/lib/comment_blocks.sh": { "lines": 653, "domain": "comments", "purpose": "build_cve_blocks, build_evidence_blocks, build_checklist_blocks" },
+      "scripts/lib/comment_templates.sh": { "lines": 457, "domain": "comments", "purpose": "dispatch_comment_template — 15-branch verdict dispatch" }
+    },
     "utilities": {
       "scripts/independent_adjudicate.sh": { "lines": 100, "domain": "ai-layer", "purpose": "Independent AI adjudication runner" },
       "scripts/probe-selftest.sh": { "lines": 275, "domain": "testing", "purpose": "Self-test for behavioral probe" },
@@ -47,25 +60,59 @@
   },
   "python": {
     "core": {
-      "scripts/evidence_contract.py": {
+      "scripts/core/evidence_contract.py": {
         "lines": 748,
         "domain": "core",
         "purpose": "Typed evidence dataclasses (EvidenceBundle, EvidenceRecord, SignalName, etc.) and pure decide() function",
         "imported_by": ["release_notes_evidence", "dynamic_probe_runner", "policy_lowering"],
+        "shim": "scripts/evidence_contract.py",
         "status": "needs-split"
       },
-      "scripts/verdict_contract.py": {
-        "lines": 549,
+      "scripts/core/verdict_contract.py": {
+        "lines": 561,
         "domain": "core",
         "purpose": "Single source of truth for authoritative_verdict() - bucket mapping and gate prediction",
         "imported_by": ["breakability_analyst", "generate_ai_comments", "generate_ai_merge_plan"],
+        "shim": "scripts/verdict_contract.py",
         "status": "ok"
       },
-      "scripts/ai_backend.py": {
-        "lines": 351,
+      "scripts/core/build_results_schema.py": {
+        "lines": 667,
         "domain": "core",
+        "purpose": "Typed schema contract for build-results.json — dataclasses, normalization, validation. Prevents key-name drift (12 known aliases)",
+        "status": "new"
+      }
+    },
+    "ai": {
+      "scripts/ai/ai_backend.py": {
+        "lines": 356,
+        "domain": "ai",
         "purpose": "Unified AI model backend with record/replay cassette system",
         "imported_by": ["generate_ai_verdicts", "generate_ai_comments", "generate_ai_merge_plan", "changelog_comprehension"],
+        "shim": "scripts/ai_backend.py",
+        "status": "ok"
+      },
+      "scripts/ai/generate_ai_comments.py": {
+        "lines": 798,
+        "domain": "ai",
+        "purpose": "AI-enriched per-PR comment generation",
+        "imports": ["ai_backend", "verdict_contract"],
+        "shim": "scripts/generate_ai_comments.py",
+        "status": "needs-split"
+      },
+      "scripts/ai/generate_ai_merge_plan.py": {
+        "lines": 584,
+        "domain": "ai",
+        "purpose": "AI-enriched or template merge plan generation",
+        "imports": ["ai_backend", "verdict_contract"],
+        "shim": "scripts/generate_ai_merge_plan.py",
+        "status": "ok"
+      },
+      "scripts/ai/generate_ai_verdicts.py": {
+        "lines": 193,
+        "domain": "ai",
+        "purpose": "AI verdict generation for REVIEW PRs",
+        "shim": "scripts/generate_ai_verdicts.py",
         "status": "ok"
       }
     },
@@ -86,26 +133,10 @@
       "scripts/ci_classifier.py": { "lines": 48, "domain": "analysis", "purpose": "CI dependency sensitivity classifier" },
       "scripts/cve_security_posture.py": { "lines": 134, "domain": "security", "purpose": "Precise Dependabot alert attribution" },
       "scripts/reconcile_adjudication.py": { "lines": 431, "domain": "analysis", "purpose": "Reconciles deterministic + AI verdicts" },
-      "scripts/cross_pr_deps.py": { "lines": 100, "domain": "analysis", "purpose": "Cross-PR dependency detection (K8s, OTel, NestJS, React, workspace graph) — extracted from build-check.sh CROSSDEPS heredoc", "status": "new" },
-      "scripts/security_posture_scan.py": { "lines": 193, "domain": "security", "purpose": "Dependabot alert attribution, CVE fix matching, govulncheck aggregation — extracted from build-check.sh SECURITYEOF heredoc", "status": "new" },
-      "scripts/core/build_results_schema.py": { "lines": 430, "domain": "core", "purpose": "Typed schema contract for build-results.json — dataclasses, normalization, validation. Prevents key-name drift (12 known aliases)", "status": "new" }
+      "scripts/cross_pr_deps.py": { "lines": 100, "domain": "analysis", "purpose": "Cross-PR dependency detection — extracted from build-check.sh CROSSDEPS heredoc" },
+      "scripts/security_posture_scan.py": { "lines": 193, "domain": "security", "purpose": "Dependabot alert attribution — extracted from build-check.sh SECURITYEOF heredoc" }
     },
     "rendering": {
-      "scripts/generate_ai_comments.py": {
-        "lines": 788,
-        "domain": "rendering",
-        "purpose": "AI-enriched per-PR comment generation",
-        "imports": ["ai_backend", "verdict_contract"],
-        "status": "needs-split"
-      },
-      "scripts/generate_ai_merge_plan.py": {
-        "lines": 574,
-        "domain": "rendering",
-        "purpose": "AI-enriched or template merge plan generation",
-        "imports": ["ai_backend", "verdict_contract"],
-        "status": "needs-split"
-      },
-      "scripts/generate_ai_verdicts.py": { "lines": 191, "domain": "rendering", "purpose": "AI verdict generation for REVIEW PRs" },
       "scripts/breakability_analyst.py": {
         "lines": 1115,
         "domain": "rendering",
@@ -125,8 +156,25 @@
       "scripts/dynamic_probe_runner.py": { "lines": 364, "domain": "probe", "purpose": "Go old-vs-new probe runner" }
     },
     "ecosystem": {
-      "scripts/ecosystem_adapters.py": { "lines": 418, "domain": "ecosystem", "purpose": "Lightweight ecosystem adapter interfaces" },
-      "scripts/npm_changelog.py": { "lines": 327, "domain": "ecosystem", "purpose": "npm changelog/release-note fetch helpers" }
+      "scripts/ecosystems/ecosystem_adapters.py": {
+        "lines": 426,
+        "domain": "ecosystem",
+        "purpose": "Lightweight ecosystem adapter interfaces",
+        "shim": "scripts/ecosystem_adapters.py",
+        "status": "ok"
+      },
+      "scripts/ecosystems/npm_changelog.py": {
+        "lines": 333,
+        "domain": "ecosystem",
+        "purpose": "npm changelog/release-note fetch helpers",
+        "shim": "scripts/npm_changelog.py",
+        "status": "ok"
+      }
+    },
+    "extracted_heredocs": {
+      "scripts/batch_vuln_summary.py": { "lines": 26, "domain": "analysis", "purpose": "govulncheck aggregation — extracted from build-check.sh" },
+      "scripts/write_skip_entry.py": { "lines": 69, "domain": "pipeline", "purpose": "Skip entry writer — extracted from build-check.sh" },
+      "scripts/discover_peer_groups.py": { "lines": 37, "domain": "detection", "purpose": "Peer dependency discovery — extracted from build-check.sh" }
     },
     "eval": {
       "scripts/breakability_eval.py": { "lines": 331, "domain": "eval", "purpose": "Evaluation corpus validator and scorer" },
@@ -134,10 +182,10 @@
     }
   },
   "tests": {
-    "count": 26,
-    "total_lines": 7000,
-    "baseline": "588 passed, 1 skipped (2026-07-13)",
-    "note": "33 new schema contract tests added"
+    "count": 27,
+    "total_lines": 7248,
+    "baseline": "587 passed, 1 failed (pre-existing), 1 skipped (2026-07-13)",
+    "note": "33 schema contract tests added; 1 pre-existing merge_plan_renderer GLANCE assertion failure"
   },
   "workflows": {
     ".github/workflows/breakability-reusable.yml": { "lines": 423, "purpose": "Main reusable workflow - 3 jobs: discover, deterministic, finalize" },
