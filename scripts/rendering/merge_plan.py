@@ -8,12 +8,16 @@ Usage:
     python3 rendering/merge_plan.py
 """
 
-import json, sys, subprocess
+import json, os, sys, subprocess
 from datetime import datetime, timezone
 
 # ci_review_tier is the canonical CI-sensitivity classifier (single source of
 # truth, also used by policy_lowering.py and tested in test_ci_classifier.py).
-sys.path.insert(0, sys.path[0] if sys.path else ".")
+try:
+    _here = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, os.path.dirname(_here))  # scripts/
+except NameError:
+    sys.path.insert(0, sys.path[0] if sys.path else ".")
 from ci_classifier import ci_review_tier
 
 with open("/tmp/build-results.json") as f:
