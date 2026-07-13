@@ -26,7 +26,7 @@ def extract_policy_overlay_python():
     marker = 'python3 - "$RESULTS_FILE" <<\'PYEOF\' || echo "[warn] policy lowering overlay unavailable; using legacy verdict_v2"'
     start = body.index(marker)
     start = body.index("\n", start) + 1
-    end = body.index("\nPYEOF\n\nget_verdict_v2", start)
+    end = body.index("\nPYEOF\n\n# Get all PR numbers", start)
     return body[start:end]
 
 
