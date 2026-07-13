@@ -1,0 +1,144 @@
+{
+  "_description": "Structured inventory of every production file in the breakability codebase. Used to track modularization progress.",
+  "_generated": "2026-07-13",
+  "bash": {
+    "entry_points": {
+      "scripts/build-check.sh": {
+        "lines": 5055,
+        "domain": "deterministic-analysis",
+        "purpose": "Main deterministic analysis orchestrator - discovers PRs, runs baseline builds, per-PR ecosystem builds, CVE extraction, verdict determination",
+        "called_by": ["breakability-reusable.yml", "action.yml", "breakability-agent.yml"],
+        "status": "needs-split"
+      },
+      "scripts/post-fallback-comments.sh": {
+        "lines": 4379,
+        "domain": "comment-rendering",
+        "purpose": "Legacy comment renderer + merge plan generator - reads build-results.json, posts PR comments, creates merge plan issue",
+        "called_by": ["action.yml"],
+        "status": "needs-split"
+      },
+      "scripts/merge-results.sh": {
+        "lines": 596,
+        "domain": "data-pipeline",
+        "purpose": "Merges per-batch build-results JSON files, runs cross-PR detection, security posture scan",
+        "called_by": ["breakability-reusable.yml"],
+        "status": "ok"
+      },
+      "scripts/run-local.sh": {
+        "lines": 275,
+        "domain": "developer-tools",
+        "purpose": "Local development runner - exercises build-check.sh end-to-end with subset of PRs",
+        "called_by": ["manual"],
+        "status": "ok"
+      }
+    },
+    "utilities": {
+      "scripts/independent_adjudicate.sh": { "lines": 100, "domain": "ai-layer", "purpose": "Independent AI adjudication runner" },
+      "scripts/probe-selftest.sh": { "lines": 275, "domain": "testing", "purpose": "Self-test for behavioral probe" },
+      "scripts/copilot_backend_smoketest.sh": { "lines": 60, "domain": "testing", "purpose": "Copilot backend smoke test" },
+      "scripts/signature-file-copy.sh": { "lines": 146, "domain": "deployment", "purpose": "RBAC signature file copy" },
+      "scripts/rbac-file-copy.sh": { "lines": 70, "domain": "deployment", "purpose": "RBAC file copy" },
+      "sync-to-deployments.sh": { "lines": 64, "domain": "deployment", "purpose": "Syncs scripts/ to NDM/VCP deployment repos" }
+    },
+    "stale": {
+      "v10_unified_loop.sh": { "lines": 200, "purpose": "Ad-hoc debugging loop (unused)", "status": "remove-or-archive" },
+      "v10_content_fix_loop.sh": { "lines": 25, "purpose": "Content fix investigation (unused)", "status": "remove-or-archive" }
+    }
+  },
+  "python": {
+    "core": {
+      "scripts/evidence_contract.py": {
+        "lines": 748,
+        "domain": "core",
+        "purpose": "Typed evidence dataclasses (EvidenceBundle, EvidenceRecord, SignalName, etc.) and pure decide() function",
+        "imported_by": ["release_notes_evidence", "dynamic_probe_runner", "policy_lowering"],
+        "status": "needs-split"
+      },
+      "scripts/verdict_contract.py": {
+        "lines": 549,
+        "domain": "core",
+        "purpose": "Single source of truth for authoritative_verdict() - bucket mapping and gate prediction",
+        "imported_by": ["breakability_analyst", "generate_ai_comments", "generate_ai_merge_plan"],
+        "status": "ok"
+      },
+      "scripts/ai_backend.py": {
+        "lines": 351,
+        "domain": "core",
+        "purpose": "Unified AI model backend with record/replay cassette system",
+        "imported_by": ["generate_ai_verdicts", "generate_ai_comments", "generate_ai_merge_plan", "changelog_comprehension"],
+        "status": "ok"
+      }
+    },
+    "analysis": {
+      "scripts/policy_lowering.py": {
+        "lines": 603,
+        "domain": "analysis",
+        "purpose": "Central evidence integration - imports 5 local modules, builds typed evidence bundles",
+        "imports": ["evidence_contract", "release_notes_evidence", "callsite_impact", "agent_adjudicator", "ci_classifier"],
+        "status": "needs-split"
+      },
+      "scripts/callsite_impact.py": { "lines": 449, "domain": "analysis", "purpose": "Callsite reachability analysis" },
+      "scripts/release_notes_evidence.py": { "lines": 507, "domain": "analysis", "purpose": "Release note extraction and classification" },
+      "scripts/changelog_comprehension.py": { "lines": 326, "domain": "analysis", "purpose": "Changelog parsing into structured breaking_claims" },
+      "scripts/break_class_router.py": { "lines": 210, "domain": "analysis", "purpose": "Break classification for differential probe" },
+      "scripts/cross_pr_reconciler.py": { "lines": 269, "domain": "analysis", "purpose": "Cross-PR evidence reconciliation" },
+      "scripts/agent_adjudicator.py": { "lines": 235, "domain": "analysis", "purpose": "Deterministic reachability adjudication" },
+      "scripts/ci_classifier.py": { "lines": 48, "domain": "analysis", "purpose": "CI dependency sensitivity classifier" },
+      "scripts/cve_security_posture.py": { "lines": 134, "domain": "security", "purpose": "Precise Dependabot alert attribution" },
+      "scripts/reconcile_adjudication.py": { "lines": 431, "domain": "analysis", "purpose": "Reconciles deterministic + AI verdicts" }
+    },
+    "rendering": {
+      "scripts/generate_ai_comments.py": {
+        "lines": 788,
+        "domain": "rendering",
+        "purpose": "AI-enriched per-PR comment generation",
+        "imports": ["ai_backend", "verdict_contract"],
+        "status": "needs-split"
+      },
+      "scripts/generate_ai_merge_plan.py": {
+        "lines": 574,
+        "domain": "rendering",
+        "purpose": "AI-enriched or template merge plan generation",
+        "imports": ["ai_backend", "verdict_contract"],
+        "status": "needs-split"
+      },
+      "scripts/generate_ai_verdicts.py": { "lines": 191, "domain": "rendering", "purpose": "AI verdict generation for REVIEW PRs" },
+      "scripts/breakability_analyst.py": {
+        "lines": 1115,
+        "domain": "rendering",
+        "purpose": "Deterministic template comment renderer",
+        "status": "needs-split"
+      }
+    },
+    "probe": {
+      "scripts/differential-probe.py": {
+        "lines": 1604,
+        "domain": "probe",
+        "purpose": "Agent-driven behavioral verification probe",
+        "imports": ["break_class_router", "cross_pr_reconciler"],
+        "status": "needs-split-and-rename"
+      },
+      "scripts/behavioral-probe.py": { "lines": 294, "domain": "probe", "purpose": "Targeted behavioral AI probe", "status": "needs-rename" },
+      "scripts/dynamic_probe_runner.py": { "lines": 364, "domain": "probe", "purpose": "Go old-vs-new probe runner" }
+    },
+    "ecosystem": {
+      "scripts/ecosystem_adapters.py": { "lines": 418, "domain": "ecosystem", "purpose": "Lightweight ecosystem adapter interfaces" },
+      "scripts/npm_changelog.py": { "lines": 327, "domain": "ecosystem", "purpose": "npm changelog/release-note fetch helpers" }
+    },
+    "eval": {
+      "scripts/breakability_eval.py": { "lines": 331, "domain": "eval", "purpose": "Evaluation corpus validator and scorer" },
+      "scripts/filter-build-results.py": { "lines": 229, "domain": "eval", "purpose": "Slices build-results.json to PR subset", "status": "needs-rename" }
+    }
+  },
+  "tests": {
+    "count": 25,
+    "total_lines": 6800,
+    "baseline": "555 passed, 1 skipped (2026-07-13)"
+  },
+  "workflows": {
+    ".github/workflows/breakability-reusable.yml": { "lines": 423, "purpose": "Main reusable workflow - 3 jobs: discover, deterministic, finalize" },
+    ".github/workflows/ci.yml": { "lines": 51, "purpose": "CI for the breakability repo itself" },
+    "workflows/breakability-agent.yml": { "lines": 355, "purpose": "Standalone workflow synced to deployment repos" },
+    "action.yml": { "lines": 196, "purpose": "Composite GitHub Action entry point (Copilot agent path)" }
+  }
+}

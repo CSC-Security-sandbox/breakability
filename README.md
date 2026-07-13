@@ -380,10 +380,23 @@ This is a production tool used for real dependency management. Contributions wel
 
 ---
 
-## 📄 License
+## Known Issues (v1 - working-with-bugs)
 
-MIT License - See LICENSE file
+| ID | Severity | Title | Status |
+|---|---|---|---|
+| F001 | P0 | CVE data completely missing from merge plans and PR comments | OPEN |
+| F002 | P1 | VCP PR#7 and PR#11 still false-BLOCKED despite verdict_contract.py fix | OPEN |
+| F003 | P2 | Merge plan vs PR comment verdict inconsistency | OPEN |
+| F004 | P2 | Security Posture section empty in both repos | OPEN |
+| F005 | P2 | Golden standard structure partially matched - missing key sections | OPEN |
+| F006 | P3 | VCP PR#6 (StepSecurity) not analyzed | OPEN |
+| F007 | P1 | No CVE column data in NDM or VCP merge plan tables | OPEN |
+| F008 | P2 | Pre-existing build failures not distinguished from upgrade-caused | OPEN |
+
+These issues are tracked from the v13 evaluator run (effective score: 4/10). The `cleanup` branch focuses on modularizing the codebase first; bug fixes will follow on a separate branch once the code is manageable.
 
 ---
 
-**Built with ❤️ to eliminate developer toil and false alarms**
+## 📄 License
+
+MIT License - See LICENSE file
