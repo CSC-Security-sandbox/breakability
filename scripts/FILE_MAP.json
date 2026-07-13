@@ -43,7 +43,10 @@
       "scripts/lib/post_loop.sh": { "lines": 65, "domain": "aggregation", "purpose": "Post-loop cross-PR deps, security scan, cleanup" },
       "scripts/lib/comment_helpers.sh": { "lines": 331, "domain": "comments", "purpose": "gh_pr_comment, gh_delete_comment, get_verdict_v2, etc." },
       "scripts/lib/comment_blocks.sh": { "lines": 653, "domain": "comments", "purpose": "build_cve_blocks, build_evidence_blocks, build_checklist_blocks" },
-      "scripts/lib/comment_templates.sh": { "lines": 457, "domain": "comments", "purpose": "dispatch_comment_template — 15-branch verdict dispatch" }
+      "scripts/lib/comment_templates.sh": { "lines": 457, "domain": "comments", "purpose": "dispatch_comment_template — 15-branch verdict dispatch" },
+      "scripts/lib/pr_metadata.sh": { "lines": 351, "domain": "pr-pipeline", "purpose": "PR metadata extraction — extracted from build-check.sh (Phase 9)" },
+      "scripts/lib/pr_build.sh": { "lines": 746, "domain": "pr-pipeline", "purpose": "Per-PR build orchestration — extracted from build-check.sh (Phase 9)" },
+      "scripts/lib/pr_test.sh": { "lines": 271, "domain": "pr-pipeline", "purpose": "Per-PR test execution — extracted from build-check.sh (Phase 9)" }
     },
     "utilities": {
       "scripts/independent_adjudicate.sh": { "lines": 100, "domain": "ai-layer", "purpose": "Independent AI adjudication runner" },
@@ -81,6 +84,30 @@
         "domain": "core",
         "purpose": "Typed schema contract for build-results.json — dataclasses, normalization, validation. Prevents key-name drift (12 known aliases)",
         "status": "new"
+      },
+      "scripts/core/ai_reassert.py": {
+        "lines": 67,
+        "domain": "core",
+        "purpose": "AI reassertion logic — extracted from post-fallback-comments.sh (Phase 8)",
+        "status": "ok"
+      },
+      "scripts/core/policy_overlay.py": {
+        "lines": 225,
+        "domain": "core",
+        "purpose": "Policy-lowering overlay — maps policy_lowering.decision to verdict_v2, extracted from post-fallback-comments.sh (Phase 8)",
+        "status": "ok"
+      },
+      "scripts/core/pr_utils.py": {
+        "lines": 395,
+        "domain": "core",
+        "purpose": "PR data utilities — field extraction, verdict mapping, extracted from post-fallback-comments.sh (Phase 10)",
+        "status": "ok"
+      },
+      "scripts/core/pr_data_assembler.py": {
+        "lines": 1106,
+        "domain": "core",
+        "purpose": "PR data assembly — builds per-PR field objects from build-results.json, extracted from post-fallback-comments.sh (Phase 10)",
+        "status": "ok"
       }
     },
     "ai": {
@@ -141,6 +168,11 @@
       "scripts/rendering/helpers.py": { "lines": 478, "domain": "rendering", "purpose": "Risk/recommendation/confidence helpers" },
       "scripts/rendering/renderer.py": { "lines": 442, "domain": "rendering", "purpose": "Markdown comment renderer (_render_compact, render_pr_comment)" },
       "scripts/rendering/cli.py": { "lines": 62, "domain": "rendering", "purpose": "CLI entry point (main)" },
+      "scripts/rendering/comment_builder.py": { "lines": 246, "domain": "rendering", "purpose": "Structured PR comment body builder — extracted from post-fallback-comments.sh (Phase 7)" },
+      "scripts/rendering/merge_plan.py": { "lines": 1152, "domain": "rendering", "purpose": "Deterministic merge-plan issue body generator — extracted from post-fallback-comments.sh (Phase 7)" },
+      "scripts/rendering/truncate_plan.py": { "lines": 34, "domain": "rendering", "purpose": "Merge plan truncation for GitHub comment size limits — extracted from post-fallback-comments.sh (Phase 7)" },
+      "scripts/rendering/pr_fields.py": { "lines": 254, "domain": "rendering", "purpose": "PR field extraction and formatting — extracted from post-fallback-comments.sh (Phase 8)" },
+      "scripts/rendering/residual_risk.py": { "lines": 225, "domain": "rendering", "purpose": "Residual risk rendering for PR comments — extracted from post-fallback-comments.sh (Phase 8)" },
       "scripts/breakability_analyst.py": {
         "lines": 46,
         "domain": "rendering",

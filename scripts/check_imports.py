@@ -28,6 +28,10 @@ MODULES = [
     "core.evidence_contract",
     "core.verdict_contract",
     "core.build_results_schema",
+    "core.ai_reassert",
+    "core.policy_overlay",
+    "core.pr_utils",
+    "core.pr_data_assembler",
     "ai.ai_backend",
     "ai.generate_ai_comments",
     "ai.generate_ai_merge_plan",
@@ -51,6 +55,10 @@ MODULES = [
     "rendering.helpers",
     "rendering.renderer",
     "rendering.cli",
+    "rendering.comment_builder",
+    "rendering.pr_fields",
+    "rendering.residual_risk",
+    "rendering.truncate_plan",
     "breakability_eval",
 ]
 
@@ -62,6 +70,7 @@ CLI_SCRIPTS = [
     "batch_vuln_summary",
     "write_skip_entry",
     "discover_peer_groups",
+    "rendering.merge_plan",  # runs top-level (reads /tmp/build-results.json)
 ]
 
 failed = []

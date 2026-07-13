@@ -11,23 +11,16 @@ from pathlib import Path
 
 
 SCRIPT = Path(__file__).with_name("post-fallback-comments.sh")
+MERGE_PLAN_SCRIPT = Path(__file__).resolve().parent / "rendering" / "merge_plan.py"
+POLICY_OVERLAY_SCRIPT = Path(__file__).resolve().parent / "core" / "policy_overlay.py"
 
 
 def extract_merge_plan_python():
-    body = SCRIPT.read_text()
-    start = body.index("MERGE_PLAN_BODY=$(python3 << 'PYEOF'")
-    start = body.index("\n", start) + 1
-    end = body.index("\nPYEOF\n)", start)
-    return body[start:end]
+    return MERGE_PLAN_SCRIPT.read_text()
 
 
 def extract_policy_overlay_python():
-    body = SCRIPT.read_text()
-    marker = 'python3 - "$RESULTS_FILE" <<\'PYEOF\' || echo "[warn] policy lowering overlay unavailable; using legacy verdict_v2"'
-    start = body.index(marker)
-    start = body.index("\n", start) + 1
-    end = body.index("\nPYEOF\n\n# Get all PR numbers", start)
-    return body[start:end]
+    return POLICY_OVERLAY_SCRIPT.read_text()
 
 
 def base_pr(**overrides):
