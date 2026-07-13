@@ -137,22 +137,34 @@
       "scripts/security_posture_scan.py": { "lines": 193, "domain": "security", "purpose": "Dependabot alert attribution — extracted from build-check.sh SECURITYEOF heredoc" }
     },
     "rendering": {
+      "scripts/rendering/normalizers.py": { "lines": 189, "domain": "rendering", "purpose": "Signal normalization (verdict, changelog, test, probe, reachability)" },
+      "scripts/rendering/helpers.py": { "lines": 478, "domain": "rendering", "purpose": "Risk/recommendation/confidence helpers" },
+      "scripts/rendering/renderer.py": { "lines": 442, "domain": "rendering", "purpose": "Markdown comment renderer (_render_compact, render_pr_comment)" },
+      "scripts/rendering/cli.py": { "lines": 62, "domain": "rendering", "purpose": "CLI entry point (main)" },
       "scripts/breakability_analyst.py": {
-        "lines": 1115,
+        "lines": 46,
         "domain": "rendering",
-        "purpose": "Deterministic template comment renderer",
-        "status": "needs-split"
+        "purpose": "Backward-compatible shim → rendering/ package",
+        "status": "done-split"
       }
     },
     "probe": {
+      "scripts/probe/config.py": { "lines": 76, "domain": "probe", "purpose": "Constants, env config, regex patterns" },
+      "scripts/probe/utils.py": { "lines": 56, "domain": "probe", "purpose": "log, is_residual, safe_int, read_snippet" },
+      "scripts/probe/evidence.py": { "lines": 105, "domain": "probe", "purpose": "first_prod_site, affected_files, our_usages" },
+      "scripts/probe/grading.py": { "lines": 250, "domain": "probe", "purpose": "Proof-contract parsing, derive_grade" },
+      "scripts/probe/sandbox.py": { "lines": 218, "domain": "probe", "purpose": "Agent env scrubbing, ephemeral home, run_agent" },
+      "scripts/probe/npm_probe.py": { "lines": 477, "domain": "probe", "purpose": "npm runtime-shape probe with embedded JS" },
+      "scripts/probe/gomod_probe.py": { "lines": 176, "domain": "probe", "purpose": "Go module API-surface probe" },
+      "scripts/probe/cache.py": { "lines": 36, "domain": "probe", "purpose": "Probe result caching" },
+      "scripts/probe/orchestrator.py": { "lines": 327, "domain": "probe", "purpose": "grade_residual, run_reasoning, main" },
       "scripts/differential-probe.py": {
-        "lines": 1604,
+        "lines": 20,
         "domain": "probe",
-        "purpose": "Agent-driven behavioral verification probe",
-        "imports": ["break_class_router", "cross_pr_reconciler"],
-        "status": "needs-split-and-rename"
+        "purpose": "Backward-compatible shim → probe/ package",
+        "status": "done-split"
       },
-      "scripts/behavioral-probe.py": { "lines": 294, "domain": "probe", "purpose": "Targeted behavioral AI probe", "status": "needs-rename" },
+      "scripts/behavioral-probe.py": { "lines": 294, "domain": "probe", "purpose": "Targeted behavioral AI probe" },
       "scripts/dynamic_probe_runner.py": { "lines": 364, "domain": "probe", "purpose": "Go old-vs-new probe runner" }
     },
     "ecosystem": {
