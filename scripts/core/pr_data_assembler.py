@@ -606,6 +606,8 @@ def main():
             else:
                 is_preexisting_test = False
                 preexisting_detail = ""
+                new_test_fails = set()
+                new_npm_test_fails = set()
                 if eco == "gomod" and main_go_test_exit_val > 0 and test_exit_val > 0:
                     # Content-level comparison: extract FAIL lines from both (Finding-4.3)
                     main_test_file = f"/tmp/_bc_main_go_test_out_{pr_num}.txt"
