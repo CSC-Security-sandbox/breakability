@@ -105,7 +105,8 @@ def cmd_companion_banner(_args):
     try:
         with open(os.environ["RESULTS_FILE"]) as fh:
             data = json.load(fh)
-    except Exception:
+    except Exception as exc:
+        print(f"WARNING: failed to read RESULTS_FILE: {exc}", file=sys.stderr)
         raise SystemExit(0)
     prs = data.get("prs", {})
     cross = data.get("cross_pr_deps", []) or []

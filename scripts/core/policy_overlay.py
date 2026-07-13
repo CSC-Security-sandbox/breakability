@@ -49,8 +49,8 @@ def main():
                 _sys.path.insert(0, _sd)
             from verdict_contract import map_policy_decision as _canon
             return _canon(decision)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"WARNING: could not import verdict_contract, using inline fallback: {exc}", file=sys.stderr)
         action = decision.get("verdict")
         severity = decision.get("severity")
         if severity not in severity_rank:

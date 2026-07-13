@@ -848,7 +848,8 @@ def main():
                     "(\"|')" + _dbr_re.escape(p) + "(\"|')", repo_root]
             try:
                 out = _dbr_sub.run(cmd, capture_output=True, text=True, timeout=45)
-            except Exception:
+            except Exception as exc:
+                print(f"WARNING: behavioral exposure grep failed for path {p}: {exc}", file=sys.stderr)
                 continue
             for line in (out.stdout or "").splitlines():
                 parts = line.split(":", 2)

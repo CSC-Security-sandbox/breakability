@@ -751,9 +751,9 @@ if all_cves:
         _gated = [c for c in _cve_ids_by_pr.get(str(e["num"]), []) if c]
         if _gated:
             _cve_list = _gated
-            cve_str = ", ".join(_cve_list)
+            cve_str = ", ".join(dict.fromkeys(_cve_list))
         else:
-            _cve_list = [c for c in (e.get("cves") or []) if c]
+            _cve_list = list(dict.fromkeys(c for c in (e.get("cves") or []) if c))
             cve_str = (", ".join(_cve_list) + " (claimed in PR body — not version-verified vs fixed-in)") if _cve_list else "see Dependabot alerts"
         # Verdict note derived from the COMMITTED bucket (not the raw build verdict):
         # a CVE-fixing PR routed to Manual Review or Fix-required must NOT also read
