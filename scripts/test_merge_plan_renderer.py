@@ -68,6 +68,7 @@ def render_plan(results):
 
 def apply_policy_overlay(results):
     code = extract_policy_overlay_python()
+    scripts_dir = str(Path(__file__).resolve().parent)
     with tempfile.TemporaryDirectory() as td:
         results_path = Path(td) / "build-results.json"
         results_path.write_text(json.dumps(results))
@@ -77,6 +78,7 @@ def apply_policy_overlay(results):
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env={**os.environ, "BREAKABILITY_SCRIPTS_DIR": scripts_dir},
         )
         return json.loads(results_path.read_text())
 

@@ -19,65 +19,21 @@ def main():
 
     severity_rank = {"none": 0, "low": 1, "medium": 2, "high": 3}
     rank_severity = {v: k for k, v in severity_rank.items()}
-    valid_v2_verdicts = {"SAFE", "REVIEW", "BLOCKED"}
+    valid_v2_verdicts = {"SAFE", "REVIEW", "BLOCKED", "GLANCE"}
 
-
-    def confidence_to_level(conf, action):
-        if action == "ABSTAIN":
-            return "L0"
-        return {"high": "L4", "medium": "L3", "low": "L2"}.get(str(conf).lower(), "L2")
-
-
-    def priority(action, severity):
-        if action == "FIX":
-            return "P0"
-        if severity == "high":
-            return "P1"
-        if severity == "medium":
-            return "P2"
-        return "P3"
-
+    import os as _os
+    _sd = _os.environ.get("BREAKABILITY_SCRIPTS_DIR") or _os.path.join(_os.getcwd(), ".github", "scripts")
+    _core = _os.path.join(_sd, "core")
+    for _p in (_sd, _core):
+        if _p not in sys.path:
+            sys.path.insert(0, _p)
+    from verdict_contract import map_policy_decision as _canon_map
 
     def map_policy(decision):
-        # CANONICAL mapping lives in .github/scripts/verdict_contract.py::map_policy_decision.
-        # Prefer it so the renderer, reconcile, and the gate never drift again; fall back to the
-        # inline copy (kept in sync) if the module can't be imported in this heredoc context.
-        try:
-            import os as _os, sys as _sys
-            _sd = _os.path.join(_os.getcwd(), ".github", "scripts")
-            if _sd not in _sys.path:
-                _sys.path.insert(0, _sd)
-            from verdict_contract import map_policy_decision as _canon
-            return _canon(decision)
-        except Exception as exc:
-            print(f"WARNING: could not import verdict_contract, using inline fallback: {exc}", file=sys.stderr)
-        action = decision.get("verdict")
-        severity = decision.get("severity")
-        if severity not in severity_rank:
-            severity = {"FIX": "high", "ABSTAIN": "medium", "REVIEW": "medium", "GLANCE": "low", "MERGE": "none"}.get(action, "medium")
-        if action == "FIX":
-            verdict = "BLOCKED"
-        elif action in {"REVIEW", "ABSTAIN"}:
-            verdict = "REVIEW"
-        elif action in {"MERGE", "GLANCE"}:
-            # GLANCE = clean build/tests, only soft/missing-changelog uncertainty -> auto-clear
-            # (Safe to merge / optional glance, Low). Mapping GLANCE->REVIEW was the #121->#128
-            # review-wall regression. Keep in sync with verdict_contract._ACTION_TO_BUCKET.
-            verdict = "SAFE"
-        else:
-            return None
-        return {
-            "verdict": verdict,
-            "severity": severity,
-            "confidence": confidence_to_level(decision.get("confidence"), action),
-            "priority": priority(action, severity),
-            "reason": decision.get("display_reason") or decision.get("reason_code") or "",
-            "residual": {
-                "summary": decision.get("display_reason") or decision.get("reason_code") or "",
-                "check": decision.get("reason_code") or "",
-            },
-            "policyDecision": decision,
-        }
+        mapped = _canon_map(decision)
+        if mapped and mapped.get("verdict") == "GLANCE":
+            mapped["verdict"] = "SAFE"
+        return mapped
 
 
     def stronger_review(existing, mapped):
