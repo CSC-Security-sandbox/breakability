@@ -87,7 +87,7 @@ jobs:
   # Job 1: Discover PRs and split into batches
   # ═══════════════════════════════════════════════════════════════════════
   discover:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, breakability]
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.split.outputs.matrix }}
@@ -144,7 +144,7 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════════
   deterministic:
     needs: discover
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, breakability]
     timeout-minutes: 60
     strategy:
       matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
@@ -203,7 +203,7 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════════
   finalize:
     needs: [discover, deterministic]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, breakability]
     timeout-minutes: 120
     if: always() && needs.discover.result == 'success'
     steps:
