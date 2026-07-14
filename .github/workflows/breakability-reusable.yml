@@ -175,6 +175,9 @@ jobs:
         with:
           python-version: ${{ inputs.python_version }}
 
+      - name: Fetch all PR branches for analysis
+        run: git fetch --all --prune --quiet
+
       - name: Run deterministic analysis (batch ${{ matrix.batch_id }})
         run: |
           chmod +x $BRK_DIR/scripts/build-check.sh
