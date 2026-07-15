@@ -251,6 +251,32 @@ def main():
         infra_filtered = len(new_errors) - len(real_errors)
         new_errors = real_errors
 
+    def _count_output_errors(output, ecosystem):
+        """Count compiler/build error lines in output_tail when new_errors is empty."""
+        if not output:
+            return 0, ""
+        count = 0
+        first = ""
+        for line in output.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            is_error = False
+            if ecosystem == "gomod":
+                if re.search(r'\.go:\d+:\d+:', stripped):
+                    is_error = True
+            elif ecosystem == "npm":
+                if re.search(r'error TS\d+:', stripped):
+                    is_error = True
+            else:
+                if re.search(r'(error|Error|ERROR)[:[] ', stripped):
+                    is_error = True
+            if is_error:
+                count += 1
+                if not first:
+                    first = stripped
+        return count, first
+
     # Test values
     test_ran = True if test_ran_str == "true" else False
     test_exit_raw = test_exit_str
@@ -544,8 +570,14 @@ def main():
                 # The BUILD_FAILS comment should show L2, not L1.
                 level = 2
                 # v9: Include first new error so the comment says WHAT broke
-                _fail_sample = new_errors[0] if new_errors else "build exit non-zero"
-                steps.append({"step": "type_check", "status": "fail", "detail": f"{len(new_errors)} new error(s): {_fail_sample[:120]}"})
+                if new_errors:
+                    _fail_count = len(new_errors)
+                    _fail_sample = new_errors[0]
+                else:
+                    _fail_count, _fail_sample = _count_output_errors(build_output, eco)
+                    if not _fail_sample:
+                        _fail_sample = "build exit non-zero"
+                steps.append({"step": "type_check", "status": "fail", "detail": f"{_fail_count} new error(s): {_fail_sample[:120]}"})
             else:
                 steps.append({"step": "type_check", "status": "fail"})
         elif tsc_ran:
@@ -570,8 +602,14 @@ def main():
                 # V8 FIX: tsc WAS run and FAILED. This is L2 (attempted), not L1.
                 level = 2
                 # v9: Include first new error so the comment says WHAT broke
-                _tsc_fail_sample = new_errors[0] if new_errors else "tsc exit non-zero"
-                steps.append({"step": "type_check", "status": "fail", "detail": f"{len(new_errors)} new error(s): {_tsc_fail_sample[:120]}"})
+                if new_errors:
+                    _tsc_fail_count = len(new_errors)
+                    _tsc_fail_sample = new_errors[0]
+                else:
+                    _tsc_fail_count, _tsc_fail_sample = _count_output_errors(build_output, eco)
+                    if not _tsc_fail_sample:
+                        _tsc_fail_sample = "tsc exit non-zero"
+                steps.append({"step": "type_check", "status": "fail", "detail": f"{_tsc_fail_count} new error(s): {_tsc_fail_sample[:120]}"})
             else:
                 steps.append({"step": "type_check", "status": "fail"})
         else:
@@ -706,6 +744,64 @@ def main():
         pr_data["merge_risk"]["confidenceAxis"] = pr_data["merge_risk"]["buildVerificationAxis"]
         if isinstance(pr_data.get("deterministic"), dict) and isinstance(pr_data["deterministic"].get("merge_risk"), dict):
             pr_data["deterministic"]["merge_risk"] = pr_data["merge_risk"]
+
+    # -- Compute merge_risk tag/reason from build evidence -----------------
+    # The deterministic layer may already have set a tag (e.g. "High" for a
+    # confirmed API break).  Only fill in tag/reason when the deterministic
+    # layer left them blank so we never overwrite a higher-confidence signal.
+    if isinstance(pr_data.get("merge_risk"), dict) and not pr_data["merge_risk"].get("tag"):
+        _mr = pr_data["merge_risk"]
+        if build_verdict in ("fail", "pre_existing_plus_new") and new_errors:
+            _mr["tag"] = "High"
+            _mr["reason"] = (f"build fails with {len(new_errors)} new error(s): "
+                             f"{new_errors[0][:120]}")
+            _mr["evidenceAxis"] = "build failure with new errors"
+        elif build_verdict == "fail" and not new_errors:
+            _tail_count, _tail_sample = _count_output_errors(build_output, eco)
+            if _tail_count > 0:
+                _mr["tag"] = "High"
+                _mr["reason"] = (f"build fails with {_tail_count} error(s) in output "
+                                 f"(new_errors empty — may be environmental): {_tail_sample[:100]}")
+                _mr["evidenceAxis"] = "build failure, errors in output_tail"
+            else:
+                _mr["tag"] = "Medium"
+                _mr["reason"] = "build fails but no classifiable errors — investigate manually"
+                _mr["evidenceAxis"] = "build failure, unclassified"
+        elif not files_importing and build_verdict in ("pass", "security_review", "skipped", "no build needed"):
+            _mr["tag"] = "Low"
+            _mr["reason"] = "no importing files and build passes; change is isolated"
+            _mr["evidenceAxis"] = "no import footprint, build clean"
+        elif not files_importing and build_verdict in ("fail", "pre_existing"):
+            _mr["tag"] = "Low"
+            _mr["reason"] = f"no importing files; build verdict={build_verdict} likely environmental"
+            _mr["evidenceAxis"] = "no import footprint, build issue likely unrelated"
+        elif files_importing and build_verdict in ("pass", "security_review"):
+            _mr["tag"] = "Medium"
+            _mr["reason"] = (f"build passes with {len(files_importing)} importing file(s); "
+                             f"bump={bump}; review for behavioral changes")
+            _mr["evidenceAxis"] = "build clean, imports present"
+        else:
+            _parts = [f"build verdict={build_verdict}",
+                      f"{len(files_importing)} importing file(s)"]
+            if cve_details:
+                _cve_ids = [c.get("id", "unknown") for c in cve_details[:3]
+                            if isinstance(c, dict)]
+                _parts.append(("CVE(s): " + ", ".join(_cve_ids)) if _cve_ids
+                              else "CVE(s) referenced")
+            _parts.append(f"bump={bump}")
+            _mr["tag"] = "Medium"
+            _mr["reason"] = "; ".join(_parts)
+            _mr["evidenceAxis"] = "computed from build and import evidence"
+        # Major version bumps escalate one level
+        if bump == "major":
+            if _mr["tag"] == "Low":
+                _mr["tag"] = "Medium"
+                _mr["reason"] += "; escalated from Low due to major version bump"
+            elif _mr["tag"] == "Medium":
+                _mr["tag"] = "High"
+                _mr["reason"] += "; escalated due to major version bump"
+            _mr["evidenceAxis"] = (_mr.get("evidenceAxis", "") +
+                                   " + major semver bump")
 
     # -- Declared-break reachability resolution ----------------------------
     # A declared-breaking changelog verdict (High) is reachability-BLIND on its own: the break

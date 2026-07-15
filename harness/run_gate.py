@@ -34,6 +34,183 @@ except Exception:  # pragma: no cover - contract must exist, but never crash the
     _contract_prediction = None
 
 
+def check_pipeline_completeness(results):
+    """P0/P1 checks: did the pipeline actually run all stages?
+
+    Returns list of (severity, tag, detail) tuples.
+    """
+    findings = []
+    meta = results.get("meta", {})
+    pf = meta.get("pipeline_flags", {})
+    prs = results.get("prs", {})
+    if isinstance(prs, list):
+        prs = {str(p.get("pr_id") or p.get("number")): p for p in prs}
+
+    if pf:
+        if pf.get("skip_agent_requested"):
+            findings.append(("P0", "AI_SKIPPED",
+                             "skip_agent=true — AI layer explicitly disabled, all comments are thin templates"))
+        elif not pf.get("ai_comments_generated"):
+            findings.append(("P0", "AI_FAILED",
+                             "AI agent ran but produced no comments — 1,257-line prompt unused"))
+        if pf.get("template_fallback_used") and not pf.get("skip_agent_requested"):
+            findings.append(("P0", "TEMPLATE_FALLBACK",
+                             "template-fallback active despite AI not being skipped — AI layer crashed"))
+        if not pf.get("ai_agent_installed") and not pf.get("skip_agent_requested"):
+            findings.append(("P1", "AI_NOT_INSTALLED",
+                             "AI agent CLI was not installed"))
+    else:
+        fallback_detected = False
+        for pid, pr in prs.items():
+            comment_footer = str(pr.get("comment_footer", ""))
+            comment_model = str(pr.get("comment_model", ""))
+            if "template-fallback" in comment_footer or "template-fallback" in comment_model:
+                fallback_detected = True
+                break
+        if fallback_detected:
+            findings.append(("P0", "TEMPLATE_FALLBACK_DETECTED",
+                             "meta.pipeline_flags missing AND template-fallback detected in PR comments"))
+        else:
+            all_empty_det = all(
+                not (pr.get("deterministic") or {}).get("changelogSignal")
+                for pr in prs.values()
+            ) if prs else False
+            if all_empty_det:
+                findings.append(("P0", "AI_LAYER_SUSPECT",
+                                 "meta.pipeline_flags missing, all PRs have empty deterministic/changelogSignal — "
+                                 "AI layer likely did not run (add pipeline_flags to workflow)"))
+
+    no_changelog = 0
+    for pid, pr in prs.items():
+        cs = (pr.get("deterministic") or {}).get("changelogSignal")
+        if cs is None or cs == "":
+            no_changelog += 1
+    if no_changelog > 0:
+        pct = no_changelog / max(len(prs), 1) * 100
+        if pct > 50:
+            findings.append(("P1", "CHANGELOG_MISSING",
+                             f"changelog data missing on {no_changelog}/{len(prs)} PRs ({pct:.0f}%)"))
+
+    return findings
+
+
+def check_security_coverage(results):
+    """P1 checks: is the security analysis actually functional?
+
+    Returns list of (severity, tag, detail) tuples.
+    """
+    findings = []
+    sp = results.get("security_posture", {})
+    prs = results.get("prs", {})
+    if isinstance(prs, list):
+        prs = {str(p.get("pr_id") or p.get("number")): p for p in prs}
+
+    if sp.get("alerts_unavailable"):
+        findings.append(("P1", "ALERTS_BLIND",
+                         "alerts_unavailable=true — tool cannot correlate Dependabot alerts with PRs"))
+
+    unknown_vuln = 0
+    for pid, pr in prs.items():
+        if pr.get("vuln_status") == "unknown":
+            unknown_vuln += 1
+    if unknown_vuln > 0 and unknown_vuln == len(prs):
+        findings.append(("P1", "VULN_ALL_UNKNOWN",
+                         f"vuln_status=unknown on all {unknown_vuln} PRs — govulncheck not running"))
+
+    if sp.get("total_open_alerts", 0) > 0 and not sp.get("prs_fixing_alerts"):
+        findings.append(("P1", "ALERTS_NO_CORRELATION",
+                         f"{sp['total_open_alerts']} open alerts but no PR correlation in prs_fixing_alerts"))
+
+    return findings
+
+
+def check_build_misattribution(results):
+    """P1 check: detect build failures caused by pre-existing/environmental errors.
+
+    If 3+ PRs from different packages share byte-identical build output_tail,
+    those failures are almost certainly a pre-existing break in the build sandbox
+    (e.g. a codegen issue in vcm-proxy) rather than real dependency-bump breakage.
+
+    Returns list of (severity, tag, detail) tuples.
+    """
+    findings = []
+    prs = results.get("prs", {})
+    if isinstance(prs, list):
+        prs = {str(p.get("pr_id") or p.get("number")): p for p in prs}
+
+    # Collect PRs whose build verdict is "fail" and that have output_tail content
+    fail_groups = {}  # output_tail -> list of (pr_id, package)
+    for pid, pr in prs.items():
+        build = pr.get("build") or {}
+        if build.get("verdict") != "fail":
+            continue
+        tail = build.get("output_tail")
+        if not tail or not tail.strip():
+            continue
+        pkg = pr.get("package", "unknown")
+        fail_groups.setdefault(tail, []).append((pid, pkg))
+
+    for tail, group in fail_groups.items():
+        if len(group) < 3:
+            continue
+        # Check that the PRs come from different packages (not one package repeated)
+        packages = set(pkg for _, pkg in group)
+        if len(packages) < 2:
+            continue
+        pr_ids = sorted(group, key=lambda x: int(x[0]) if x[0].isdigit() else x[0])
+        pr_list = ",".join(pid for pid, _ in pr_ids)
+        # Extract a short error signature from the tail for the message
+        lines = tail.strip().splitlines()
+        # Pick the first non-empty error-like line for context
+        sig = ""
+        for line in lines:
+            stripped = line.strip()
+            if stripped and ("undefined" in stripped or "error" in stripped.lower()
+                            or "cannot" in stripped.lower() or "failed" in stripped.lower()):
+                sig = stripped[:120]
+                break
+        if not sig and lines:
+            sig = lines[-1].strip()[:120]
+        detail = (f"PRs {pr_list} share identical build error — "
+                  f"likely pre-existing, not caused by their dependency bumps")
+        if sig:
+            detail += f" ({sig})"
+        findings.append(("P1", "BUILD_MISATTRIBUTED", detail))
+
+    return findings
+
+
+def check_merge_risk_uniformity(results):
+    """P1 check: flag when merge_risk is suspiciously uniform across PRs.
+
+    If >50% of PRs share a byte-identical merge_risk object, the risk
+    computation is likely broken (static template instead of computed).
+    """
+    findings = []
+    prs = results.get("prs", {})
+    if isinstance(prs, list):
+        prs = {str(p.get("pr_id") or p.get("number")): p for p in prs}
+    if len(prs) < 3:
+        return findings
+
+    import json as _json
+    risk_groups = {}
+    for pid, pr in prs.items():
+        mr = pr.get("merge_risk") or {}
+        key = _json.dumps(mr, sort_keys=True)
+        risk_groups.setdefault(key, []).append(pid)
+
+    for key, group in risk_groups.items():
+        pct = len(group) / len(prs) * 100
+        if pct > 50 and len(group) > 2:
+            mr_obj = _json.loads(key)
+            tag = mr_obj.get("tag", "?")
+            findings.append(("P1", "MERGE_RISK_UNIFORM",
+                             f"{len(group)}/{len(prs)} PRs ({pct:.0f}%) share identical "
+                             f"merge_risk (tag={tag}) — risk computation may be broken"))
+    return findings
+
+
 def _legacy_prediction(pr):
     """Original derivation from build.verdict + merge_risk.tag (pre-typed-policy artifacts)."""
     build = pr.get("build") or {}
@@ -250,6 +427,18 @@ def main():
             if got and got != want:
                 golden_regressions.append((pid, want, got))
 
+    # 4. pipeline completeness checks (AI layer, changelog)
+    pipeline_findings = check_pipeline_completeness(results)
+
+    # 5. security coverage checks (alerts, vuln status)
+    security_findings = check_security_coverage(results)
+
+    # 6. build misattribution (cross-PR error deduplication)
+    misattribution_findings = check_build_misattribution(results)
+
+    # 7. merge_risk uniformity (detects static template bug)
+    uniformity_findings = check_merge_risk_uniformity(results)
+
     fg = score_res["errors"]["false_green_count"]
     fb = score_res["errors"]["false_block_count"]
     fn = score_res["errors"]["false_none_count"]
@@ -259,7 +448,12 @@ def main():
     zero_invented = len(invented) == 0
     no_golden_reg = len(golden_regressions) == 0
     zero_overclaim = len(overclaims) == 0
-    accepted = zero_fg and zero_invented and no_golden_reg and zero_overclaim
+
+    has_p0_pipeline = any(s == "P0" for s, _, _ in pipeline_findings)
+    has_p0_security = any(s == "P0" for s, _, _ in security_findings)
+
+    accepted = (zero_fg and zero_invented and no_golden_reg
+                and zero_overclaim and not has_p0_pipeline and not has_p0_security)
 
     # composite 0-10 score: start 10, subtract heavy for hard fails, light for noise
     score = 10.0
@@ -269,6 +463,14 @@ def main():
     score -= len(golden_regressions) * 2.0
     score -= fb * 1.0            # over-flagging (noise)
     score -= fn * 1.0
+    for sev, tag, _ in pipeline_findings:
+        score -= 3.0 if sev == "P0" else 1.5
+    for sev, tag, _ in security_findings:
+        score -= 2.0 if sev == "P0" else 1.0
+    for sev, tag, _ in misattribution_findings:
+        score -= 1.0  # P1: pre-existing build failures inflating false breakage
+    for sev, tag, _ in uniformity_findings:
+        score -= 1.5  # P1: merge_risk computation broken
     score = max(0.0, round(score, 1))
 
     print(f"SCORE: {score}")
@@ -279,6 +481,10 @@ def main():
     print(f"INVENTED_CITATIONS: {len(invented)}")
     print(f"OVERCLAIMS: {len(overclaims)}")
     print(f"GOLDEN_REGRESSIONS: {len(golden_regressions)}")
+    print(f"PIPELINE_ISSUES: {len(pipeline_findings)}")
+    print(f"SECURITY_ISSUES: {len(security_findings)}")
+    print(f"BUILD_MISATTRIBUTIONS: {len(misattribution_findings)}")
+    print(f"MERGE_RISK_UNIFORMITY: {len(uniformity_findings)}")
     print(f"AUTO_CLEAR_PCT: {ac:.1f}")
     if ai_path:
         print(f"AI_OFF_AUTO_CLEAR_PCT: {base_ac:.1f}")
@@ -289,10 +495,10 @@ def main():
         print(f"AI_PROOF_ADDED: {len(ai_proof_added)}")
         print(f"AI_REJECTED: {len(ai_rejected)}")
     print("FINDINGS:")
-    sev = {"false_green": "P0", "false_none": "P1", "false_block": "P2"}
+    sev_map = {"false_green": "P0", "false_none": "P1", "false_block": "P2"}
     for c in score_res["per_case"]:
         if c["error"]:
-            p = sev.get(c["error"], "P2")
+            p = sev_map.get(c["error"], "P2")
             print(f"- [{p}] PR#{c['pr_id']} | {c['error']} | expected={c['expected']} predicted={c['predicted']}")
     for pid, pkg, why in invented:
         print(f"- [P0] PR#{pid} {pkg} | INVENTED CITATION | {why}")
@@ -300,11 +506,23 @@ def main():
         print(f"- [P1] PR#{pid} {pkg} | OVERCLAIM | {why}")
     for pid, want, got in golden_regressions:
         print(f"- [P1] PR#{pid} | GOLDEN REGRESSION want={want} got={got}")
+    for sev, tag, detail in pipeline_findings:
+        print(f"- [{sev}] PIPELINE | {tag} | {detail}")
+    for sev, tag, detail in security_findings:
+        print(f"- [{sev}] SECURITY | {tag} | {detail}")
+    for sev, tag, detail in misattribution_findings:
+        print(f"- [{sev}] BUILD | {tag} | {detail}")
+    for sev, tag, detail in uniformity_findings:
+        print(f"- [{sev}] QUALITY | {tag} | {detail}")
     print("END_FINDINGS")
 
     json.dump({"score": score, "accepted": accepted, "metrics": score_res["metrics"],
                "errors": score_res["errors"], "invented": invented, "overclaims": overclaims,
-               "golden_regressions": golden_regressions, "predictions": predictions},
+               "golden_regressions": golden_regressions, "predictions": predictions,
+               "pipeline_findings": [{"sev": s, "tag": t, "detail": d} for s, t, d in pipeline_findings],
+               "security_findings": [{"sev": s, "tag": t, "detail": d} for s, t, d in security_findings],
+               "misattribution_findings": [{"sev": s, "tag": t, "detail": d} for s, t, d in misattribution_findings],
+               "uniformity_findings": [{"sev": s, "tag": t, "detail": d} for s, t, d in uniformity_findings]},
               open("gate-result.json", "w"), indent=2)
     return 0 if accepted else 1
 

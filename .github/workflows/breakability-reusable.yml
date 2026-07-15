@@ -69,6 +69,9 @@ on:
       cursor_api_key:
         description: 'Cursor agent API key (for AI-powered comments)'
         required: false
+      breakability_pat:
+        description: 'Fine-grained PAT with Dependabot alerts:read (for security correlation)'
+        required: false
 
 permissions:
   contents: read
@@ -185,6 +188,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.token || github.token }}
           GITHUB_TOKEN: ${{ secrets.token || github.token }}
+          BREAKABILITY_PAT: ${{ secrets.breakability_pat }}
           PR_FILTER: ${{ matrix.pr_filter }}
           BATCH_ID: ${{ matrix.batch_id }}
           REPO_ROOT: ${{ github.workspace }}
@@ -358,6 +362,26 @@ jobs:
           ANALYSIS_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           BREAKABILITY_SCRIPTS_DIR: ${{ github.workspace }}/.breakability/scripts
 
+      # ── Write pipeline metadata into build-results.json ────────────
+      - name: Write pipeline metadata
+        if: always()
+        run: |
+          python3 -c "
+          import json, os
+          path = '/tmp/build-results.json'
+          d = json.load(open(path))
+          if 'meta' not in d or d['meta'] is None:
+              d['meta'] = {}
+          d['meta']['pipeline_flags'] = {
+              'skip_agent_requested': '${{ inputs.skip_agent }}' == 'true',
+              'ai_agent_installed': '${{ steps.agent_install.outputs.agent_available }}' == 'true',
+              'ai_comments_generated': '${{ steps.ai_comments.outputs.ai_comments }}' == 'true',
+              'template_fallback_used': '${{ inputs.skip_agent }}' == 'true' or '${{ steps.ai_comments.outputs.ai_comments }}' != 'true',
+          }
+          json.dump(d, open(path, 'w'), indent=2)
+          print('Pipeline flags written:', json.dumps(d['meta']['pipeline_flags'], indent=2))
+          "
+
       # ── Post comments to PRs ───────────────────────────────────────
       - name: Post comments to PRs
         if: always()
@@ -424,3 +448,12 @@ jobs:
             /tmp/build-results.json
             /tmp/pr-*.diff
           retention-days: 30
+
+      - name: Upload comment artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-comments
+          path: /tmp/pr-*-comment.md
+          retention-days: 30
+          if-no-files-found: warn

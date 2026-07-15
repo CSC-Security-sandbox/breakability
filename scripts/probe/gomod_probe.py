@@ -33,10 +33,10 @@ def _valid_gomod_ref(pkg, version):
     return True
 
 
-def gomod_unavailable_grade(reason, commands=None):
+def gomod_unavailable_grade(reason, commands=None, *, source="fallback"):
     return {
         "grade": "medium",
-        "source": "probe",
+        "source": source,
         "probe_kind": "gomod_api_surface",
         "behavior_changed": "unverified",
         "same_behavior": None,
@@ -156,9 +156,9 @@ def run_gomod_differential_probe(num, pr):
         f"go doc -all {pkg}",
     ]
     if not _valid_gomod_ref(pkg, from_version) or not _valid_gomod_ref(pkg, to_version):
-        return gomod_unavailable_grade("invalid Go module/version reference", commands)
+        return gomod_unavailable_grade("invalid Go module/version reference", commands, source="fallback")
     if shutil.which("go") is None:
-        return gomod_unavailable_grade("go executable not found", commands)
+        return gomod_unavailable_grade("go executable not found", commands, source="fallback")
 
     os.makedirs(GOMOD_PROBE_ROOT, exist_ok=True)
     workdir = tempfile.mkdtemp(prefix=f"gomod-dp-{num}-", dir=GOMOD_PROBE_ROOT)

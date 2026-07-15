@@ -109,6 +109,28 @@ if [[ -f "$MAIN_DIR/go.work" ]]; then
     echo "  go baseline cache-clean retry: exit=$main_go_exit"
   fi
   echo "  go baseline (workspace): exit=$main_go_exit"
+  # go.work repos still need per-module baselines so pr_build.sh can detect
+  # pre-existing failures in modules the PR doesn't touch (e.g. vcm-proxy).
+  _GO_MODULES_WS=$(find "$MAIN_DIR" -name go.mod -not -path '*/vendor/*' -not -path '*/.git/*' 2>/dev/null | sort)
+  _MOD_COUNT_WS=$(echo "$_GO_MODULES_WS" | grep -c . || echo 0)
+  if [[ "$_MOD_COUNT_WS" -gt 1 ]]; then
+    _GO_MULTI_MODULE="true"
+    echo "  go.work: saving per-module baselines for $_MOD_COUNT_WS modules..."
+    while IFS= read -r _mod_file; do
+      _mod_dir=$(dirname "$_mod_file")
+      _mod_rel=$(realpath --relative-to="$MAIN_DIR" "$_mod_dir" 2>/dev/null || echo "$_mod_dir")
+      _mod_output=$(cd "$_mod_dir" && {
+        _BUILD_RC=0
+        GOMEMLIMIT=1500MiB timeout -k 15 $GO_TIMEOUT go build -p 2 -o /dev/null ./... || _BUILD_RC=$?
+        exit $_BUILD_RC
+      } 2>&1)
+      _mod_exit=$?
+      _mod_key=$(echo "$_mod_rel" | tr '/' '_')
+      echo "$_mod_exit" > "/tmp/_bc_main_go_mod_exit_${_mod_key}.txt"
+      echo "$_mod_output" > "/tmp/_bc_main_go_mod_output_${_mod_key}.txt"
+      echo "    module $_mod_rel: exit=$_mod_exit"
+    done <<< "$_GO_MODULES_WS"
+  fi
 elif [[ -n "$(find "$MAIN_DIR" -name go.mod -not -path '*/vendor/*' -not -path '*/.git/*' -print -quit 2>/dev/null)" ]]; then
   # Check for multi-module layout (one or more go.mod without go.work, including repos with no root go.mod)
   _GO_MODULES=$(find "$MAIN_DIR" -name go.mod -not -path '*/vendor/*' -not -path '*/.git/*' 2>/dev/null | sort)
