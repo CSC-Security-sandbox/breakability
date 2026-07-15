@@ -474,9 +474,18 @@ def authoritative_verdict(pr: Mapping[str, Any]) -> dict:
         result["breakability_grade"] = assign_breakability_grade(pr, bucket)
         return _probe_escalation(pr, result)
 
+    reason = "no typed verdict available; fail-closed to review"
+    bg = pr.get("behavioral_grade") or {}
+    bg_conf = str(bg.get("confidence", "")).strip().lower()
+    if bg_conf in ("medium", "high") and bg.get("source") == "probe":
+        cb = bg.get("changed_behavior")
+        if cb:
+            reason = f"behavioral probe: {cb}; fail-closed to review"
+        elif bg.get("same_behavior") is True:
+            reason = f"behavioral probe found same API surface (grade {bg.get('grade', 'low')}); fail-closed to review"
     result = {
         "verdict": BUCKET_REVIEW, "severity": "medium", "confidence": "L2", "priority": "P2",
-        "reason": "no typed verdict available; fail-closed to review",
+        "reason": reason,
         "source": "fail_closed",
     }
     result["breakability_grade"] = GRADE_MEDIUM_BREAKING

@@ -48,6 +48,38 @@ def _extract_pr_data(pr: Dict[str, Any]) -> str:
     return json.dumps(pr, indent=2, default=str)
 
 
+def _detect_misattribution_groups(
+    pr_items: Dict[str, Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    """Detect PRs sharing byte-identical build output across different packages.
+
+    Returns {pr_num: {"pr_ids": [...], "packages": [...]}} for PRs in groups of 3+.
+    """
+    fail_groups: Dict[str, list] = {}
+    for num, pr in pr_items.items():
+        build = pr.get("build") or {}
+        if build.get("verdict") != "fail":
+            continue
+        tail = build.get("output_tail")
+        if not tail or not tail.strip():
+            continue
+        pkg = pr.get("package", "unknown")
+        fail_groups.setdefault(tail, []).append((num, pkg))
+
+    result: Dict[str, Dict[str, Any]] = {}
+    for group in fail_groups.values():
+        if len(group) < 3:
+            continue
+        packages = set(pkg for _, pkg in group)
+        if len(packages) < 2:
+            continue
+        pr_ids = sorted([pid for pid, _ in group], key=lambda x: int(x) if x.isdigit() else 0)
+        group_info = {"pr_ids": pr_ids, "packages": sorted(packages)}
+        for pid, _ in group:
+            result[pid] = group_info
+    return result
+
+
 def _build_per_pr_prompt(
     base_prompt: str,
     pr: Dict[str, Any],
@@ -58,6 +90,7 @@ def _build_per_pr_prompt(
     model_name: str,
     cross_deps: list,
     top_level: Dict[str, Any],
+    misattribution_group: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Build the full prompt for one PR: base instructions + PR-specific data."""
     pr_json = _extract_pr_data(pr)
@@ -76,6 +109,33 @@ def _build_per_pr_prompt(
         f"Replace `#ISSUE_NUMBER` with `{plan_ref}` in the merge plan link.\n",
         f"\n### PR Data (from build-results.json)\n```json\n{pr_json}\n```\n",
     ]
+
+    if pr.get("go_resolution"):
+        sections.append(
+            "\n### ⚠️ DATA SOURCE WARNING: go_resolution\n"
+            "The `go_resolution` field (including `modsum_diff`) shows the result of "
+            "running `go work sync` across the ENTIRE workspace. It may include packages "
+            "and changes from OTHER modules that are NOT touched by this PR's actual diff. "
+            "Do NOT cite `go_resolution` or `modsum_diff` content as 'added in this PR' or "
+            "'introduced by this PR'. Only the PR's actual diff (files listed in `changed_files` "
+            "or the PR diff) reflects what this specific PR changes.\n"
+        )
+
+    if misattribution_group:
+        other_prs = ", ".join(f"#{p}" for p in misattribution_group["pr_ids"] if p != pr_num)
+        sections.append(
+            f"\n### ⚠️ SHARED BUILD FAILURE — LIKELY PRE-EXISTING\n"
+            f"This PR's build output is **byte-identical** to {len(misattribution_group['pr_ids']) - 1} "
+            f"other PRs from different packages ({other_prs}). "
+            f"This strongly indicates the failure is a pre-existing/environmental issue in the "
+            f"build sandbox, NOT caused by this specific dependency bump.\n\n"
+            f"You MUST:\n"
+            f"- State that the build failure is shared across {len(misattribution_group['pr_ids'])} "
+            f"unrelated PRs and is likely pre-existing\n"
+            f"- Do NOT assert that 'this PR introduces' or 'this PR causes' the failure\n"
+            f"- Use hedged language: 'appears to be a pre-existing issue' or "
+            f"'shared by N other PRs from different packages'\n"
+        )
 
     if relevant_cross_deps:
         sections.append(
@@ -153,6 +213,9 @@ def _build_per_pr_prompt(
         "- MUST include at least one ```bash code block with reproducible verification commands.\n"
         "- MUST include numbered action steps (1. 2. 3.) in the recommendation section.\n"
         "- Each per-layer section needs a confidence rating (HIGH/MEDIUM/LOW) with reasoning.\n"
+        "- The `severity` and `priority` fields in verdict_v2 reflect **build/test verification "
+        "status** (e.g. build-fail → high/P0), NOT CVE severity or security risk. Do not "
+        "present them as security ratings. If mentioning severity, clarify it is build-derived.\n"
         "- MAXIMUM 350 lines. If your comment exceeds 350 lines, trim the least essential "
         "sections (verbose output blocks, redundant changelog excerpts) while keeping all "
         "13 required features.\n"
@@ -623,6 +686,10 @@ def generate_comments(
         if data.get("build", {}).get("verdict") != "skipped"
     ]
 
+    misattribution_map = _detect_misattribution_groups(
+        {num: data for num, data in pr_items}
+    )
+
     backend = Backend.from_env(model=model)
     comments = {}
     diagnostics_log: list = []
@@ -640,6 +707,7 @@ def generate_comments(
             model_name=model,
             cross_deps=cross_deps,
             top_level=top_level,
+            misattribution_group=misattribution_map.get(pr_num),
         )
 
         comment = None

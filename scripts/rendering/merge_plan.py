@@ -19,6 +19,7 @@ try:
 except NameError:
     sys.path.insert(0, sys.path[0] if sys.path else ".")
 from ci_classifier import ci_review_tier
+from core.verdict_contract import authoritative_verdict
 
 with open("/tmp/build-results.json") as f:
     data = json.load(f)
@@ -27,6 +28,16 @@ prs = data.get("prs", {})
 meta = data.get("metadata", {})
 cross = data.get("cross_pr_deps", [])
 security = data.get("security_posture", {})
+
+_results_v2 = {}
+for _r in data.get("results", []):
+    _rn = str(_r.get("pr_num", _r.get("pr_number", "")))
+    _rv2 = _r.get("verdict_v2")
+    if _rn and isinstance(_rv2, dict) and "verdict" in _rv2:
+        _results_v2[_rn] = _rv2
+for _num, _pr in prs.items():
+    if not isinstance(_pr.get("verdict_v2"), dict) or "verdict" not in _pr.get("verdict_v2", {}):
+        _pr["verdict_v2"] = _results_v2.get(_num) or authoritative_verdict(_pr)
 
 # Count total open PRs (not just Dependabot) for completeness note
 try:
@@ -221,11 +232,7 @@ for num, pr in sorted(prs.items(), key=lambda x: int(x[0])):
     elif eco in ("actions",) or ver == "CI_ONLY":
         # V8 FIX (H3): Separate CI-only PRs — don't inflate "verified" count
         ci_only.append(entry)
-    elif committed_v2_verdict(pr) == "BLOCKED" and v in ("pass", "pre_existing"):
-        # ONE-COMMITTED-VERDICT: committed_v2_verdict() is the authoritative per-PR verdict the
-        # comment headline/body are built from (fail-closed to REVIEW exactly like the poster). If
-        # it says BLOCKED, the merge plan MUST agree — a green build does not override a committed
-        # BLOCKED (PR#10/#23 clash).
+    elif committed_v2_verdict(pr) == "BLOCKED":
         entry["v2_blocked"] = True
         blocked.append(entry)
     elif committed_v2_verdict(pr) == "REVIEW" and v in ("pass", "pre_existing"):
@@ -559,8 +566,8 @@ if _all_entries:
     lines.append("")
     lines.append(
         "> High/Medium = worth a review · Low = optional glance · None = safe to merge. "
-        "Severity matches each PR's breakability headline (security-fix PRs show a "
-        "merge-priority headline instead).")
+        "Severity is derived from **build/test verification status** (not CVE/CVSS scores). "
+        "Check individual PR comments for security-specific guidance.")
     lines.append("")
 
 # Close the Technical Details collapsible section
