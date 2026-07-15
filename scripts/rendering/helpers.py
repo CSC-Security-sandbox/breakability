@@ -21,7 +21,33 @@ __all__ = [
     "_build_expanded_layer_sections",
     "_build_risk_assessment",
     "_build_numbered_recommendations",
+    "_is_api_diff_skipped",
+    "_extract_error_lines",
 ]
+
+
+def _is_api_diff_skipped(pr: Dict) -> bool:
+    for ev in pr.get("evidence", []):
+        if ev.get("signal") == "api_diff":
+            return ev.get("status") == "skipped"
+    if not pr.get("deterministic", {}).get("api_changes") and pr.get("deterministic") == {}:
+        return True
+    return False
+
+
+def _extract_error_lines(output: str, max_chars: int = 500) -> str:
+    if not output:
+        return ""
+    lines = output.strip().splitlines()
+    error_patterns = ("undefined:", "cannot ", "error:", "Error:", "FAIL", "fatal:",
+                      "not found", "no required module", "could not")
+    error_lines = [l for l in lines if any(p in l for p in error_patterns)]
+    if error_lines:
+        result = "\n".join(error_lines)
+        if len(result) > max_chars:
+            result = result[:max_chars] + "\n..."
+        return result
+    return output[-max_chars:] if len(output) > max_chars else output
 
 
 def _merge_risk_tag(pr: Dict[str, Any]) -> str:
@@ -153,18 +179,24 @@ def _count_evidence_layers(pr: Dict) -> int:
     return count
 
 
-def _per_layer_confidence(build_v, test_norm, api_changes, changelog_norm, reach, probe):
+def _per_layer_confidence(build_v, test_norm, api_changes, changelog_norm, reach, probe,
+                          *, api_diff_skipped=False, ecosystem=""):
     """Compute per-layer confidence (HIGH/MEDIUM/LOW) with one-sentence rationale."""
     layers = {}
 
-    if build_v in ("pass", "fail"):
+    is_actions = ecosystem == "actions"
+    if is_actions:
+        layers["Build"] = ("LOW", "CI-only dependency — no build applicable")
+    elif build_v in ("pass", "fail"):
         layers["Build"] = ("HIGH", "Definitive exit code from full build pipeline")
     elif build_v == "pre_existing":
         layers["Build"] = ("MEDIUM", "Build fails but failures pre-date this upgrade")
     else:
         layers["Build"] = ("LOW", "Build was not executed or status unknown")
 
-    if test_norm["verdict"] == "pass":
+    if test_norm["verdict"] == "pre_existing":
+        layers["Tests"] = ("MEDIUM", f"Tests fail (exit {test_norm['exit_code']}) but same failures exist on main branch")
+    elif test_norm["verdict"] == "pass":
         layers["Tests"] = ("HIGH", "Test suite ran and passed (exit 0)")
     elif test_norm["verdict"] == "fail":
         layers["Tests"] = ("HIGH", f"Test suite ran and failed (exit {test_norm['exit_code']})")
@@ -173,7 +205,9 @@ def _per_layer_confidence(build_v, test_norm, api_changes, changelog_norm, reach
     else:
         layers["Tests"] = ("LOW", "No test suite was executed")
 
-    if api_changes > 0:
+    if api_diff_skipped:
+        layers["API Diff"] = ("LOW", "API diff tool unavailable — no symbol comparison performed")
+    elif api_changes > 0:
         layers["API Diff"] = ("HIGH", f"{api_changes} exported symbol change(s) detected")
     else:
         layers["API Diff"] = ("MEDIUM", "No symbol changes found; diff may not cover all APIs")
@@ -246,33 +280,57 @@ def _build_expanded_layer_sections(build, build_v, test_norm, api_changes,
     test_icon = {"pass": "✅", "fail": "❌", "skip": "⬜"}.get(test_norm["verdict"], "⬜")
 
     # ### Build Analysis
-    lines += [
-        f"### {build_icon} Build Analysis",
-        f"**Status:** {build_icon} **{build_v.upper()}** | **Verification Level:** {layer_conf['Build'][0]}",
-        "",
-        "**What we checked:**",
-        f"- ✅ Installed `{pkg}@{to_ver}` into the project",
-        f"- ✅ Ran full build pipeline (`npm run build` / `go build ./...`)",
-    ]
-    if build_v == "pass":
-        lines.append("- ✅ Build completed with zero errors")
-    elif build_v == "fail":
-        lines.append("- ❌ Build produced compilation or resolution errors")
-    elif build_v == "pre_existing":
-        lines.append("- ⚠️ Pre-existing build failures detected (unrelated to this upgrade)")
+    ecosystem = pr.get("ecosystem", "")
+    is_actions = ecosystem == "actions"
+    if is_actions:
+        build_icon = "ℹ️"
+        lines += [
+            f"### {build_icon} Build Analysis",
+            f"**Status:** {build_icon} **CI-ONLY** | **Verification Level:** {layer_conf['Build'][0]}",
+            "",
+            "**What we checked:**",
+            "- ℹ️ CI-only dependency — no build applicable",
+            "- ℹ️ This action only affects CI/CD workflows, not application code",
+        ]
+    else:
+        lines += [
+            f"### {build_icon} Build Analysis",
+            f"**Status:** {build_icon} **{build_v.upper()}** | **Verification Level:** {layer_conf['Build'][0]}",
+            "",
+            "**What we checked:**",
+            f"- ✅ Installed `{pkg}@{to_ver}` into the project",
+            f"- ✅ Ran full build pipeline (`npm run build` / `go build ./...`)",
+        ]
+        if build_v == "pass":
+            lines.append("- ✅ Build completed with zero errors")
+        elif build_v == "fail":
+            lines.append("- ❌ Build produced compilation or resolution errors")
+        elif build_v == "pre_existing":
+            lines.append("- ⚠️ Pre-existing build failures detected (unrelated to this upgrade)")
     build_output = (build.get("output_tail") or build.get("stdout") or "").strip()
-    if build_output:
-        lines += ["", "**Build Output:**", "```", build_output[:400], "```"]
+    if build_output and not is_actions:
+        error_output = _extract_error_lines(build_output, 400)
+        lines += ["", "**Build Output:**", "```", error_output, "```"]
     lines += ["", f"**Confidence:** **{layer_conf['Build'][0]}** — {layer_conf['Build'][1]}", ""]
 
     # ### Test Analysis
+    test_verdict_display = test_norm['verdict'].upper()
+    if test_norm["verdict"] == "pre_existing":
+        test_icon = "⚠️"
+        test_verdict_display = "PRE-EXISTING FAILURES"
     lines += [
         f"### {test_icon} Test Analysis",
-        f"**Status:** {test_icon} **{test_norm['verdict'].upper()}** | **Verification Level:** {layer_conf['Tests'][0]}",
+        f"**Status:** {test_icon} **{test_verdict_display}** | **Verification Level:** {layer_conf['Tests'][0]}",
         "",
         "**What we checked:**",
     ]
-    if test_norm["ran"] and test_norm["verdict"] in ("pass", "fail"):
+    if test_norm["verdict"] == "pre_existing":
+        lines += [
+            "- ✅ Executed project test suite against the upgraded dependency",
+            f"- ⚠️ Test exit code: {test_norm['exit_code']}",
+            "- ⚠️ Same failures exist on main branch — not caused by this PR",
+        ]
+    elif test_norm["ran"] and test_norm["verdict"] in ("pass", "fail"):
         lines += [
             "- ✅ Executed project test suite against the upgraded dependency",
             f"- {'✅' if test_norm['verdict'] == 'pass' else '❌'} Test exit code: {test_norm['exit_code']}",
@@ -286,23 +344,34 @@ def _build_expanded_layer_sections(build, build_v, test_norm, api_changes,
         ]
     test_data = pr.get("test", {})
     test_output = (test_data.get("output_tail") or test_data.get("stdout") or "").strip()
-    if test_output and test_norm["verdict"] == "fail":
+    if test_output and test_norm["verdict"] in ("fail", "pre_existing"):
         lines += ["", "**Test Output:**", "```", test_output[:400], "```"]
     lines += ["", f"**Confidence:** **{layer_conf['Tests'][0]}** — {layer_conf['Tests'][1]}", ""]
 
     # ### API Diff Analysis
-    api_icon = "⚠️" if api_changes > 0 else "✅"
-    lines += [
-        f"### {api_icon} API Diff Analysis",
-        f"**Status:** {api_icon} **{api_changes} change(s)** | **Verification Level:** {layer_conf['API Diff'][0]}",
-        "",
-        "**What we checked:**",
-        f"- ✅ Compared exported symbols between {from_ver} and {to_ver}",
-    ]
-    if api_changes > 0:
-        lines.append(f"- ⚠️ {api_changes} exported symbol(s) changed — review for breaking signature changes")
+    api_diff_skipped = _is_api_diff_skipped(pr)
+    if api_diff_skipped:
+        api_icon = "⬜"
+        lines += [
+            f"### {api_icon} API Diff Analysis",
+            f"**Status:** {api_icon} **UNAVAILABLE** | **Verification Level:** {layer_conf['API Diff'][0]}",
+            "",
+            "**What we checked:**",
+            f"- ⬜ API diff tool was not available — no symbol comparison performed",
+        ]
     else:
-        lines.append("- ✅ No exported symbol changes detected")
+        api_icon = "⚠️" if api_changes > 0 else "✅"
+        lines += [
+            f"### {api_icon} API Diff Analysis",
+            f"**Status:** {api_icon} **{api_changes} change(s)** | **Verification Level:** {layer_conf['API Diff'][0]}",
+            "",
+            "**What we checked:**",
+            f"- ✅ Compared exported symbols between {from_ver} and {to_ver}",
+        ]
+        if api_changes > 0:
+            lines.append(f"- ⚠️ {api_changes} exported symbol(s) changed — review for breaking signature changes")
+        else:
+            lines.append("- ✅ No exported symbol changes detected")
     lines += ["", f"**Confidence:** **{layer_conf['API Diff'][0]}** — {layer_conf['API Diff'][1]}", ""]
 
     # ### Changelog Analysis

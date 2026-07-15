@@ -22,6 +22,8 @@ from rendering.helpers import (
     _build_expanded_layer_sections,
     _build_risk_assessment,
     _build_numbered_recommendations,
+    _is_api_diff_skipped,
+    _extract_error_lines,
 )
 
 __all__ = [
@@ -98,7 +100,8 @@ def _synthesize_explanation(pr: Dict) -> str:
     return " ".join(parts) if parts else "Review required for this upgrade."
 
 
-def _render_compact(pr: Dict, cross_deps: Optional[List[Dict]] = None) -> str:
+def _render_compact(pr: Dict, cross_deps: Optional[List[Dict]] = None,
+                    prs_lookup: Optional[Dict[str, Dict]] = None) -> str:
     """Render a compact PR comment (~40 lines)."""
     from datetime import date
 
@@ -117,13 +120,23 @@ def _render_compact(pr: Dict, cross_deps: Optional[List[Dict]] = None) -> str:
     vlevel_str = vlevel_labels.get(verification_level, "")
     merge_risk = _merge_risk_tag(pr)
 
+    ecosystem = pr.get("ecosystem", "")
     build = pr.get("build", {})
     build_v = build.get("verdict", "unknown")
-    build_icon = {"pass": "✅", "fail": "❌", "pre_existing": "⚠️"}.get(build_v, "⬜")
+    is_actions = ecosystem == "actions"
+    if is_actions:
+        build_icon = "ℹ️"
+    else:
+        build_icon = {"pass": "✅", "fail": "❌", "pre_existing": "⚠️"}.get(build_v, "⬜")
 
     test_norm = _normalize_test(pr.get("test", {}))
-    test_icon = {"pass": "✅", "fail": "❌", "skip": "⬜"}.get(test_norm["verdict"], "⬜")
-    test_suffix = f" (exit {test_norm['exit_code']})" if test_norm["verdict"] == "fail" else ""
+    test_icon = {"pass": "✅", "fail": "❌", "skip": "⬜", "pre_existing": "⚠️"}.get(test_norm["verdict"], "⬜")
+    if test_norm["verdict"] == "pre_existing":
+        test_suffix = f" (exit {test_norm['exit_code']}, same on main)"
+    elif test_norm["verdict"] == "fail":
+        test_suffix = f" (exit {test_norm['exit_code']})"
+    else:
+        test_suffix = ""
 
     probe = _normalize_probe(pr)
     probe_state_display = probe["state"].lower().replace("_", " ")
@@ -148,14 +161,17 @@ def _render_compact(pr: Dict, cross_deps: Optional[List[Dict]] = None) -> str:
     explanation = _synthesize_explanation(pr)
     recommendation = _get_recommendation(pr)
 
+    api_diff_skipped = _is_api_diff_skipped(pr)
+    build_display = "CI-only" if is_actions else build_v
+    api_diff_text = "unavailable" if api_diff_skipped else f"{api_changes} changes"
     vlevel_badge = f" · Verification: {vlevel_str}" if vlevel_str else ""
     lines = [
         "<!-- breakability-check -->",
         f"## {emoji} {verdict} — `{pkg}` {from_ver} → {to_ver} · {dep_type} · {bump}",
         merge_risk + vlevel_badge,
         "",
-        f"**Build:** {build_icon} {build_v} · **Tests:** {test_icon} {test_norm['verdict']}{test_suffix} · **Probe:** {probe_icon} {probe_state_display}",
-        f"**Reachability:** {reach_text} · **Changelog:** {cl_icon} {cl_text} · **API Diff:** {api_changes} changes",
+        f"**Build:** {build_icon} {build_display} · **Tests:** {test_icon} {test_norm['verdict']}{test_suffix} · **Probe:** {probe_icon} {probe_state_display}",
+        f"**Reachability:** {reach_text} · **Changelog:** {cl_icon} {cl_text} · **API Diff:** {api_diff_text}",
         "",
         "### What this means",
         explanation,
@@ -179,16 +195,29 @@ def _render_compact(pr: Dict, cross_deps: Optional[List[Dict]] = None) -> str:
         probe_detail = "—"
     test_detail = test_norm["reason"] if test_norm["verdict"] != "pass" else f"exit {test_norm['exit_code']}"
 
-    layer_conf = _per_layer_confidence(build_v, test_norm, api_changes, changelog_norm, reach, probe)
+    layer_conf = _per_layer_confidence(build_v, test_norm, api_changes, changelog_norm, reach, probe,
+                                       api_diff_skipped=api_diff_skipped, ecosystem=ecosystem)
+
+    if is_actions:
+        build_row = f"| Build | {build_icon} CI-only | no build applicable | {layer_conf['Build'][0]} — {layer_conf['Build'][1]} |"
+    else:
+        build_row = f"| Build | {build_icon} {build_v} | exit {build.get('pr_exit', build.get('main_exit', '?'))} | {layer_conf['Build'][0]} — {layer_conf['Build'][1]} |"
+
+    if api_diff_skipped:
+        api_row = f"| API Diff | ⬜ unavailable | tool not available | {layer_conf['API Diff'][0]} — {layer_conf['API Diff'][1]} |"
+    elif api_changes > 0:
+        api_row = f"| API Diff | ⚠️ breaking | {api_changes} symbol(s) | {layer_conf['API Diff'][0]} — {layer_conf['API Diff'][1]} |"
+    else:
+        api_row = f"| API Diff | ✅ clean | {api_changes} symbol(s) | {layer_conf['API Diff'][0]} — {layer_conf['API Diff'][1]} |"
 
     lines += [
         "### Evidence Summary",
         "",
         "| Layer | Signal | Detail | Confidence |",
         "|-------|--------|--------|------------|",
-        f"| Build | {build_icon} {build_v} | exit {build.get('pr_exit', build.get('main_exit', '?'))} | {layer_conf['Build'][0]} — {layer_conf['Build'][1]} |",
+        build_row,
         f"| Tests | {test_icon} {test_norm['verdict']} | {test_detail} | {layer_conf['Tests'][0]} — {layer_conf['Tests'][1]} |",
-        f"| API Diff | {'⚠️ breaking' if api_changes > 0 else '✅ clean'} | {api_changes} symbol(s) | {layer_conf['API Diff'][0]} — {layer_conf['API Diff'][1]} |",
+        api_row,
         f"| Changelog | {cl_icon} {cl_text} | {cl_detail} | {layer_conf['Changelog'][0]} — {layer_conf['Changelog'][1]} |",
         f"| Reachability | {'⚠️ reached' if reach['reached'] else '✅ not reached'} | {reach_file_count} imports | {layer_conf['Reachability'][0]} — {layer_conf['Reachability'][1]} |",
         f"| Probe | {probe_icon} {probe_state_display} | {probe_detail} | {layer_conf['Probe'][0]} — {layer_conf['Probe'][1]} |",
@@ -205,12 +234,26 @@ def _render_compact(pr: Dict, cross_deps: Optional[List[Dict]] = None) -> str:
 
     lines.append("")
 
+    if is_actions:
+        build_check_text = "CI-only dependency — no build applicable"
+    else:
+        build_check_text = f"Installed `{pkg}@{to_ver}` and ran full build pipeline"
+    if api_diff_skipped:
+        api_check_text = "API diff tool unavailable — no symbol comparison performed"
+    else:
+        api_check_text = f"Compared exported symbols between {from_ver} and {to_ver}"
+    if test_norm["verdict"] == "pre_existing":
+        test_check_text = "Ran project test suite — failures match main branch (pre-existing)"
+    elif test_norm["ran"]:
+        test_check_text = "Ran project test suite"
+    else:
+        test_check_text = "No test suite executed"
     lines += [
         "### How we checked",
         "",
-        f"- **Build**: Installed `{pkg}@{to_ver}` and ran full build pipeline",
-        f"- **Tests**: {'Ran project test suite' if test_norm['ran'] else 'No test suite executed'}",
-        f"- **API Diff**: Compared exported symbols between {from_ver} and {to_ver}",
+        f"- **Build**: {build_check_text}",
+        f"- **Tests**: {test_check_text}",
+        f"- **API Diff**: {api_check_text}",
         f"- **Changelog**: {'Parsed release notes for breaking-change markers' if changelog_norm['available'] else 'No changelog found for this version range'}",
         f"- **Reachability**: Scanned project source for imports of `{pkg}`",
         f"- **Probe**: {'Compared runtime behavior before/after upgrade' if probe['state'] != 'NOT_RUN' else 'Behavioral probe was not executed'}",
@@ -282,12 +325,13 @@ def _render_compact(pr: Dict, cross_deps: Optional[List[Dict]] = None) -> str:
     lines += ["```", "", "</details>", ""]
 
     build_output = build.get("output_tail", "")
-    if build_output:
+    if build_output and not is_actions:
+        display_output = _extract_error_lines(build_output, 500)
         lines += [
             "<details><summary>🔨 Build output</summary>",
             "",
             "```",
-            build_output[:500],
+            display_output,
             "```",
             "",
             "</details>",
@@ -417,9 +461,24 @@ def _render_compact(pr: Dict, cross_deps: Optional[List[Dict]] = None) -> str:
         if related:
             lines.append("### Coupled PRs")
             lines.append("")
+            blocked_others = []
             for dep in related:
-                other = dep["pr_b"] if str(dep["pr_a"]) == pr_num else dep["pr_a"]
-                lines.append(f"- PR #{other}: {dep.get('reason', '')} — {dep.get('merge_order', '')}")
+                other = str(dep["pr_b"] if str(dep["pr_a"]) == pr_num else dep["pr_a"])
+                other_verdict = ""
+                if prs_lookup and other in prs_lookup:
+                    other_pr = prs_lookup[other]
+                    other_verdict_norm = _normalize_verdict(other_pr)
+                    other_verdict = other_verdict_norm.get("verdict", "")
+                icon = "⛔" if other_verdict in ("BLOCKED", "BUILD_FAILS") else "🔗"
+                line = f"- {icon} PR #{other}: {dep.get('reason', '')} — {dep.get('merge_order', '')}"
+                if other_verdict in ("BLOCKED", "BUILD_FAILS"):
+                    line += f" ⚠️ **PR #{other} is currently {other_verdict}**"
+                    blocked_others.append(other)
+                lines.append(line)
+            if blocked_others:
+                blocked_str = ", ".join(f"#{n}" for n in blocked_others)
+                lines.append(f"")
+                lines.append(f"> ⚠️ **Warning:** {blocked_str} {'is' if len(blocked_others)==1 else 'are'} currently blocked. Resolve before merging this group.")
             lines.append("")
 
     merge_plan_issue = os.environ.get("MERGE_PLAN_ISSUE", "")
@@ -437,6 +496,7 @@ def _render_compact(pr: Dict, cross_deps: Optional[List[Dict]] = None) -> str:
     return "\n".join(lines)
 
 
-def render_pr_comment(pr: Dict[str, Any], cross_deps: Optional[List[Dict]] = None) -> str:
+def render_pr_comment(pr: Dict[str, Any], cross_deps: Optional[List[Dict]] = None,
+                      prs_lookup: Optional[Dict[str, Dict]] = None) -> str:
     """Render compact PR comment (~40 lines)."""
-    return _render_compact(pr, cross_deps=cross_deps)
+    return _render_compact(pr, cross_deps=cross_deps, prs_lookup=prs_lookup)

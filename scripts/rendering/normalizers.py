@@ -88,6 +88,11 @@ def _normalize_test(test: Dict) -> Dict[str, Any]:
         if exit_code is None:
             exit_code = test.get("main_test_exit", -1)
 
+        raw_verdict = test.get("verdict", "")
+        if raw_verdict == "pre_existing":
+            return {"verdict": "pre_existing", "exit_code": exit_code, "ran": ran,
+                    "reason": f"Tests fail (exit {exit_code}) but same failures exist on main"}
+
         if not ran:
             verdict = "skip"
             reason = test.get("reason", "Tests not executed")
