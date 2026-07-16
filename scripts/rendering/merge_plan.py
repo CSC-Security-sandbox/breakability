@@ -19,7 +19,7 @@ try:
 except NameError:
     sys.path.insert(0, sys.path[0] if sys.path else ".")
 from ci_classifier import ci_review_tier
-from core.verdict_contract import authoritative_verdict
+from core.verdict_contract import authoritative_verdict, stamp_build_misattribution
 
 with open("/tmp/build-results.json") as f:
     data = json.load(f)
@@ -28,6 +28,8 @@ prs = data.get("prs", {})
 meta = data.get("metadata", {})
 cross = data.get("cross_pr_deps", [])
 security = data.get("security_posture", {})
+
+stamp_build_misattribution(prs)
 
 _results_v2 = {}
 for _r in data.get("results", []):
@@ -388,8 +390,12 @@ lines.append(f"> To refresh: `gh workflow run breakability-agent.yml`")
 if meta.get('incomplete'):
     _missing = meta.get('missing_pr_count', '?')
     _ibs = meta.get('incomplete_batches', [])
+    _missing_nums = meta.get('missing_pr_numbers', [])
     lines.append(f"> ")
     lines.append(f"> ⚠️ **INCOMPLETE RUN:** {_missing} PRs were NOT analyzed (batch{'es' if len(_ibs) != 1 else ''} {', '.join(_ibs) if _ibs else '?'} cancelled/failed).")
+    if _missing_nums:
+        _mn_str = ", ".join(f"#{n}" for n in sorted(_missing_nums))
+        lines.append(f"> Missing PRs: {_mn_str}")
     lines.append(f"> PRs missing from this plan should be re-analyzed before merging.")
 lines.append("")
 
@@ -439,6 +445,7 @@ _vuln_not_installed = 0
 _vuln_failed_oom   = 0
 _vuln_failed_timeout = 0
 _vuln_failed_error = 0
+_vuln_unknown = 0
 _vuln_found = []   # list of (pr_num, [new_findings])
 _vuln_ok_preexisting = 0
 _vuln_ok = 0
@@ -457,6 +464,7 @@ for _pn, _pr in prs.items():
     elif _vs == "ok_preexisting":
         _vuln_ok_preexisting += 1
     elif _vs == "ok": _vuln_ok += 1
+    elif _vs in ("unknown", ""): _vuln_unknown += 1
 
 # Main baseline context — this is key for developer trust
 if _main_baseline_findings:
@@ -482,8 +490,12 @@ if _vuln_not_installed:
     lines.append("> ")
     lines.append(f"> ⚠️ **govulncheck not installed on {_vuln_not_installed} PR runner(s)** — vulnerability scan was skipped. Install via `go install golang.org/x/vuln/cmd/govulncheck@latest`.")
     lines.append("")
+if _vuln_unknown:
+    lines.append("> ")
+    lines.append(f"> ⚠️ **{_vuln_unknown} PR(s) not scanned** — govulncheck did not run (status unknown). Absence of findings is NOT proof of safety. Run `govulncheck ./...` locally before merging.")
+    lines.append("")
 # Clean summary if scans succeeded with no new findings
-if (_vuln_ok + _vuln_ok_preexisting) and not (_vuln_found or _vuln_failed_oom or _vuln_failed_timeout or _vuln_failed_error):
+if (_vuln_ok + _vuln_ok_preexisting) and not (_vuln_found or _vuln_failed_oom or _vuln_failed_timeout or _vuln_failed_error or _vuln_unknown or _vuln_not_installed):
     _clean_parts = []
     if _vuln_ok: _clean_parts.append(f"{_vuln_ok} with no vulns")
     if _vuln_ok_preexisting: _clean_parts.append(f"{_vuln_ok_preexisting} only touching pre-existing vulns on main (no NEW vulns introduced)")

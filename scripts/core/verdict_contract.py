@@ -181,6 +181,8 @@ def _hard_fix_floor(pr: Mapping[str, Any]) -> bool:
     build_verdict = (pr.get("build") or {}).get("verdict", "")
     if build_verdict in ("fail", "pre_existing_plus_new"):
         if build_verdict == "fail":
+            if pr.get("build_misattributed"):
+                return False
             bg = pr.get("behavioral_grade") or {}
             fi = pr.get("files_importing")
             if bg.get("same_behavior") is True and isinstance(fi, list) and len(fi) == 0:
@@ -210,6 +212,51 @@ def _valid_v2(pr: Mapping[str, Any]) -> Optional[dict]:
     if isinstance(v2, Mapping) and v2.get("verdict") in VALID_BUCKETS:
         return dict(v2)
     return None
+
+
+def _max_cvss(pr: Mapping[str, Any]) -> float:
+    """Return the highest CVSS score from the PR's cve_details list, or 0.0."""
+    cve_details = pr.get("cve_details")
+    if not isinstance(cve_details, list) or not cve_details:
+        return 0.0
+    best = 0.0
+    for entry in cve_details:
+        if isinstance(entry, Mapping):
+            score = entry.get("cvss_score")
+            if isinstance(score, (int, float)) and score > best:
+                best = float(score)
+    return best
+
+
+def _apply_cve_floor(pr: Mapping[str, Any], result: dict) -> dict:
+    """Raise priority/severity when the PR addresses high-CVSS vulnerabilities.
+
+    Floor only — never lowers an already-higher priority.
+      max CVSS >= 9.0 → at least P0 / severity high
+      max CVSS >= 7.0 → at least P1 / severity high
+    """
+    cvss = _max_cvss(pr)
+    if cvss < 7.0:
+        return result
+    result = dict(result)
+    _PRIO_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+    cur_rank = _PRIO_RANK.get(result.get("priority", "P3"), 3)
+    if cvss >= 9.0:
+        floor_prio, floor_rank = "P0", 0
+    else:
+        floor_prio, floor_rank = "P1", 1
+    if floor_rank < cur_rank:
+        result["priority"] = floor_prio
+        result["cve_floor_applied"] = True
+    if _SEVERITY_RANK.get(result.get("severity", "medium"), 1) < _SEVERITY_RANK["high"]:
+        result["severity"] = "high"
+        result["cve_floor_applied"] = True
+    if result.get("cve_floor_applied"):
+        cve_count = len(pr.get("cve_details") or [])
+        result["reason"] = (result.get("reason", "") +
+                            f"; CVE floor applied (max CVSS {cvss:.1f}, {cve_count} CVE(s))").lstrip("; ")
+        result["source"] = result.get("source", "") + "+cve_floor"
+    return result
 
 
 def _probe_escalation(pr: Mapping[str, Any], result: dict) -> dict:
@@ -350,6 +397,16 @@ def assign_breakability_grade(pr: Mapping[str, Any], verdict_bucket: str, signal
 def authoritative_verdict(pr: Mapping[str, Any]) -> dict:
     """THE one accessor. Returns the authoritative rendered verdict object for a PR.
 
+    Wraps _raw_authoritative_verdict with a CVE-severity floor so high-CVSS
+    PRs can never fall below P1/high (CVSS >= 7.0) or P0/high (CVSS >= 9.0).
+    """
+    result = _raw_authoritative_verdict(pr)
+    return _apply_cve_floor(pr, result)
+
+
+def _raw_authoritative_verdict(pr: Mapping[str, Any]) -> dict:
+    """Core verdict logic. See authoritative_verdict() for the public API.
+
     Precedence (highest first), all converging on a single bucket:
       0. hard FIX floor (build fail / security introduced)  -> BLOCKED, never downgraded
       1. AI adjudication (reconcile)                         -> SAFE / REVIEW
@@ -397,6 +454,26 @@ def authoritative_verdict(pr: Mapping[str, Any]) -> dict:
     if str(pr.get("ecosystem", "")).strip().lower() == "actions":
         build_v = (pr.get("build") or {}).get("verdict", "")
         if build_v in ("pass", "pre_existing", ""):
+            bump = str(pr.get("bump", "")).strip().lower()
+            if bump == "major":
+                from_v = str(pr.get("from", "") or "").strip().lstrip("vV").split("+")[0].split("-")[0].split(".")
+                to_v = str(pr.get("to", "") or "").strip().lstrip("vV").split("+")[0].split("-")[0].split(".")
+                try:
+                    delta = int(to_v[0]) - int(from_v[0])
+                except (ValueError, IndexError):
+                    delta = 1
+                if delta >= 2:
+                    reason = (f"CI action major bump spans {delta} major versions — "
+                              "review for breaking input/output changes and verify workflow compatibility")
+                else:
+                    reason = "CI action major version bump — review for breaking input/output changes"
+                return {
+                    "verdict": BUCKET_REVIEW, "severity": "medium", "confidence": "L3",
+                    "priority": "P2",
+                    "reason": reason,
+                    "source": "actions_major_bump",
+                    "breakability_grade": GRADE_MEDIUM_BREAKING,
+                }
             result = {
                 "verdict": BUCKET_SAFE, "severity": "none", "confidence": "L3",
                 "priority": "P3",
@@ -527,11 +604,43 @@ def stage_report(stage: str, input_count: int, processed_count: int) -> str:
     return f"[{stage}] input_prs={input_count} processed_prs={processed_count}"
 
 
+def stamp_build_misattribution(prs: Mapping[str, Any]) -> int:
+    """Stamp build_misattributed=True on PRs whose build failures are likely pre-existing.
+
+    Detection: 3+ PRs from different packages sharing byte-identical output_tail.
+    Returns the number of PRs stamped.
+    """
+    fail_groups: dict = {}
+    for pid, pr in prs.items():
+        if not isinstance(pr, Mapping):
+            continue
+        build = pr.get("build") or {}
+        if build.get("verdict") != "fail":
+            continue
+        tail = build.get("output_tail")
+        if not tail or not tail.strip():
+            continue
+        fail_groups.setdefault(tail, []).append((pid, pr.get("package", "unknown")))
+    stamped = 0
+    for tail, group in fail_groups.items():
+        if len(group) < 3:
+            continue
+        packages = set(pkg for _, pkg in group)
+        if len(packages) < 2:
+            continue
+        peer_ids = sorted(pid for pid, _ in group)
+        for pid, _ in group:
+            prs[pid]["build_misattributed"] = True
+            prs[pid]["misattribution_peers"] = [p for p in peer_ids if p != pid]
+            stamped += 1
+    return stamped
+
+
 # ── CLI entrypoint ────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import sys
     import json
-    
+
     if len(sys.argv) < 2:
         print("Usage: verdict_contract.py <build-results.json> [--write]", file=sys.stderr)
         print("", file=sys.stderr)
@@ -540,25 +649,34 @@ if __name__ == "__main__":
         print("Options:", file=sys.stderr)
         print("  --write    Write enriched data back to input file (default: print to stdout)", file=sys.stderr)
         sys.exit(1)
-    
+
     results_file = sys.argv[1]
     write_back = "--write" in sys.argv
-    
+
     with open(results_file) as f:
         data = json.load(f)
-    
+
+    prs = data.get("prs", {})
+    misattr_count = stamp_build_misattribution(prs)
+    if misattr_count:
+        print(f"ℹ️  Stamped {misattr_count} PRs as build_misattributed (shared error cluster)", file=sys.stderr)
+
     # Process all PRs
     results = data.get("results", [])
     if not results:
-        results = [v for k, v in data.get("prs", {}).items()]
-    
+        results = [v for k, v in prs.items()]
+
+    # Also stamp results[] (separate objects from prs{})
+    results_dict = {str(r.get("pr_number", r.get("pr_num", i))): r for i, r in enumerate(results)}
+    stamp_build_misattribution(results_dict)
+
     processed = 0
     for pr in results:
         pr.pop("verdict_v2", None)
         verdict = authoritative_verdict(pr)
         pr["verdict_v2"] = verdict
         processed += 1
-    
+
     # Write back or print
     if write_back:
         with open(results_file, "w") as f:
@@ -566,5 +684,5 @@ if __name__ == "__main__":
         print(f"✅ Enriched {processed} PRs with authoritative verdicts → {results_file}", file=sys.stderr)
     else:
         json.dump(data, sys.stdout, indent=2)
-    
+
     sys.exit(0)
