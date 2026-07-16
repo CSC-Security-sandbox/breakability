@@ -17,6 +17,7 @@ Usage:
 
 __all__ = [
     "_read_prompt", "_extract_pr_data", "_build_per_pr_prompt",
+    "_reject_false_cve_claim", "_reject_cve_direction_error", "_reject_fabricated_probe",
     "_enforce_verdict_floor", "_normalize_verdict_text", "_inject_verdict_logic",
     "_ensure_marker", "_signal_table_ok", "_validate_comment", "_near_valid",
     "_fallback_comment", "generate_comments", "main",
@@ -161,8 +162,14 @@ def _build_per_pr_prompt(
     if cve_details:
         sections.append(
             f"\n### CVE/Vulnerability Data for This PR\n"
-            f"This PR fixes the following CVEs. You MUST include a '### Security Impact' "
-            f"section listing each CVE with severity, summary, and advisory link.\n"
+            f"**CRITICAL FRAMING RULE:** These CVEs are vulnerabilities present in the OLD "
+            f"(FROM) version that are FIXED/REMEDIATED by upgrading to the new (TO) version. "
+            f"This PR REMEDIATES these CVEs — it does NOT introduce them.\n\n"
+            f"You MUST:\n"
+            f"- Say 'remediates', 'fixes', or 'addresses' — NEVER 'introduces' or 'adds'\n"
+            f"- Include a '### Security Impact' section listing each CVE with severity, "
+            f"summary, and advisory link\n"
+            f"- NEVER write 'No CVEs associated with this upgrade' — this PR has {len(cve_details)} CVE(s)\n\n"
             f"```json\n{json.dumps(cve_details, indent=2)}\n```\n"
         )
 
@@ -196,6 +203,26 @@ def _build_per_pr_prompt(
     if run_url:
         sections.append(f"[Analysis run]({run_url})\n")
     sections.append("```\n")
+
+    bg = pr.get("behavioral_grade") or {}
+    if bg:
+        probe_ran = bg.get("same_behavior") is not None
+        sections.append(
+            f"\n### Behavioral Probe Data (GROUND TRUTH — do not fabricate)\n"
+            f"```json\n{json.dumps(bg, indent=2)}\n```\n"
+        )
+        if not probe_ran:
+            sections.append(
+                "**The behavioral probe did NOT run successfully.** "
+                f"Reason: {bg.get('rationale', 'unavailable')}. "
+                "Do NOT invent SHA256 hashes, doc line counts, or any other probe output. "
+                "State that the probe was unavailable and report confidence as LOW.\n"
+            )
+        else:
+            sections.append(
+                "Use ONLY the data above for the behavioral probe section. "
+                "Do not invent hashes or metrics not present in this data.\n"
+            )
 
     sections.append(
         "\n### OUTPUT INSTRUCTIONS\n"
@@ -332,6 +359,71 @@ def _inject_verdict_logic(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
         comment = comment.rstrip() + pseudocode
 
     print(f"PR#{pr_num}: injected deterministic verdict logic pseudocode", file=sys.stderr)
+    return comment
+
+
+def _reject_false_cve_claim(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
+    """Post-gen guard: if the PR has CVEs, the comment must not claim there are none."""
+    cve_details = pr.get("cve_details") or []
+    if not cve_details:
+        return comment
+    false_claims = [
+        r'[Nn]o\s+CVE',
+        r'[Nn]o\s+known\s+(?:CVE|vulnerabilit)',
+        r'[Nn]o\s+(?:CVE|vulnerabilit).*associated',
+        r'0\s+CVE',
+    ]
+    for pattern in false_claims:
+        if re.search(pattern, comment):
+            print(
+                f"PR#{pr_num}: REJECTED — comment claims no CVEs but PR has "
+                f"{len(cve_details)} CVE(s). Replacing with fallback.",
+                file=sys.stderr,
+            )
+            return ""
+    return comment
+
+
+def _reject_cve_direction_error(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
+    """Post-gen guard: upgrade PRs must say CVEs are fixed, not introduced."""
+    cve_details = pr.get("cve_details") or []
+    if not cve_details:
+        return comment
+    banner_match = re.search(r'^##\s+[^\n]*', comment, re.MULTILINE)
+    if not banner_match:
+        return comment
+    banner = banner_match.group(0)
+    if re.search(r'\bintroduce', banner, re.IGNORECASE) and re.search(r'\bCVE|vulnerabilit', banner, re.IGNORECASE):
+        print(
+            f"PR#{pr_num}: REJECTED — banner says 'introduces' CVEs for an upgrade PR. "
+            f"Replacing with fallback.",
+            file=sys.stderr,
+        )
+        return ""
+    return comment
+
+
+def _reject_fabricated_probe(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
+    """Post-gen guard: reject SHA256 claims when the behavioral probe never ran."""
+    bg = pr.get("behavioral_grade") or {}
+    probe_ran = bg.get("same_behavior") is not None
+    if probe_ran:
+        return comment
+    eco = str(pr.get("ecosystem", "")).strip().lower()
+    if eco == "actions":
+        return comment
+    if re.search(r'SHA256[:\s]+[0-9a-f]{8,}', comment):
+        print(
+            f"PR#{pr_num}: REJECTED — comment contains fabricated SHA256 hash "
+            f"(probe never ran: {bg.get('rationale', 'unavailable')}). Stripping probe section.",
+            file=sys.stderr,
+        )
+        comment = re.sub(
+            r'(?:^|\n)###?\s*(?:Behavioral|Runtime)\s*Probe.*?(?=\n###?\s|\n---|\Z)',
+            '\n### Behavioral Probe\n\n⬜ **UNAVAILABLE** — probe did not run. '
+            f'Reason: {bg.get("rationale", "unavailable")}. Confidence: LOW.\n',
+            comment, count=1, flags=re.DOTALL | re.IGNORECASE,
+        )
     return comment
 
 
@@ -768,6 +860,12 @@ def generate_comments(
             if attempt < max_attempts - 1:
                 print(f"PR#{pr_num}: AI call {reason}, retrying...", file=sys.stderr)
 
+        if comment:
+            comment = _reject_false_cve_claim(comment, pr_data, pr_num)
+        if comment:
+            comment = _reject_cve_direction_error(comment, pr_data, pr_num)
+        if comment:
+            comment = _reject_fabricated_probe(comment, pr_data, pr_num)
         if comment:
             comment = _enforce_verdict_floor(comment, pr_data, pr_num)
             comment = _normalize_verdict_text(comment, pr_num)

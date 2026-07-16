@@ -25,7 +25,7 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from breakability_eval import CorpusCase, Scorer  # noqa: E402
 
 try:
@@ -227,13 +227,14 @@ def derive_prediction(pr):
 
     The gate MUST grade the same verdict the developer sees, otherwise a renderer/policy
     regression (e.g. the #121->#128 GLANCE->REVIEW review-wall) moves the rendered output
-    but not the gate number and slips through. So when the typed policy layer is present we
-    grade via the single authoritative source (verdict_contract); we fall back to the legacy
-    build+merge_risk derivation only for older artifacts that predate typed policy lowering.
+    but not the gate number and slips through.
+
+    Always prefer the contract prediction (verdict_contract.prediction_for_pr) — it is the
+    single authoritative source that accounts for misattribution, CVE floor, probe escalation,
+    and all other verdict rules. The legacy derivation only fires when the contract module
+    is unavailable (should never happen in practice).
     """
-    has_policy = isinstance(pr.get("policy_lowering"), dict) and \
-        isinstance((pr.get("policy_lowering") or {}).get("decision"), dict)
-    if _contract_prediction is not None and has_policy:
+    if _contract_prediction is not None:
         return _contract_prediction(pr)
     return _legacy_prediction(pr)
 
@@ -372,11 +373,16 @@ def main():
 
     # 1. deterministic predictions for corpus PRs (AI-off baseline)
     predictions = {}
+    skipped_mismatch = []
     for c in cases:
         pid = str(c.pr_id)
-        if pid in prs:
-            predictions[pid] = derive_prediction(prs[pid])
-        # else -> Scorer defaults to abstain (counts as false_none for review/fix)
+        if pid not in prs:
+            continue  # Scorer defaults to abstain (counts as false_none for review/fix)
+        pr_pkg = prs[pid].get("package", "")
+        if c.package and pr_pkg and c.package != pr_pkg:
+            skipped_mismatch.append((pid, c.package, pr_pkg))
+            continue  # PR number reused for a different package — skip
+        predictions[pid] = derive_prediction(prs[pid])
 
     base_res = Scorer(cases).score(dict(predictions))
     base_ac = base_res["metrics"]["auto_clear_pct"]
@@ -494,6 +500,11 @@ def main():
         print(f"AI_DOWNGRADES_APPLIED: {len(ai_applied)}")
         print(f"AI_PROOF_ADDED: {len(ai_proof_added)}")
         print(f"AI_REJECTED: {len(ai_rejected)}")
+    if skipped_mismatch:
+        print(f"CORPUS_MISMATCHED: {len(skipped_mismatch)}")
+        for pid, corpus_pkg, data_pkg in skipped_mismatch:
+            print(f"  PR#{pid}: corpus={corpus_pkg} data={data_pkg} (skipped)")
+
     print("FINDINGS:")
     sev_map = {"false_green": "P0", "false_none": "P1", "false_block": "P2"}
     for c in score_res["per_case"]:

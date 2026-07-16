@@ -382,12 +382,16 @@ jobs:
           print('Pipeline flags written:', json.dumps(d['meta']['pipeline_flags'], indent=2))
           "
 
-      # ── Post comments to PRs ───────────────────────────────────────
+      # ── Post comments to PRs (update-or-create: one comment per PR) ──
       - name: Post comments to PRs
         if: always()
         run: |
           POSTED=0
+          UPDATED=0
           FAILED=0
+          MARKER="<!-- breakability-check -->"
+          OWNER="${GITHUB_REPOSITORY%/*}"
+          REPO="${GITHUB_REPOSITORY#*/}"
           for comment_file in /tmp/pr-*-comment.md; do
             if [ -f "$comment_file" ]; then
               pr_num=$(basename "$comment_file" | sed 's/pr-\([0-9]*\)-comment.md/\1/')
@@ -396,14 +400,30 @@ jobs:
                 echo "Skipping PR #$pr_num (state=$pr_state)"
                 continue
               fi
-              if gh pr comment "$pr_num" --body-file "$comment_file"; then
-                POSTED=$((POSTED + 1))
+              # Find existing breakability comment by marker
+              existing_id=$(gh api "repos/$OWNER/$REPO/issues/$pr_num/comments" \
+                --jq "[.[] | select(.body | startswith(\"$MARKER\"))] | last | .id // empty" 2>/dev/null || echo "")
+              if [ -n "$existing_id" ]; then
+                # Update existing comment in place (PATCH)
+                if gh api "repos/$OWNER/$REPO/issues/comments/$existing_id" \
+                  -X PATCH -F "body=@$comment_file" > /dev/null 2>&1; then
+                  UPDATED=$((UPDATED + 1))
+                  echo "Updated existing comment $existing_id on PR #$pr_num"
+                else
+                  FAILED=$((FAILED + 1))
+                  echo "Failed to update comment on PR #$pr_num"
+                fi
               else
-                FAILED=$((FAILED + 1))
+                # No existing comment — create new one (POST)
+                if gh pr comment "$pr_num" --body-file "$comment_file"; then
+                  POSTED=$((POSTED + 1))
+                else
+                  FAILED=$((FAILED + 1))
+                fi
               fi
             fi
           done
-          echo "Posted $POSTED comments ($FAILED failed)"
+          echo "Posted $POSTED new, updated $UPDATED existing ($FAILED failed)"
         env:
           GH_TOKEN: ${{ secrets.token || github.token }}
 
