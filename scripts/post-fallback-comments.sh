@@ -37,7 +37,7 @@ source "$BRK_SCRIPTS/lib/comment_blocks.sh"
 source "$BRK_SCRIPTS/lib/comment_templates.sh"
 
 RESULTS_FILE="/tmp/build-results.json"
-CLI_PATH="${CLI_PATH:-.github/actions/breakability-check/index.js}"
+CLI_PATH="${CLI_PATH:-$(dirname "$BRK_SCRIPTS")/.github/actions/breakability-check/index.js}"
 
 if [[ ! -f "$RESULTS_FILE" ]]; then
   echo "No build-results.json found — nothing to do"

@@ -31,7 +31,7 @@ if [[ -n "$BATCH_ID" ]]; then
 else
   RESULTS_FILE="/tmp/build-results.json"
 fi
-CLI_PATH="${CLI_PATH:-.github/actions/breakability-check/index.js}"
+CLI_PATH="${CLI_PATH:-$(dirname "$BRK_SCRIPTS")/.github/actions/breakability-check/index.js}"
 REPO_ROOT="$(pwd)"
 PR_FILTER="${PR_FILTER:-${BREAKABILITY_PR_NUMBERS:-}}"
 
