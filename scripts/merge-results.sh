@@ -209,8 +209,12 @@ merged["results"] = [
     for k, v in sorted(merged.get("prs", {}).items(), key=lambda x: int(x[0]))
 ]
 
-with open("/tmp/build-results.json", "w") as f:
+import os, tempfile
+merged.setdefault("metadata", {})["verdict_generation"] = 0
+fd, tmp = tempfile.mkstemp(dir="/tmp", suffix=".json", prefix=".build-results-")
+with os.fdopen(fd, "w") as f:
     json.dump(merged, f, indent=2)
+os.replace(tmp, "/tmp/build-results.json")
 
 print(f"  Total merged PRs: {total_prs}")
 print(f"  Added .results[] compatibility shim with {len(merged['results'])} PRs")
@@ -535,8 +539,12 @@ _govuln["total_new_findings"] = sorted(_new_set)
 data["govulncheck"] = _govuln
 print(f"  govulncheck: main_baseline={len(_govuln['main_baseline']['findings'])} CVE(s), prs_with_new_vulns={_govuln['prs_with_new_vulns']}, total_new={len(_govuln['total_new_findings'])}")
 
-with open("/tmp/build-results.json", "w") as f:
+import tempfile as _tf
+data["metadata"]["verdict_generation"] = data.get("metadata", {}).get("verdict_generation", 0) + 1
+_fd, _tmp = _tf.mkstemp(dir="/tmp", suffix=".json", prefix=".build-results-")
+with os.fdopen(_fd, "w") as f:
     json.dump(data, f, indent=2)
+os.replace(_tmp, "/tmp/build-results.json")
 
 print(f"  Open vulnerability alerts: {len(open_alerts)}")
 for sev, count in sorted(severity_counts.items(), key=lambda x: {'critical':0,'high':1,'medium':2,'low':3}.get(x[0],4)):
@@ -549,7 +557,7 @@ SECURITYEOF
 
 # ── Step 5b: Merge-risk taxonomy on merged results ────────────────────────────
 python3 << 'RISKEOF'
-import json
+import json, os
 
 with open("/tmp/build-results.json") as f:
     data = json.load(f)
@@ -570,8 +578,12 @@ for pr in data.get("prs", {}).values():
     pr["merge_risk"] = risk
     counts[risk["tag"]] = counts.get(risk["tag"], 0) + 1
 
-with open("/tmp/build-results.json", "w") as f:
+import tempfile as _tf
+data["metadata"]["verdict_generation"] = data.get("metadata", {}).get("verdict_generation", 0) + 1
+_fd, _tmp = _tf.mkstemp(dir="/tmp", suffix=".json", prefix=".build-results-")
+with os.fdopen(_fd, "w") as f:
     json.dump(data, f, indent=2)
+os.replace(_tmp, "/tmp/build-results.json")
 
 print(f"  Merge Risk: High={counts.get('High', 0)} Medium={counts.get('Medium', 0)} Low={counts.get('Low', 0)}")
 RISKEOF

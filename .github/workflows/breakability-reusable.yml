@@ -377,8 +377,13 @@ jobs:
               'ai_agent_installed': '${{ steps.agent_install.outputs.agent_available }}' == 'true',
               'ai_comments_generated': '${{ steps.ai_comments.outputs.ai_comments }}' == 'true',
               'template_fallback_used': '${{ inputs.skip_agent }}' == 'true' or '${{ steps.ai_comments.outputs.ai_comments }}' != 'true',
+              'note': 'flags reflect THIS run only; live comments may differ if posting was partial',
           }
-          json.dump(d, open(path, 'w'), indent=2)
+          import tempfile
+          fd, tmp = tempfile.mkstemp(dir='/tmp', suffix='.json', prefix='.build-results-')
+          with os.fdopen(fd, 'w') as f:
+              json.dump(d, f, indent=2)
+          os.replace(tmp, path)
           print('Pipeline flags written:', json.dumps(d['meta']['pipeline_flags'], indent=2))
           "
 
@@ -388,42 +393,66 @@ jobs:
         run: |
           POSTED=0
           UPDATED=0
+          SKIPPED=0
           FAILED=0
+          TOTAL=0
           MARKER="<!-- breakability-check -->"
           OWNER="${GITHUB_REPOSITORY%/*}"
           REPO="${GITHUB_REPOSITORY#*/}"
-          for comment_file in /tmp/pr-*-comment.md; do
-            if [ -f "$comment_file" ]; then
-              pr_num=$(basename "$comment_file" | sed 's/pr-\([0-9]*\)-comment.md/\1/')
-              pr_state=$(gh pr view "$pr_num" --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
-              if [ "$pr_state" != "OPEN" ]; then
-                echo "Skipping PR #$pr_num (state=$pr_state)"
-                continue
+
+          post_with_retry() {
+            local cmd="$1" max_retries=3 attempt=0
+            while [ $attempt -lt $max_retries ]; do
+              if eval "$cmd" 2>/tmp/brk-post-err.log; then
+                return 0
               fi
-              # Find existing breakability comment by marker
-              existing_id=$(gh api "repos/$OWNER/$REPO/issues/$pr_num/comments" \
-                --jq "[.[] | select(.body | startswith(\"$MARKER\"))] | last | .id // empty" 2>/dev/null || echo "")
-              if [ -n "$existing_id" ]; then
-                # Update existing comment in place (PATCH)
-                if gh api "repos/$OWNER/$REPO/issues/comments/$existing_id" \
-                  -X PATCH -F "body=@$comment_file" > /dev/null 2>&1; then
-                  UPDATED=$((UPDATED + 1))
-                  echo "Updated existing comment $existing_id on PR #$pr_num"
-                else
-                  FAILED=$((FAILED + 1))
-                  echo "Failed to update comment on PR #$pr_num"
-                fi
+              attempt=$((attempt + 1))
+              echo "  Retry $attempt/$max_retries after failure: $(cat /tmp/brk-post-err.log | head -1)"
+              sleep $((attempt * 2))
+            done
+            return 1
+          }
+
+          for comment_file in /tmp/pr-*-comment.md; do
+            [ -f "$comment_file" ] || continue
+            TOTAL=$((TOTAL + 1))
+            pr_num=$(basename "$comment_file" | sed 's/pr-\([0-9]*\)-comment.md/\1/')
+            echo "--- PR #$pr_num ---"
+
+            pr_state=$(gh pr view "$pr_num" --json state --jq '.state' 2>&1) || pr_state="UNKNOWN"
+            if [ "$pr_state" != "OPEN" ]; then
+              echo "  Skipping (state=$pr_state)"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+
+            existing_id=$(gh api "repos/$OWNER/$REPO/issues/$pr_num/comments" \
+              --jq "[.[] | select(.body | startswith(\"$MARKER\"))] | last | .id // empty" 2>&1) || existing_id=""
+
+            if [ -n "$existing_id" ]; then
+              if post_with_retry "gh api 'repos/$OWNER/$REPO/issues/comments/$existing_id' -X PATCH -F 'body=@$comment_file' > /dev/null"; then
+                UPDATED=$((UPDATED + 1))
+                echo "  Updated comment $existing_id"
               else
-                # No existing comment — create new one (POST)
-                if gh pr comment "$pr_num" --body-file "$comment_file"; then
-                  POSTED=$((POSTED + 1))
-                else
-                  FAILED=$((FAILED + 1))
-                fi
+                FAILED=$((FAILED + 1))
+                echo "  FAILED to update (error: $(cat /tmp/brk-post-err.log | head -1))"
+              fi
+            else
+              if post_with_retry "gh pr comment '$pr_num' --body-file '$comment_file'"; then
+                POSTED=$((POSTED + 1))
+                echo "  Posted new comment"
+              else
+                FAILED=$((FAILED + 1))
+                echo "  FAILED to post (error: $(cat /tmp/brk-post-err.log | head -1))"
               fi
             fi
           done
-          echo "Posted $POSTED new, updated $UPDATED existing ($FAILED failed)"
+          echo ""
+          echo "=== Comment Posting Summary ==="
+          echo "Total: $TOTAL | Posted: $POSTED | Updated: $UPDATED | Skipped: $SKIPPED | Failed: $FAILED"
+          if [ $FAILED -gt 0 ]; then
+            echo "::warning::$FAILED comment(s) failed to post"
+          fi
         env:
           GH_TOKEN: ${{ secrets.token || github.token }}
 

@@ -422,7 +422,12 @@ def main():
 
     print(f"\nRECONCILE_SUMMARY downgraded_safe={n_safe} kept={n_kept} total={len(prs)}")
     if args.write:
-        json.dump(data, open(args.results, "w"), indent=2)
+        import tempfile
+        result_dir = os.path.dirname(os.path.abspath(args.results))
+        fd, tmp = tempfile.mkstemp(dir=result_dir, suffix=".json", prefix=".build-results-")
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, args.results)
         print(f"WROTE {args.results}")
     return 0
 

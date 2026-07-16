@@ -677,10 +677,35 @@ if __name__ == "__main__":
         pr["verdict_v2"] = verdict
         processed += 1
 
+    # Propagate verdict_v2 and build_misattributed back to prs{}
+    # results[] and prs{} are separate objects after JSON deserialization
+    propagated = 0
+    for pr in results:
+        pr_key = str(pr.get("pr_num", pr.get("pr_number", "")))
+        if pr_key and pr_key in prs:
+            prs[pr_key]["verdict_v2"] = pr.get("verdict_v2")
+            if pr.get("build_misattributed"):
+                prs[pr_key]["build_misattributed"] = True
+                prs[pr_key]["misattribution_peers"] = pr.get("misattribution_peers", [])
+            propagated += 1
+    if propagated:
+        print(f"ℹ️  Propagated verdict_v2 to {propagated} prs{{}} entries", file=sys.stderr)
+
     # Write back or print
     if write_back:
-        with open(results_file, "w") as f:
-            json.dump(data, f, indent=2)
+        import os
+        import tempfile
+        result_dir = os.path.dirname(os.path.abspath(results_file))
+        data.setdefault("metadata", {})
+        data["metadata"]["verdict_generation"] = data["metadata"].get("verdict_generation", 0) + 1
+        fd, tmp_path = tempfile.mkstemp(dir=result_dir, suffix=".json", prefix=".build-results-")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(data, f, indent=2)
+            os.replace(tmp_path, results_file)
+        except BaseException:
+            os.unlink(tmp_path)
+            raise
         print(f"✅ Enriched {processed} PRs with authoritative verdicts → {results_file}", file=sys.stderr)
     else:
         json.dump(data, sys.stdout, indent=2)
