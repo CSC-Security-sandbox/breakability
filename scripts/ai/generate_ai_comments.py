@@ -392,11 +392,13 @@ def _reject_cve_direction_error(comment: str, pr: Dict[str, Any], pr_num: str) -
     banner_match = re.search(r'^##\s+[^\n]*', comment, re.MULTILINE)
     if not banner_match:
         return comment
-    banner = banner_match.group(0)
-    if re.search(r'\bintroduce', banner, re.IGNORECASE) and re.search(r'\bCVE|vulnerabilit', banner, re.IGNORECASE):
+    start = banner_match.start()
+    lines = comment[start:].split('\n')
+    scan_region = '\n'.join(lines[:6])
+    if re.search(r'\bintroduce', scan_region, re.IGNORECASE) and re.search(r'\bCVE|vulnerabilit', scan_region, re.IGNORECASE):
         print(
-            f"PR#{pr_num}: REJECTED — banner says 'introduces' CVEs for an upgrade PR. "
-            f"Replacing with fallback.",
+            f"PR#{pr_num}: REJECTED — comment says 'introduces' CVEs for an upgrade PR "
+            f"(found in H2 + blockquote region). Replacing with fallback.",
             file=sys.stderr,
         )
         return ""
@@ -755,6 +757,22 @@ def generate_comments(
 
     prs = build_results.get("prs", {})
     results_list = build_results.get("results", [])
+
+    # Merge verdict_v2 from results[] into prs{} (prs{} often has it as None)
+    if prs and results_list:
+        _results_v2 = {}
+        for _r in results_list:
+            _rn = str(_r.get("pr_num", _r.get("pr_number", _r.get("pr", ""))))
+            _rv2 = _r.get("verdict_v2")
+            if _rn and isinstance(_rv2, dict) and "verdict" in _rv2:
+                _results_v2[_rn] = _rv2
+        for _num, _pr in prs.items():
+            if not isinstance(_pr.get("verdict_v2"), dict) or "verdict" not in (_pr.get("verdict_v2") or {}):
+                v2_from_results = _results_v2.get(_num)
+                if v2_from_results:
+                    _pr["verdict_v2"] = v2_from_results
+                else:
+                    _pr["verdict_v2"] = authoritative_verdict(_pr)
 
     pr_items = []
     if prs:

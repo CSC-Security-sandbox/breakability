@@ -1099,6 +1099,14 @@ if security:
     fixable = security.get("alerts_fixable_by_merging", 0)
     if _alerts_unavail:
         lines.append("- Open Dependabot alerts: **⚠️ Unavailable** (token missing `security_events` permission — set `BREAKABILITY_PAT` repo secret)")
+        _derived_sev = {}
+        for _p in prs.values():
+            for _cve in (_p.get("cve_details") or []):
+                s = (_cve.get("severity") or "unknown").lower()
+                _derived_sev[s] = _derived_sev.get(s, 0) + 1
+        if _derived_sev:
+            sev_str = ", ".join(f"{s}: {c}" for s, c in sorted(_derived_sev.items()))
+            lines.append(f"- CVE severity from PR data (derived): {sev_str}")
     else:
         lines.append(f"- Open Dependabot alerts: **{open_alerts}**")
         if fixable:
