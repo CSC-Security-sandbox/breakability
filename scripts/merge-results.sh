@@ -562,19 +562,65 @@ import json, os
 with open("/tmp/build-results.json") as f:
     data = json.load(f)
 
-def normalize(pr):
-    existing = pr.get("merge_risk") or (pr.get("deterministic") or {}).get("merge_risk") or {}
+def compute_merge_risk(pr):
+    det_mr = {}
+    det = pr.get("deterministic")
+    if isinstance(det, dict):
+        det_mr = det.get("merge_risk") or {}
+    existing = pr.get("merge_risk") or det_mr or {}
+    if existing.get("tag"):
+        return existing
+
+    build = pr.get("build") or {}
+    bv = build.get("verdict", "")
+    new_errors = build.get("new_errors") or []
+    files_imp = pr.get("files_importing") or []
+    vlabel = pr.get("verification_label", "")
+    cves = pr.get("cves") or []
+
+    tag, reason, axis = "Medium", "change evidence is limited; default caution", "limited evidence"
+
+    if bv in ("fail", "pre_existing_plus_new") and new_errors:
+        tag, reason = "High", f"build fails with {len(new_errors)} new error(s): {str(new_errors[0])[:120]}"
+        axis = "build failure with new errors"
+    elif bv == "fail" and not new_errors:
+        tail = build.get("output_tail", "")
+        if "error" in tail.lower() or "FAIL" in tail:
+            tag, reason = "High", "build fails with errors in output"
+            axis = "build failure, errors in output_tail"
+        else:
+            tag, reason = "Medium", "build fails but no classifiable errors"
+            axis = "build failure, unclassified"
+    elif not files_imp and bv in ("pass", "security_review", "skipped"):
+        tag, reason = "Low", "no importing files and build passes; change is isolated"
+        axis = "no import footprint, build clean"
+    elif not files_imp and bv in ("fail", "pre_existing"):
+        tag, reason = "Low", f"no importing files; build verdict={bv} likely environmental"
+        axis = "no import footprint, build issue likely unrelated"
+    elif files_imp and bv in ("pass", "security_review"):
+        tag, reason = "Medium", f"{len(files_imp)} file(s) import this dependency; build passes"
+        axis = "has import footprint, build clean"
+    cve_details = pr.get("cve_details") or []
+    if cve_details and isinstance(cve_details, list):
+        max_cvss = max((float(c.get("cvss_score", 0)) for c in cve_details if c.get("cvss_score")), default=0)
+        if max_cvss >= 9.0:
+            tag, reason = "High", f"critical CVE (CVSS {max_cvss}); security update"
+            axis = "critical CVE"
+        elif max_cvss >= 7.0 and tag != "High":
+            tag, reason = "Medium", f"high-severity CVE (CVSS {max_cvss}); security update"
+            axis = "high CVE"
+
     return {
-        "tag": existing.get("tag") or "Medium",
-        "reason": existing.get("reason") or "change evidence is limited; default caution",
-        "evidenceAxis": existing.get("evidenceAxis") or "limited evidence",
-        "buildVerificationAxis": existing.get("buildVerificationAxis") or existing.get("confidenceAxis") or pr.get("verification_label") or "unverified",
-        "confidenceAxis": existing.get("confidenceAxis") or existing.get("buildVerificationAxis") or pr.get("verification_label") or "unverified",
+        "tag": tag,
+        "reason": reason,
+        "evidenceAxis": axis,
+        "buildVerificationAxis": vlabel or "unverified",
+        "confidenceAxis": vlabel or "unverified",
     }
 
 counts = {"Low": 0, "Medium": 0, "High": 0}
 for pr in data.get("prs", {}).values():
-    risk = normalize(pr)
+    risk = compute_merge_risk(pr)
     pr["merge_risk"] = risk
     counts[risk["tag"]] = counts.get(risk["tag"], 0) + 1
 
