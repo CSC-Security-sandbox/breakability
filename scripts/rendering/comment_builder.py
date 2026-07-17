@@ -120,7 +120,12 @@ def signal_summary(pr, fields):
     else:
         parts.append(f'Build: {bv} (exit {build.get("pr_exit", "?")})')
     if test.get('ran'):
-        parts.append('Tests: pass' if test.get('exit') == 0 else f'Tests: fail (exit {test.get("exit")})')
+        if test.get('exit') == 0:
+            parts.append('Tests: pass')
+        elif test.get('verdict') == 'pre_existing':
+            parts.append('Tests: pre-existing (same failure on main)')
+        else:
+            parts.append(f'Tests: fail (exit {test.get("exit")})')
     else:
         parts.append('Tests: not run')
     if (pr.get('package') or fields.get('package') or '').startswith('@types/') and not files:

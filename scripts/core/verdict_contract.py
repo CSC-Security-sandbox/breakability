@@ -235,6 +235,11 @@ def _apply_cve_floor(pr: Mapping[str, Any], result: dict) -> dict:
       max CVSS >= 9.0 → at least P0 / severity high
       max CVSS >= 7.0 → at least P1 / severity high
     """
+    # Guard: if the CVE floor was already applied (e.g., verdict_v2 persisted
+    # from a prior authoritative_verdict() call), do not re-apply — that would
+    # duplicate the +cve_floor source tag and append the reason text again.
+    if "cve_floor" in (result.get("source") or ""):
+        return result
     cvss = _max_cvss(pr)
     if cvss < 7.0:
         return result
@@ -604,12 +609,38 @@ def stage_report(stage: str, input_count: int, processed_count: int) -> str:
     return f"[{stage}] input_prs={input_count} processed_prs={processed_count}"
 
 
-def stamp_build_misattribution(prs: Mapping[str, Any]) -> int:
+def stamp_build_misattribution(prs: Mapping[str, Any],
+                               main_build: Optional[Mapping[str, Any]] = None) -> int:
     """Stamp build_misattributed=True on PRs whose build failures are likely pre-existing.
 
-    Detection: 3+ PRs from different packages sharing byte-identical output_tail.
+    Detection strategies:
+      1. (Original) 3+ PRs from different packages sharing byte-identical output_tail.
+      2. (New) 2+ PRs with identical sorted new_errors arrays AND main build also
+         failed — either per-PR build.main_exit != 0 or the shared main_build data
+         for the ecosystem shows a non-zero exit.  This catches cases where
+         output_tail differs (e.g., disk-full noise ordering varies between runs)
+         but the actual errors are the same pre-existing failures.
+
     Returns the number of PRs stamped.
     """
+
+    def _shared_main_failed(eco: str) -> bool:
+        """Check if the shared main_build data shows a failure for this ecosystem."""
+        if not isinstance(main_build, Mapping):
+            return False
+        eco_key = {"gomod": "go", "npm": "npm", "pip": "pip"}.get(
+            str(eco).strip().lower(), "")
+        if not eco_key:
+            return False
+        eco_data = main_build.get(eco_key)
+        if isinstance(eco_data, Mapping):
+            exit_code = eco_data.get("exit")
+            return isinstance(exit_code, (int, float)) and exit_code != 0
+        return False
+
+    stamped_pids: set = set()
+
+    # ── Strategy 1: byte-identical output_tail (3+ PRs, 2+ packages) ──
     fail_groups: dict = {}
     for pid, pr in prs.items():
         if not isinstance(pr, Mapping):
@@ -621,7 +652,6 @@ def stamp_build_misattribution(prs: Mapping[str, Any]) -> int:
         if not tail or not tail.strip():
             continue
         fail_groups.setdefault(tail, []).append((pid, pr.get("package", "unknown")))
-    stamped = 0
     for tail, group in fail_groups.items():
         if len(group) < 3:
             continue
@@ -632,8 +662,45 @@ def stamp_build_misattribution(prs: Mapping[str, Any]) -> int:
         for pid, _ in group:
             prs[pid]["build_misattributed"] = True
             prs[pid]["misattribution_peers"] = [p for p in peer_ids if p != pid]
-            stamped += 1
-    return stamped
+            stamped_pids.add(pid)
+
+    # ── Strategy 2: identical sorted new_errors + main build also failed ──
+    error_groups: dict = {}
+    for pid, pr in prs.items():
+        if pid in stamped_pids:
+            continue  # already stamped by strategy 1
+        if not isinstance(pr, Mapping):
+            continue
+        build = pr.get("build") or {}
+        if build.get("verdict") != "fail":
+            continue
+        new_errors = build.get("new_errors")
+        if not isinstance(new_errors, list) or not new_errors:
+            continue
+        # Require evidence that the main build also failed: either the per-PR
+        # main_exit is non-zero, or the shared main_build data for this
+        # ecosystem shows a non-zero exit code.
+        main_exit = build.get("main_exit")
+        eco = pr.get("ecosystem", "")
+        main_also_failed = (
+            (isinstance(main_exit, (int, float)) and main_exit != 0)
+            or _shared_main_failed(eco)
+        )
+        if not main_also_failed:
+            continue
+        key = tuple(sorted(new_errors))
+        error_groups.setdefault(key, []).append((pid, pr.get("package", "unknown")))
+    for key, group in error_groups.items():
+        if len(group) < 2:
+            continue
+        peer_ids = sorted(pid for pid, _ in group)
+        for pid, _ in group:
+            prs[pid]["build_misattributed"] = True
+            prs[pid]["misattribution_peers"] = [p for p in peer_ids if p != pid]
+            prs[pid]["misattribution_strategy"] = "sorted_new_errors"
+            stamped_pids.add(pid)
+
+    return len(stamped_pids)
 
 
 # ── CLI entrypoint ────────────────────────────────────────────────────────────
@@ -657,7 +724,8 @@ if __name__ == "__main__":
         data = json.load(f)
 
     prs = data.get("prs", {})
-    misattr_count = stamp_build_misattribution(prs)
+    main_build = data.get("main_build") or {}
+    misattr_count = stamp_build_misattribution(prs, main_build=main_build)
     if misattr_count:
         print(f"ℹ️  Stamped {misattr_count} PRs as build_misattributed (shared error cluster)", file=sys.stderr)
 
@@ -668,7 +736,7 @@ if __name__ == "__main__":
 
     # Also stamp results[] (separate objects from prs{})
     results_dict = {str(r.get("pr_number", r.get("pr_num", i))): r for i, r in enumerate(results)}
-    stamp_build_misattribution(results_dict)
+    stamp_build_misattribution(results_dict, main_build=main_build)
 
     processed = 0
     for pr in results:
