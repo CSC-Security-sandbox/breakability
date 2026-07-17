@@ -83,7 +83,7 @@ def check_pipeline_completeness(results):
     no_changelog = 0
     for pid, pr in prs.items():
         cs = (pr.get("deterministic") or {}).get("changelogSignal")
-        if cs is None or cs == "":
+        if cs is None or cs == "" or (isinstance(cs, dict) and cs.get("status") == "missing"):
             no_changelog += 1
     if no_changelog > 0:
         pct = no_changelog / max(len(prs), 1) * 100

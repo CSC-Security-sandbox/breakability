@@ -358,14 +358,8 @@ for PR_NUM in $PR_NUMBERS; do
   fi
   TEST_EXIT_CODE=$(echo "$_FIELDS_EXTRACTED" | grep '^TEST_EXIT_CODE=' | cut -d= -f2-)
   TEST_RAN=$(echo "$_FIELDS_EXTRACTED" | grep '^TEST_RAN=' | cut -d= -f2-)
+  TEST_VERDICT=$(echo "$_FIELDS_EXTRACTED" | grep '^TEST_VERDICT=' | cut -d= -f2-)
   MAIN_TEST_EXIT=$(echo "$_FIELDS_EXTRACTED" | grep '^MAIN_TEST_EXIT=' | cut -d= -f2-)
-  # ── Single-source, HONEST test-result framing (one derivation feeds BOTH the signals
-  # table and the "how we checked" block, so the same fact can never read alarming in one
-  # place and exculpatory in another — PR#16). We only call a failure "pre-existing" when
-  # we can PROVE main also fails (upstream classified it via TEST_FAIL_DETAIL, or
-  # MAIN_TEST_EXIT>0). When main never tested (its build broke -> main_test_exit=-1) we say
-  # "could not confirm" — we do NOT fabricate "same failure on main". Safe direction:
-  # underclaim pre-existing.
   _TESTS_CLEAN=0
   _TEST_FAILED=0
   if [[ "${TEST_RAN:-False}" == "True" && "${TEST_EXIT_CODE:-}" == "0" ]]; then
@@ -374,7 +368,9 @@ for PR_NUM in $PR_NUMBERS; do
     _TEST_FAILED=1
   fi
   _TEST_PREEXIST_VERIFIED=0
-  if [[ -n "${TEST_FAIL_DETAIL:-}" ]]; then
+  if [[ "${TEST_VERDICT:-}" == "pre_existing" ]]; then
+    _TEST_PREEXIST_VERIFIED=1
+  elif [[ -n "${TEST_FAIL_DETAIL:-}" ]]; then
     _TEST_PREEXIST_VERIFIED=1
   elif [[ "${MAIN_TEST_EXIT:-}" =~ ^[0-9]+$ && "${MAIN_TEST_EXIT}" -gt 0 ]]; then
     _TEST_PREEXIST_VERIFIED=1

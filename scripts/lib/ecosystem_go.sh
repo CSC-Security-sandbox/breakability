@@ -265,7 +265,7 @@ go_check_vulnerabilities() {
   # Opt-in gate: Dependabot already supplies the CVE list, and govulncheck is a heavy
   # CPU/time cost on the self-hosted runner (esp. under TLS inspection). Default OFF.
   # Set BREAKABILITY_GOVULNCHECK=1 to re-enable the CVE-reachability hint scan.
-  if [[ "${BREAKABILITY_GOVULNCHECK:-0}" != "1" ]]; then
+  if [[ "${BREAKABILITY_GOVULNCHECK:-1}" != "1" ]]; then
     echo "  [security] govulncheck disabled (BREAKABILITY_GOVULNCHECK!=1) — Dependabot supplies CVE list; skipping"
     echo "###VULN_STATUS=skipped_disabled"
     return 0

@@ -59,7 +59,7 @@ PRED_AUTO_CLEAR = "auto_clear"
 PRED_REVIEW = "review"
 PRED_FIX = "fix"
 
-_SEVERITY_RANK = {"none": 0, "low": 1, "medium": 2, "high": 3}
+_SEVERITY_RANK = {"none": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 
 # ── Breakability grades (decisive verdict terminology) ────────────────────────
 GRADE_SAFE = "SAFE"
@@ -232,7 +232,7 @@ def _apply_cve_floor(pr: Mapping[str, Any], result: dict) -> dict:
     """Raise priority/severity when the PR addresses high-CVSS vulnerabilities.
 
     Floor only — never lowers an already-higher priority.
-      max CVSS >= 9.0 → at least P0 / severity high
+      max CVSS >= 9.0 → at least P0 / severity critical
       max CVSS >= 7.0 → at least P1 / severity high
     """
     # Guard: if the CVE floor was already applied (e.g., verdict_v2 persisted
@@ -253,8 +253,9 @@ def _apply_cve_floor(pr: Mapping[str, Any], result: dict) -> dict:
     if floor_rank < cur_rank:
         result["priority"] = floor_prio
         result["cve_floor_applied"] = True
-    if _SEVERITY_RANK.get(result.get("severity", "medium"), 1) < _SEVERITY_RANK["high"]:
-        result["severity"] = "high"
+    floor_sev = "critical" if cvss >= 9.0 else "high"
+    if _SEVERITY_RANK.get(result.get("severity", "medium"), 1) < _SEVERITY_RANK[floor_sev]:
+        result["severity"] = floor_sev
         result["cve_floor_applied"] = True
     if result.get("cve_floor_applied"):
         cve_count = len(pr.get("cve_details") or [])
@@ -531,9 +532,9 @@ def _raw_authoritative_verdict(pr: Mapping[str, Any]) -> dict:
         mapped["breakability_grade"] = assign_breakability_grade(pr, mapped.get("verdict", BUCKET_REVIEW))
         return _probe_escalation(pr, mapped)
 
-    # Fallback: use deterministic.merge_risk.tag when no typed verdict exists
+    # Fallback: use merge_risk.tag when no typed verdict exists
     det = pr.get("deterministic") or {}
-    mr = det.get("merge_risk") or det.get("verdict") or det.get("classification")
+    mr = det.get("merge_risk") or det.get("verdict") or det.get("classification") or pr.get("merge_risk")
     if isinstance(mr, Mapping):
         tag = mr.get("tag", "")
     elif isinstance(mr, str):
@@ -555,6 +556,23 @@ def _raw_authoritative_verdict(pr: Mapping[str, Any]) -> dict:
         }
         result["breakability_grade"] = assign_breakability_grade(pr, bucket)
         return _probe_escalation(pr, result)
+
+    # Deterministic SAFE lane: build-pass + 0-import + non-major + no-CVE
+    build = pr.get("build") or {}
+    if build.get("verdict") in ("pass", "pre_existing"):
+        files_importing = pr.get("files_importing") or []
+        from_v = str(pr.get("from", "") or "")
+        to_v = str(pr.get("to", "") or "")
+        cve_details = pr.get("cve_details") or []
+        if not files_importing and not _is_major_bump(from_v, to_v) and not cve_details:
+            result = {
+                "verdict": BUCKET_SAFE, "severity": "none", "confidence": "L3",
+                "priority": "P3",
+                "reason": "build passes, no imports found, non-major bump, no CVEs",
+                "source": "deterministic_safe_lane",
+                "breakability_grade": GRADE_SAFE,
+            }
+            return _probe_escalation(pr, result)
 
     reason = "no typed verdict available; fail-closed to review"
     bg = pr.get("behavioral_grade") or {}

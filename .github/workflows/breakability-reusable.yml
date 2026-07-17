@@ -372,12 +372,24 @@ jobs:
           d = json.load(open(path))
           if 'meta' not in d or d['meta'] is None:
               d['meta'] = {}
+          import glob
+          fallback_count = 0
+          total_comments = 0
+          for cf in glob.glob('/tmp/pr-*-comment.md'):
+              total_comments += 1
+              try:
+                  with open(cf) as fh:
+                      if '<!-- ai-fallback -->' in fh.read():
+                          fallback_count += 1
+              except Exception:
+                  pass
           d['meta']['pipeline_flags'] = {
               'skip_agent_requested': '${{ inputs.skip_agent }}' == 'true',
               'ai_agent_installed': '${{ steps.agent_install.outputs.agent_available }}' == 'true',
               'ai_comments_generated': '${{ steps.ai_comments.outputs.ai_comments }}' == 'true',
-              'template_fallback_used': '${{ inputs.skip_agent }}' == 'true' or '${{ steps.ai_comments.outputs.ai_comments }}' != 'true',
-              'note': 'flags reflect THIS run only; live comments may differ if posting was partial',
+              'template_fallback_used': fallback_count > 0,
+              'template_fallback_count': fallback_count,
+              'total_comments': total_comments,
           }
           import tempfile
           fd, tmp = tempfile.mkstemp(dir='/tmp', suffix='.json', prefix='.build-results-')

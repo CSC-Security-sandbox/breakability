@@ -291,15 +291,14 @@ ${_mod_tidy_out}"
 $GO_VET_OUT"
             fi
           fi
-          # Security vulnerability check
+        fi
+        # Security vulnerability check (both go.work and single-module)
+        if [[ "$GO_AVAILABLE" == "true" ]]; then
           GO_VULN_OUT=$(go_check_vulnerabilities "$PR_WORKTREE" 2>&1) || true
-          # Extract ###VULN_STATUS=... sentinel, strip from displayed output
           VULN_STATUS=$(echo "$GO_VULN_OUT" | grep -oE '^###VULN_STATUS=[a-z_]+' | tail -1 | cut -d= -f2)
           [[ -z "$VULN_STATUS" ]] && VULN_STATUS="unknown"
           GO_VULN_OUT_DISPLAY=$(echo "$GO_VULN_OUT" | grep -v '^###VULN_STATUS=')
-          # Extract all findings in PR worktree
           _PR_VULNS=$(echo "$GO_VULN_OUT_DISPLAY" | grep -oE 'GO-[0-9]{4}-[0-9]+' | sort -u)
-          # Diff against main baseline — only NEW findings count as "introduced by this PR"
           _MAIN_VULNS=""
           [[ -f "/tmp/_bc_main_vuln_findings.txt" ]] && _MAIN_VULNS=$(cat /tmp/_bc_main_vuln_findings.txt)
           _NEW_VULNS=$(comm -23 <(echo "$_PR_VULNS" | sort -u) <(echo "$_MAIN_VULNS" | sort -u) | grep -v '^$' || true)
@@ -307,8 +306,6 @@ $GO_VET_OUT"
           _PRE_VULN_COUNT=$(echo -n "$_PR_VULNS" | grep -c . || true)
           _PRE_VULN_COUNT=$((_PRE_VULN_COUNT - _NEW_VULN_COUNT))
           [[ "$_PRE_VULN_COUNT" -lt 0 ]] && _PRE_VULN_COUNT=0
-          # Refine status: if PR had vulns_found but ALL were pre-existing on main,
-          # treat as "ok_preexisting" — the PR itself introduces no new vulns.
           if [[ "$VULN_STATUS" == "vulns_found" && "$_NEW_VULN_COUNT" -eq 0 ]]; then
             VULN_STATUS="ok_preexisting"
             echo "  [security] PR has $_PRE_VULN_COUNT pre-existing vuln(s) also present on main — no new vulns introduced"
@@ -316,15 +313,10 @@ $GO_VET_OUT"
             echo "  [security] PR introduces $_NEW_VULN_COUNT NEW vuln(s) (plus $_PRE_VULN_COUNT pre-existing on main)"
           fi
           echo "$VULN_STATUS" > "/tmp/_bc_vuln_status_${PR_NUM}.txt"
-          # Persist new findings (one per line) and pre-existing count
           echo "$_NEW_VULNS" > "/tmp/_bc_vuln_new_findings_${PR_NUM}.txt"
           echo "$_PRE_VULN_COUNT" > "/tmp/_bc_vuln_preexisting_count_${PR_NUM}.txt"
-          # Extract first NEW vuln finding for header badge (if any)
           _VULN_FINDING=$(echo "$_NEW_VULNS" | head -1)
           [[ -n "$_VULN_FINDING" ]] && echo "$_VULN_FINDING" > "/tmp/_bc_vuln_finding_${PR_NUM}.txt" || printf '' > "/tmp/_bc_vuln_finding_${PR_NUM}.txt"
-          # V9.8 iter6 (C): keep govulncheck output in its OWN variable.
-          # Do NOT append to BUILD_OUTPUT — that caused vuln text to be misclassified
-          # as compile errors (iter5c finding F4/P0-1). Emit dedicated vuln scan file.
           VULN_OUTPUT="$GO_VULN_OUT_DISPLAY"
           if [[ -n "$VULN_OUTPUT" ]]; then
             printf '%s' "$VULN_OUTPUT" > "/tmp/_bc_vuln_output_${PR_NUM}.txt"
