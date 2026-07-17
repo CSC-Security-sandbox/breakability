@@ -1,176 +1,416 @@
 {
-  "_comment": "Ground-truth labels VERIFIED against build-results.json + repo source grep (not copied from tool output). This is the fitness oracle. expected_label drives breakability_eval.py. The two critical false-green guards are pr 11 and pr 38 (tool said High, truth is SAFE); the critical true-positive is pr 18 (real build break).",
-  "ecosystem": "go",
+  "_comment": "Ground truth corpus for ndm-fresh-breakability (41 PRs). Generated 2026-07-17.",
+  "ecosystem": "multi",
   "cases": [
     {
-      "pr_id": "4",
+      "pr_id": "9",
       "ecosystem": "actions",
       "package": "actions/download-artifact",
       "from_version": "4",
       "to_version": "8",
       "expected_label": "true_review",
       "expected_evidence_class": "build_pass",
-      "notes": "verdict_v2=REVIEW, source=actions_major_bump"
+      "notes": "verdict_v2=None, build=pass, risk=Unknown"
     },
     {
-      "pr_id": "7",
-      "ecosystem": "gomod",
-      "package": "go.opentelemetry.io/otel/sdk",
-      "from_version": "1.39.0",
-      "to_version": "1.43.0",
-      "expected_label": "true_fix",
-      "expected_evidence_class": "build_fail",
-      "notes": "verdict_v2=REVIEW, source=fail_closed+cve_floor"
-    },
-    {
-      "pr_id": "8",
-      "ecosystem": "gomod",
-      "package": "go.opentelemetry.io/otel",
-      "from_version": "1.40.0",
-      "to_version": "1.41.0",
-      "expected_label": "true_fix",
-      "expected_evidence_class": "build_fail",
-      "notes": "verdict_v2=REVIEW, source=fail_closed+cve_floor"
-    },
-    {
-      "pr_id": "9",
-      "ecosystem": "gomod",
-      "package": "github.com/jackc/pgx/v5",
-      "from_version": "5.7.4",
-      "to_version": "5.9.2",
-      "expected_label": "true_fix",
-      "expected_evidence_class": "build_fail",
-      "notes": "verdict_v2=REVIEW, source=fail_closed+cve_floor"
-    },
-    {
-      "pr_id": "10",
-      "ecosystem": "gomod",
-      "package": "github.com/go-chi/chi/v5",
-      "from_version": "5.2.1",
-      "to_version": "5.2.2",
-      "expected_label": "true_fix",
-      "expected_evidence_class": "build_pass",
-      "notes": "verdict_v2=REVIEW, source=fail_closed"
-    },
-    {
-      "pr_id": "11",
-      "ecosystem": "gomod",
-      "package": "github.com/go-jose/go-jose/v4",
-      "from_version": "4.1.3",
-      "to_version": "4.1.4",
-      "expected_label": "true_block",
-      "expected_evidence_class": "build_fail",
-      "notes": "verdict_v2=BLOCKED, source=hard_fix_floor"
+      "pr_id": "16",
+      "ecosystem": "npm",
+      "package": "@nestjs/common",
+      "from_version": "11.1.18",
+      "to_version": "11.1.27",
+      "expected_label": "true_clear",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=Low"
     },
     {
       "pr_id": "19",
+      "ecosystem": "npm",
+      "package": "prettier",
+      "from_version": "3.8.1",
+      "to_version": "3.8.4",
+      "expected_label": "true_clear",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=Low"
+    },
+    {
+      "pr_id": "21",
+      "ecosystem": "npm",
+      "package": "amqp-connection-manager",
+      "from_version": "4.1.15",
+      "to_version": "5.0.0",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=High"
+    },
+    {
+      "pr_id": "24",
+      "ecosystem": "npm",
+      "package": "@typescript-eslint/parser",
+      "from_version": "8.59.4",
+      "to_version": "8.61.1",
+      "expected_label": "true_clear",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=Low"
+    },
+    {
+      "pr_id": "28",
+      "ecosystem": "npm",
+      "package": "sanitize-html",
+      "from_version": "2.17.4",
+      "to_version": "2.17.5",
+      "expected_label": "true_clear",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=Low"
+    },
+    {
+      "pr_id": "29",
+      "ecosystem": "npm",
+      "package": "@nestjs/swagger",
+      "from_version": "11.4.2",
+      "to_version": "11.4.4",
+      "expected_label": "true_clear",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=Low"
+    },
+    {
+      "pr_id": "33",
+      "ecosystem": "npm",
+      "package": "ts-jest",
+      "from_version": "29.4.10",
+      "to_version": "29.4.11",
+      "expected_label": "true_clear",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=Low"
+    },
+    {
+      "pr_id": "34",
+      "ecosystem": "npm",
+      "package": "axios",
+      "from_version": "1.17.0",
+      "to_version": "1.18.0",
+      "expected_label": "true_clear",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=Low"
+    },
+    {
+      "pr_id": "35",
+      "ecosystem": "npm",
+      "package": "jest",
+      "from_version": "29.7.0",
+      "to_version": "30.4.2",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=Medium"
+    },
+    {
+      "pr_id": "36",
+      "ecosystem": "npm",
+      "package": "eslint-plugin-vue",
+      "from_version": "10.9.1",
+      "to_version": "10.9.2",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=High"
+    },
+    {
+      "pr_id": "37",
+      "ecosystem": "npm",
+      "package": "@nestjs/typeorm",
+      "from_version": "11.0.1",
+      "to_version": "11.0.2",
+      "expected_label": "true_clear",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=Low"
+    },
+    {
+      "pr_id": "38",
+      "ecosystem": "npm",
+      "package": "@eslint/js",
+      "from_version": "9.39.4",
+      "to_version": "10.0.1",
+      "expected_label": "true_fix",
+      "expected_evidence_class": "build_fail",
+      "notes": "verdict_v2=None, build=fail, risk=High"
+    },
+    {
+      "pr_id": "39",
+      "ecosystem": "npm",
+      "package": "@nestjs/platform-express",
+      "from_version": "11.1.18",
+      "to_version": "11.1.27",
+      "expected_label": "true_clear",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=Low"
+    },
+    {
+      "pr_id": "40",
+      "ecosystem": "npm",
+      "package": "@types/node",
+      "from_version": "20.19.41",
+      "to_version": "25.9.3",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=Medium"
+    },
+    {
+      "pr_id": "41",
+      "ecosystem": "npm",
+      "package": "@nestjs/testing",
+      "from_version": "11.1.18",
+      "to_version": "11.1.27",
+      "expected_label": "true_clear",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=Low"
+    },
+    {
+      "pr_id": "42",
+      "ecosystem": "npm",
+      "package": "@typescript-eslint/eslint-plugin",
+      "from_version": "8.59.4",
+      "to_version": "8.61.1",
+      "expected_label": "true_fix",
+      "expected_evidence_class": "build_fail",
+      "notes": "verdict_v2=None, build=fail, risk=High"
+    },
+    {
+      "pr_id": "43",
+      "ecosystem": "npm",
+      "package": "pg",
+      "from_version": "8.19.0",
+      "to_version": "8.21.0",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=Medium"
+    },
+    {
+      "pr_id": "44",
+      "ecosystem": "npm",
+      "package": "class-validator",
+      "from_version": "0.14.4",
+      "to_version": "0.15.1",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=High"
+    },
+    {
+      "pr_id": "45",
+      "ecosystem": "npm",
+      "package": "eslint-plugin-prettier",
+      "from_version": "5.5.5",
+      "to_version": "5.5.6",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=High"
+    },
+    {
+      "pr_id": "46",
+      "ecosystem": "npm",
+      "package": "ts-loader",
+      "from_version": "9.5.4",
+      "to_version": "9.6.1",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=High"
+    },
+    {
+      "pr_id": "59",
       "ecosystem": "actions",
       "package": "actions/setup-python",
       "from_version": "5",
       "to_version": "6",
       "expected_label": "true_review",
       "expected_evidence_class": "build_pass",
-      "notes": "verdict_v2=REVIEW, source=actions_major_bump"
+      "notes": "verdict_v2=None, build=pass, risk=Medium"
     },
     {
-      "pr_id": "20",
-      "ecosystem": "actions",
-      "package": "actions/setup-node",
-      "from_version": "4",
-      "to_version": "6",
-      "expected_label": "true_review",
-      "expected_evidence_class": "build_pass",
-      "notes": "verdict_v2=REVIEW, source=actions_major_bump"
-    },
-    {
-      "pr_id": "21",
-      "ecosystem": "actions",
-      "package": "actions/upload-artifact",
-      "from_version": "4",
-      "to_version": "7",
-      "expected_label": "true_review",
-      "expected_evidence_class": "build_pass",
-      "notes": "verdict_v2=REVIEW, source=actions_major_bump"
-    },
-    {
-      "pr_id": "22",
+      "pr_id": "60",
       "ecosystem": "actions",
       "package": "actions/checkout",
       "from_version": "4",
       "to_version": "7",
       "expected_label": "true_review",
       "expected_evidence_class": "build_pass",
-      "notes": "verdict_v2=REVIEW, source=actions_major_bump"
+      "notes": "verdict_v2=None, build=pass, risk=Medium"
     },
     {
-      "pr_id": "23",
-      "ecosystem": "gomod",
-      "package": "github.com/jackc/pgx/v5",
-      "from_version": "5.7.4",
-      "to_version": "5.9.2",
-      "expected_label": "true_block",
+      "pr_id": "61",
+      "ecosystem": "actions",
+      "package": "actions/setup-go",
+      "from_version": "5",
+      "to_version": "6",
+      "expected_label": "true_review",
       "expected_evidence_class": "build_pass",
-      "notes": "verdict_v2=BLOCKED, source=hard_fix_floor"
+      "notes": "verdict_v2=None, build=pass, risk=Medium"
     },
     {
-      "pr_id": "32",
-      "ecosystem": "gomod",
-      "package": "github.com/jackc/pgx/v5",
-      "from_version": "5.7.4",
-      "to_version": "5.9.2",
-      "expected_label": "true_block",
-      "expected_evidence_class": "build_fail",
-      "notes": "verdict_v2=BLOCKED, source=hard_fix_floor"
+      "pr_id": "62",
+      "ecosystem": "actions",
+      "package": "actions/setup-node",
+      "from_version": "4",
+      "to_version": "6",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pass",
+      "notes": "verdict_v2=None, build=pass, risk=Medium"
     },
     {
-      "pr_id": "41",
-      "ecosystem": "gomod",
-      "package": "golang.org/x/net",
-      "from_version": "0.48.0",
-      "to_version": "0.55.0",
-      "expected_label": "true_block",
-      "expected_evidence_class": "build_fail",
-      "notes": "verdict_v2=BLOCKED, source=hard_fix_floor"
+      "pr_id": "66",
+      "ecosystem": "npm",
+      "package": "jwks-rsa",
+      "from_version": "3.2.2",
+      "to_version": "4.1.0",
+      "expected_label": "true_clear",
+      "expected_evidence_class": "build_pass",
+      "notes": "verdict_v2=None, build=pass, risk=Low"
     },
     {
-      "pr_id": "42",
+      "pr_id": "68",
       "ecosystem": "gomod",
-      "package": "golang.org/x/net",
-      "from_version": "0.48.0",
-      "to_version": "0.55.0",
+      "package": "github.com/onsi/ginkgo/v2",
+      "from_version": "2.23.4",
+      "to_version": "2.32.0",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pass",
+      "notes": "verdict_v2=None, build=pass, risk=High"
+    },
+    {
+      "pr_id": "69",
+      "ecosystem": "gomod",
+      "package": "github.com/onsi/gomega",
+      "from_version": "1.37.0",
+      "to_version": "1.42.1",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pass",
+      "notes": "verdict_v2=None, build=pass, risk=Medium"
+    },
+    {
+      "pr_id": "70",
+      "ecosystem": "gomod",
+      "package": "github.com/playwright-community/playwright-go",
+      "from_version": "0.5700.1",
+      "to_version": "0.6000.0",
       "expected_label": "true_fix",
+      "expected_evidence_class": "build_fail",
+      "notes": "verdict_v2=None, build=fail, risk=High"
+    },
+    {
+      "pr_id": "99",
+      "ecosystem": "npm",
+      "package": "@nestjs/core",
+      "from_version": "11.1.18",
+      "to_version": "11.1.28",
+      "expected_label": "true_clear",
       "expected_evidence_class": "build_pass",
-      "notes": "verdict_v2=REVIEW, source=fail_closed"
+      "notes": "verdict_v2=None, build=pass, risk=Low"
     },
     {
-      "pr_id": "52",
-      "ecosystem": "gomod",
-      "package": "golang.org/x/crypto",
-      "from_version": "0.46.0",
-      "to_version": "0.52.0",
-      "expected_label": "true_block",
-      "expected_evidence_class": "build_fail",
-      "notes": "verdict_v2=BLOCKED, source=hard_fix_floor"
+      "pr_id": "100",
+      "ecosystem": "npm",
+      "package": "@nestjs/common",
+      "from_version": "11.1.18",
+      "to_version": "11.1.28",
+      "expected_label": "true_clear",
+      "expected_evidence_class": "build_pass",
+      "notes": "verdict_v2=None, build=pass, risk=Low"
     },
     {
-      "pr_id": "53",
-      "ecosystem": "gomod",
-      "package": "golang.org/x/crypto",
-      "from_version": "0.46.0",
-      "to_version": "0.52.0",
-      "expected_label": "true_block",
-      "expected_evidence_class": "build_fail",
-      "notes": "verdict_v2=BLOCKED, source=hard_fix_floor"
+      "pr_id": "101",
+      "ecosystem": "npm",
+      "package": "@nestjs/platform-express",
+      "from_version": "11.1.18",
+      "to_version": "11.1.28",
+      "expected_label": "true_clear",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=Low"
     },
     {
-      "pr_id": "54",
-      "ecosystem": "gomod",
-      "package": "golang.org/x/crypto",
-      "from_version": "0.46.0",
-      "to_version": "0.52.0",
+      "pr_id": "102",
+      "ecosystem": "npm",
+      "package": "@types/node",
+      "from_version": "22.20.1",
+      "to_version": "26.1.1",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pass",
+      "notes": "verdict_v2=None, build=pass, risk=Medium"
+    },
+    {
+      "pr_id": "103",
+      "ecosystem": "npm",
+      "package": "typescript",
+      "from_version": "5.9.3",
+      "to_version": "7.0.2",
       "expected_label": "true_fix",
+      "expected_evidence_class": "build_fail",
+      "notes": "verdict_v2=None, build=pre_existing_plus_new, risk=Medium"
+    },
+    {
+      "pr_id": "104",
+      "ecosystem": "npm",
+      "package": "typescript",
+      "from_version": "5.9.3",
+      "to_version": "7.0.2",
+      "expected_label": "true_fix",
+      "expected_evidence_class": "build_fail",
+      "notes": "verdict_v2=None, build=fail, risk=Medium"
+    },
+    {
+      "pr_id": "105",
+      "ecosystem": "npm",
+      "package": "@nestjs/common",
+      "from_version": "11.1.18",
+      "to_version": "11.1.28",
+      "expected_label": "true_clear",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=Low"
+    },
+    {
+      "pr_id": "106",
+      "ecosystem": "npm",
+      "package": "@nestjs/core",
+      "from_version": "11.1.18",
+      "to_version": "11.1.28",
+      "expected_label": "true_clear",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=Low"
+    },
+    {
+      "pr_id": "107",
+      "ecosystem": "npm",
+      "package": "@types/node",
+      "from_version": "22.20.1",
+      "to_version": "26.1.1",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=None, build=pre_existing, risk=Medium"
+    },
+    {
+      "pr_id": "109",
+      "ecosystem": "gomod",
+      "package": "golang.org/x/crypto",
+      "from_version": "0.45.0",
+      "to_version": "0.54.0",
+      "expected_label": "true_review",
       "expected_evidence_class": "build_pass",
-      "notes": "verdict_v2=REVIEW, source=fail_closed+cve_floor"
+      "notes": "verdict_v2=None, build=pass, risk=Medium"
+    },
+    {
+      "pr_id": "110",
+      "ecosystem": "gomod",
+      "package": "golang.org/x/crypto",
+      "from_version": "0.51.0",
+      "to_version": "0.54.0",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pass",
+      "notes": "verdict_v2=None, build=pass, risk=Medium"
+    },
+    {
+      "pr_id": "112",
+      "ecosystem": "gomod",
+      "package": "github.com/pkg/sftp",
+      "from_version": "1.13.9",
+      "to_version": "1.13.11",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pass",
+      "notes": "verdict_v2=None, build=pass, risk=Medium"
     }
   ]
 }

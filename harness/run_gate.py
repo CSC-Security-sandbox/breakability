@@ -275,8 +275,10 @@ def invented_citation(pr, repo_root):
     importers = pr.get("files_importing") or []
     if not importers:
         return True, "claims break-reachability but files_importing is empty"
+    pkg_dir = pr.get("pkg_dir") or ""
     missing = [f for f in importers
-               if not os.path.exists(os.path.join(repo_root, f.lstrip("./")))]
+               if not os.path.exists(os.path.join(repo_root, pkg_dir, f.lstrip("./")))
+               and not os.path.exists(os.path.join(repo_root, f.lstrip("./")))]
     if missing:
         return True, f"cites importing files that do not exist: {missing}"
     return False, ""
