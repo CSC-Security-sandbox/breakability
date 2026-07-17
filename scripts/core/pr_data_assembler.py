@@ -1047,6 +1047,20 @@ def main():
     except Exception as _dbr_e:
         print("  declared-break reachability resolution skipped:", str(_dbr_e)[:120])
 
+    if not pr_data.get("declared_break_reachability") and isinstance(deterministic, dict):
+        usages = deterministic.get("usages") or []
+        prod_usages = [u for u in usages if isinstance(u, dict) and u.get("context") == "production"]
+        if prod_usages:
+            pr_data["declared_break_reachability"] = {
+                "checked": True,
+                "affected_paths": list({u.get("symbol", "") for u in prod_usages if u.get("symbol")}),
+                "prod_reachable": True,
+                "test_only": False,
+                "reachability_kind": "import",
+                "behavior_confirmed": False,
+                "evidence": [{"path": u.get("symbol", ""), "file": u.get("file", ""), "line": str(u.get("line", "")), "is_test": False} for u in prod_usages[:12]],
+            }
+
     # -- Structured per-signal evidence ------------------------------------
     def _tail_text(value, limit=4000):
         value = value or ""
