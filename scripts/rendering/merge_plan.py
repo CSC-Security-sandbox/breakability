@@ -29,7 +29,7 @@ meta = data.get("metadata", {})
 cross = data.get("cross_pr_deps", [])
 security = data.get("security_posture", {})
 
-stamp_build_misattribution(prs)
+stamp_build_misattribution(prs, main_build=data.get("main_build") or {})
 
 _results_v2 = {}
 for _r in data.get("results", []):

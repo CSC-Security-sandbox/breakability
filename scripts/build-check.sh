@@ -286,6 +286,14 @@ for i in $(seq 0 $(( PR_COUNT - 1 )) ); do
         _pkg_mod_exit_file="/tmp/_bc_main_go_mod_exit_${_pkg_mod_key}.txt"
         if [[ -f "$_pkg_mod_exit_file" ]]; then
           MAIN_EXIT_FOR_ECO=$(cat "$_pkg_mod_exit_file" 2>/dev/null || echo "$main_go_exit")
+          # If per-module baseline passes (0) but shared main build failed,
+          # use the shared result so build.main_exit correctly reflects the
+          # overall main build state.  stamp_build_misattribution relies on
+          # main_exit != 0 to detect pre-existing failures that are visible
+          # in the shared build but hidden by per-module baselines.
+          if [[ "$MAIN_EXIT_FOR_ECO" -eq 0 && "$main_go_exit" -ne 0 ]]; then
+            MAIN_EXIT_FOR_ECO=$main_go_exit
+          fi
         else
           MAIN_EXIT_FOR_ECO=$main_go_exit
         fi
