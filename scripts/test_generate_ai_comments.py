@@ -15,6 +15,7 @@ from generate_ai_comments import (
     _ensure_marker,
     _extract_pr_data,
     _enforce_verdict_floor,
+    _enforce_merge_risk_tag,
     _normalize_verdict_text,
     _inject_verdict_logic,
 )
@@ -373,13 +374,20 @@ class TestFallbackVerdictDisplay(unittest.TestCase):
         self.assertIn("SAFE", comment)
         self.assertIn("✅", comment)
 
-    def test_review_verdict_without_verdict_v2(self):
+    def test_safe_verdict_without_verdict_v2_when_deterministic_safe(self):
         pr = {**SAMPLE_PR, "build": {"verdict": "pass", "pr_exit": 0},
               "test": {"ran": True, "exit": 0}}
         del pr["verdict_v2"]
         comment = _fallback_comment(pr, "42", None, None, "claude-sonnet-4.5")
+        self.assertIn("SAFE", comment)
+
+    def test_review_verdict_without_verdict_v2_when_imported(self):
+        pr = {**SAMPLE_PR, "build": {"verdict": "pass", "pr_exit": 0},
+              "test": {"ran": True, "exit": 0},
+              "files_importing": ["src/auth.ts"]}
+        del pr["verdict_v2"]
+        comment = _fallback_comment(pr, "42", None, None, "claude-sonnet-4.5")
         self.assertIn("REVIEW", comment)
-        self.assertIn("⚠️", comment)
 
 
 class TestEnforceVerdictFloor(unittest.TestCase):
@@ -426,6 +434,41 @@ class TestEnforceVerdictFloor(unittest.TestCase):
         }
         result = _enforce_verdict_floor(comment, pr, "99")
         self.assertIn("BLOCKED", result)
+
+    def test_review_corrected_to_safe_when_contract_says_safe(self):
+        """C4: PR#105 scenario — AI generates REVIEW but verdict_v2 is SAFE."""
+        comment = "<!-- breakability-check -->\n## ⚠️ REVIEW — `pkg` 1.0 → 2.0\nBody"
+        pr = {
+            "package": "pkg", "build": {"verdict": "pass"},
+            "test": {"ran": True, "exit": 0},
+            "verdict_v2": {"verdict": "SAFE", "severity": "low", "confidence": "L4", "priority": "P3"},
+        }
+        result = _enforce_verdict_floor(comment, pr, "105")
+        self.assertIn("SAFE", result)
+        self.assertNotIn("⚠️ REVIEW", result)
+
+
+class TestEnforceMergeRiskTag(unittest.TestCase):
+    """C6: _enforce_merge_risk_tag corrects comment body contradicting merge_risk.tag."""
+
+    def test_high_tag_corrects_low_in_body(self):
+        comment = "## ⚠️ REVIEW — pkg\n\nMerge Risk: Low\nSafe to merge"
+        pr = {"merge_risk": {"tag": "High"}, "verdict_v2": {"verdict": "REVIEW"}}
+        result = _enforce_merge_risk_tag(comment, pr, "36")
+        self.assertIn("Merge Risk: High", result)
+        self.assertNotIn("Merge Risk: Low", result)
+
+    def test_low_tag_not_changed(self):
+        comment = "## ✅ SAFE — pkg\n\nMerge Risk: Low\nSafe to merge"
+        pr = {"merge_risk": {"tag": "Low"}, "verdict_v2": {"verdict": "SAFE"}}
+        result = _enforce_merge_risk_tag(comment, pr, "100")
+        self.assertIn("Merge Risk: Low", result)
+
+    def test_no_merge_risk_field_passes_through(self):
+        comment = "## ✅ SAFE — pkg\n\nSome content"
+        pr = {"verdict_v2": {"verdict": "SAFE"}}
+        result = _enforce_merge_risk_tag(comment, pr, "101")
+        self.assertEqual(result, comment)
 
 
 class TestAllStubsDetection(unittest.TestCase):

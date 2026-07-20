@@ -39,7 +39,8 @@ __all__ = [
     "GRADE_SAFE", "GRADE_LOW_BREAKING", "GRADE_MEDIUM_BREAKING", "GRADE_HIGH_BREAKING",
     "_SEVERITY_RANK", "_ACTION_TO_BUCKET", "_ACTION_DEFAULT_SEVERITY", "_BUCKET_TO_PREDICTION",
     "_confidence_to_level", "_priority", "map_policy_decision", "_policy_decision",
-    "_is_preexisting_test_failure", "_hard_fix_floor", "_valid_v2", "_probe_escalation",
+    "_is_preexisting_test_failure", "_hard_fix_floor", "_valid_v2", "_probe_escalation", "_is_currently_vulnerable",
+    "_max_cvss", "_apply_cve_floor",
     "_has_declared_breaking", "_tests_ran_successfully", "_breaking_changelog_reachable_floor",
     "_is_major_bump", "assign_breakability_grade", "authoritative_verdict",
     "prediction_for_pr", "StageNoOpError", "assert_stage_did_work", "stage_report",
@@ -188,6 +189,10 @@ def _hard_fix_floor(pr: Mapping[str, Any]) -> bool:
             if bg.get("same_behavior") is True and isinstance(fi, list) and len(fi) == 0:
                 return False
         return True
+    if build_verdict == "pre_existing":
+        new_failures = (pr.get("test") or {}).get("new_failures")
+        if not new_failures:
+            return False
     test = pr.get("test") or {}
     test_ran = test.get("ran", False)
     test_exit = test.get("exit")
@@ -215,17 +220,67 @@ def _valid_v2(pr: Mapping[str, Any]) -> Optional[dict]:
 
 
 def _max_cvss(pr: Mapping[str, Any]) -> float:
-    """Return the highest CVSS score from the PR's cve_details list, or 0.0."""
+    """Return the highest CVSS score from the PR's cve_details list, or 0.0.
+
+    Falls back to deterministic.security when cve_details is empty (e.g. when
+    Dependabot alerts API was unavailable but the CLI's advisory lookup ran).
+    """
     cve_details = pr.get("cve_details")
-    if not isinstance(cve_details, list) or not cve_details:
-        return 0.0
     best = 0.0
-    for entry in cve_details:
-        if isinstance(entry, Mapping):
-            score = entry.get("cvss_score")
+    if isinstance(cve_details, list):
+        for entry in cve_details:
+            if isinstance(entry, Mapping):
+                score = entry.get("cvss_score")
+                if isinstance(score, (int, float)) and score > best:
+                    best = float(score)
+    if best == 0.0:
+        det_sec = (pr.get("deterministic") or {}).get("security")
+        if isinstance(det_sec, Mapping) and det_sec.get("isSecurity"):
+            score = det_sec.get("cvssScore") or det_sec.get("cvss_score") or 0
             if isinstance(score, (int, float)) and score > best:
                 best = float(score)
     return best
+
+
+def _is_currently_vulnerable(pr: Mapping[str, Any]) -> bool:
+    """Check if the FROM version falls within the vulnerable range.
+
+    When we can't determine applicability, returns True (safe default — assume
+    vulnerable so the CVE floor fires conservatively).
+    """
+    det_sec = (pr.get("deterministic") or {}).get("security")
+    if not isinstance(det_sec, Mapping):
+        return False
+    vuln_range = det_sec.get("vulnerableVersionRange") or ""
+    from_ver = pr.get("from", "")
+    if not vuln_range or not from_ver:
+        return True
+    try:
+        from packaging.version import Version
+        v = Version(from_ver)
+        parts = [p.strip() for p in vuln_range.split(",")]
+        for part in parts:
+            if part.startswith("<= "):
+                if not (v <= Version(part[3:].strip())):
+                    return False
+            elif part.startswith("< "):
+                if not (v < Version(part[2:].strip())):
+                    return False
+            elif part.startswith(">= "):
+                if not (v >= Version(part[3:].strip())):
+                    return False
+            elif part.startswith("> "):
+                if not (v > Version(part[2:].strip())):
+                    return False
+            elif part.startswith("= "):
+                if not (v == Version(part[2:].strip())):
+                    return False
+            else:
+                return True
+        return True
+    except Exception:
+        pass
+    return True
 
 
 def _apply_cve_floor(pr: Mapping[str, Any], result: dict) -> dict:
@@ -242,6 +297,8 @@ def _apply_cve_floor(pr: Mapping[str, Any], result: dict) -> dict:
         return result
     cvss = _max_cvss(pr)
     if cvss < 7.0:
+        return result
+    if not pr.get("cve_details") and not _is_currently_vulnerable(pr):
         return result
     result = dict(result)
     _PRIO_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
@@ -776,6 +833,26 @@ if __name__ == "__main__":
             propagated += 1
     if propagated:
         print(f"ℹ️  Propagated verdict_v2 to {propagated} prs{{}} entries", file=sys.stderr)
+
+    # Fix merge_risk when symbol verification overrides (C3: PR#44 overclaim)
+    mr_fixed = 0
+    for pr_key, pr_data in prs.items():
+        mr = pr_data.get("merge_risk") or {}
+        if mr.get("tag") != "High" or "signature" not in (mr.get("reason") or "").lower():
+            continue
+        det = pr_data.get("deterministic") or {}
+        verification = det.get("verification") or {}
+        if verification.get("compatible") is not True:
+            continue
+        sr = verification.get("symbol_results") or verification.get("symbolResults") or {}
+        if sr and all(v == "COMPATIBLE" for v in sr.values()):
+            mr = dict(mr)
+            mr["tag"] = "Low"
+            mr["reason"] = "API diff detected but symbol verification confirms COMPATIBLE"
+            pr_data["merge_risk"] = mr
+            mr_fixed += 1
+    if mr_fixed:
+        print(f"ℹ️  Fixed {mr_fixed} merge_risk tag(s) via symbol verification override", file=sys.stderr)
 
     # Write back or print
     if write_back:

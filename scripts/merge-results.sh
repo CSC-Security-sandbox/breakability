@@ -325,14 +325,17 @@ duplicate_pkg_groups = {}
 for num, pr in prs.items():
     key = (pr.get("ecosystem", ""), pr.get("package", ""), pr.get("to", ""))
     if key[1] and key[2]:
-        duplicate_pkg_groups.setdefault(key, []).append(num)
-for (eco, pkg, to_ver), nums in duplicate_pkg_groups.items():
-    if len(nums) > 1:
-        for i, na in enumerate(nums):
-            for nb in nums[i+1:]:
+        duplicate_pkg_groups.setdefault(key, []).append((num, pr.get("pkg_dir", "/")))
+for (eco, pkg, to_ver), entries in duplicate_pkg_groups.items():
+    if len(entries) > 1:
+        for i, (na, dir_a) in enumerate(entries):
+            for (nb, dir_b) in entries[i+1:]:
                 if not any((d["pr_a"]==int(na) and d["pr_b"]==int(nb)) or (d["pr_a"]==int(nb) and d["pr_b"]==int(na)) for d in cross_deps):
-                    cross_deps.append({"pr_a": int(na), "pr_b": int(nb), "reason": f"Duplicate {eco} upgrade: {pkg} -> {to_ver} appears in multiple PRs", "merge_order": "merge only one; close/rebase duplicate"})
-        print(f"  Duplicate package group: {pkg} -> {to_ver} (PRs: {', '.join('#'+str(n) for n in nums)})")
+                    if dir_a != dir_b:
+                        cross_deps.append({"pr_a": int(na), "pr_b": int(nb), "reason": f"Same {eco} upgrade ({pkg} -> {to_ver}) in different modules: {dir_a} + {dir_b}", "merge_order": "merge both — different modules"})
+                    else:
+                        cross_deps.append({"pr_a": int(na), "pr_b": int(nb), "reason": f"Duplicate {eco} upgrade: {pkg} -> {to_ver} appears in multiple PRs", "merge_order": "merge only one; close/rebase duplicate"})
+        print(f"  Package group: {pkg} -> {to_ver} (PRs: {', '.join('#'+str(n) for n,_ in entries)})")
 # K8s module coordination: k8s.io modules must be upgraded together
 K8S_MODULES = {"k8s.io/api", "k8s.io/apimachinery", "k8s.io/client-go", "k8s.io/apiserver", "k8s.io/apiextensions-apiserver"}
 k8s_prs = [(num, pr["package"]) for num, pr in prs.items() if any(pr.get("package", "").startswith(m) for m in K8S_MODULES)]
@@ -569,6 +572,15 @@ def compute_merge_risk(pr):
         det_mr = det.get("merge_risk") or {}
     existing = pr.get("merge_risk") or det_mr or {}
     if existing.get("tag"):
+        verification = (det or {}).get("verification") or {}
+        if (verification.get("compatible") is True
+            and existing.get("tag") == "High"
+            and "signature" in (existing.get("reason") or "").lower()):
+            symbol_results = verification.get("symbol_results") or verification.get("symbolResults") or {}
+            if symbol_results and all(v == "COMPATIBLE" for v in symbol_results.values()):
+                existing = dict(existing)
+                existing["tag"] = "Low"
+                existing["reason"] = "API diff detected but symbol verification confirms COMPATIBLE"
         return existing
 
     build = pr.get("build") or {}

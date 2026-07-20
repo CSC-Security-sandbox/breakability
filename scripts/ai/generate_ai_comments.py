@@ -18,7 +18,7 @@ Usage:
 __all__ = [
     "_read_prompt", "_extract_pr_data", "_build_per_pr_prompt",
     "_reject_false_cve_claim", "_reject_cve_direction_error", "_reject_fabricated_probe",
-    "_enforce_verdict_floor", "_normalize_verdict_text", "_inject_verdict_logic",
+    "_enforce_verdict_floor", "_enforce_merge_risk_tag", "_normalize_verdict_text", "_inject_verdict_logic",
     "_ensure_marker", "_signal_table_ok", "_validate_comment", "_near_valid",
     "_fallback_comment", "generate_comments", "main",
 ]
@@ -252,11 +252,14 @@ def _build_per_pr_prompt(
     return "\n".join(sections)
 
 
-def _enforce_verdict_floor(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
-    """Post-processing guard: ensure AI verdict does not undercut authoritative_verdict().
+_VERDICT_MAP = {"BUILD_FAILS": "BLOCKED", "GLANCE": "SAFE"}
 
-    If the AI says SAFE but verdict_contract says REVIEW or BLOCKED, replace the
-    verdict in the H2 headline to match the contract. Logs a warning when overriding.
+
+def _enforce_verdict_floor(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
+    """Post-processing guard: ensure AI verdict matches authoritative_verdict() exactly.
+
+    Both upward and downward corrections are applied so the comment headline always
+    reflects the computed verdict (fixes C4: PR#105 SAFE rendered as REVIEW).
     """
     av = authoritative_verdict(pr)
     contract_verdict = av.get("verdict", "REVIEW")
@@ -264,12 +267,10 @@ def _enforce_verdict_floor(comment: str, pr: Dict[str, Any], pr_num: str) -> str
     if not m:
         return comment
     ai_verdict = m.group(2)
-    severity_order = {"SAFE": 0, "GLANCE": 0, "REVIEW": 1, "BLOCKED": 2, "BUILD_FAILS": 3}
-    ai_sev = severity_order.get(ai_verdict, 1)
-    contract_sev = severity_order.get(contract_verdict, 1)
-    if ai_sev < contract_sev:
+    ai_normalized = _VERDICT_MAP.get(ai_verdict, ai_verdict)
+    if ai_normalized != contract_verdict:
         print(
-            f"PR#{pr_num}: verdict floor enforcement — AI said {ai_verdict}, "
+            f"PR#{pr_num}: verdict match enforcement — AI said {ai_verdict}, "
             f"contract says {contract_verdict} (source={av.get('source', '?')}). Overriding.",
             file=sys.stderr,
         )
@@ -426,6 +427,28 @@ def _reject_fabricated_probe(comment: str, pr: Dict[str, Any], pr_num: str) -> s
             f'Reason: {bg.get("rationale", "unavailable")}. Confidence: LOW.\n',
             comment, count=1, flags=re.DOTALL | re.IGNORECASE,
         )
+    return comment
+
+
+def _enforce_merge_risk_tag(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
+    """Post-gen guard: ensure comment body doesn't contradict merge_risk.tag."""
+    mr = pr.get("merge_risk") or (pr.get("deterministic") or {}).get("merge_risk") or {}
+    tag = mr.get("tag", "")
+    if not tag:
+        return comment
+    tag_upper = tag.upper()
+    if tag_upper == "HIGH":
+        changed = False
+        if re.search(r'(?i)merge\s*risk[:\s]+low', comment):
+            comment = re.sub(r'(?i)(merge\s*risk[:\s]+)low', r'\g<1>High', comment)
+            changed = True
+        contract_verdict = (authoritative_verdict(pr).get("verdict") or "")
+        if contract_verdict in ("REVIEW", "BLOCKED"):
+            if re.search(r'(?i)AI\s+Arbiter[:\s]+SAFE', comment):
+                comment = re.sub(r'(?i)(AI\s+Arbiter[:\s]+)SAFE', r'\g<1>' + contract_verdict, comment)
+                changed = True
+        if changed:
+            print(f"PR#{pr_num}: merge_risk tag enforcement — corrected Low→High in comment body", file=sys.stderr)
     return comment
 
 
@@ -887,6 +910,7 @@ def generate_comments(
         if comment:
             comment = _enforce_verdict_floor(comment, pr_data, pr_num)
             comment = _normalize_verdict_text(comment, pr_num)
+            comment = _enforce_merge_risk_tag(comment, pr_data, pr_num)
             comment = _inject_verdict_logic(comment, pr_data, pr_num)
             comments[pr_num] = comment
         else:

@@ -469,6 +469,98 @@ class TestHardFixFloorTransitiveDepException(unittest.TestCase):
         self.assertTrue(_hard_fix_floor(pr))
 
 
+class TestHardFixFloorPreExistingBuildGuard(unittest.TestCase):
+    """C1: hard_fix_floor must skip pre_existing builds with no new test failures."""
+
+    def test_pre_existing_no_new_failures_returns_false(self):
+        from verdict_contract import _hard_fix_floor
+        pr = {"build": {"verdict": "pre_existing", "exit": 2},
+              "test": {"ran": True, "exit": 1, "new_failures": []}}
+        self.assertFalse(_hard_fix_floor(pr))
+
+    def test_pre_existing_null_new_failures_returns_false(self):
+        from verdict_contract import _hard_fix_floor
+        pr = {"build": {"verdict": "pre_existing", "exit": 2},
+              "test": {"ran": True, "exit": 1}}
+        self.assertFalse(_hard_fix_floor(pr))
+
+    def test_pre_existing_with_new_failures_returns_true(self):
+        from verdict_contract import _hard_fix_floor
+        pr = {"build": {"verdict": "pre_existing", "exit": 2},
+              "test": {"ran": True, "exit": 1, "new_failures": ["TestFoo"]}}
+        self.assertTrue(_hard_fix_floor(pr))
+
+    def test_genuine_fail_still_blocked(self):
+        from verdict_contract import _hard_fix_floor
+        pr = {"build": {"verdict": "fail", "exit": 1},
+              "test": {"ran": False}}
+        self.assertTrue(_hard_fix_floor(pr))
+
+    def test_pre_existing_verdict_produces_safe_or_review(self):
+        pr = {"build": {"verdict": "pre_existing", "exit": 2},
+              "test": {"ran": True, "exit": 1, "new_failures": []},
+              "deterministic": {"merge_risk": {"tag": "Low", "reason": "no imports"}}}
+        v = authoritative_verdict(pr)
+        self.assertNotEqual(v["verdict"], BUCKET_BLOCKED)
+        self.assertNotEqual(v.get("source"), "hard_fix_floor")
+
+    def test_positive_control_pr68_stays_blocked(self):
+        pr = {"build": {"verdict": "pre_existing", "exit": 2},
+              "test": {"ran": True, "exit": 1,
+                       "new_failures": ["TestObservability"],
+                       "output_tail": "FAIL: TestObservability"}}
+        v = authoritative_verdict(pr)
+        self.assertEqual(v["verdict"], BUCKET_BLOCKED)
+
+
+class TestCVEWiringFromDeterministicSecurity(unittest.TestCase):
+    """C2: _max_cvss must fall back to deterministic.security; CVE floor must
+    gate on version applicability to avoid false-P0s on stale advisories."""
+
+    def test_max_cvss_from_deterministic_security(self):
+        from verdict_contract import _max_cvss
+        pr = {"cve_details": [], "deterministic": {"security": {"isSecurity": True, "cvssScore": 9.1}}}
+        self.assertEqual(_max_cvss(pr), 9.1)
+
+    def test_max_cvss_prefers_cve_details(self):
+        from verdict_contract import _max_cvss
+        pr = {"cve_details": [{"cvss_score": 8.0}],
+              "deterministic": {"security": {"isSecurity": True, "cvssScore": 9.1}}}
+        self.assertEqual(_max_cvss(pr), 8.0)
+
+    def test_max_cvss_ignores_non_security(self):
+        from verdict_contract import _max_cvss
+        pr = {"cve_details": [], "deterministic": {"security": {"isSecurity": False, "cvssScore": 9.1}}}
+        self.assertEqual(_max_cvss(pr), 0.0)
+
+    def test_cve_floor_skips_non_vulnerable_version(self):
+        pr = {"cve_details": [], "from": "3.0.0",
+              "deterministic": {"security": {"isSecurity": True, "cvssScore": 9.8,
+                                              "vulnerableVersionRange": "< 2.11.2"}}}
+        v = authoritative_verdict(pr)
+        self.assertNotIn("cve_floor", v.get("source", ""))
+
+    def test_cve_floor_fires_on_vulnerable_version(self):
+        pr = {"cve_details": [], "from": "0.0.62",
+              "deterministic": {"security": {"isSecurity": True, "cvssScore": 10.0,
+                                              "vulnerableVersionRange": "< 0.0.66"}}}
+        v = authoritative_verdict(pr)
+        self.assertIn("cve_floor", v.get("source", ""))
+        self.assertEqual(v.get("priority"), "P0")
+
+    def test_is_currently_vulnerable_true(self):
+        from verdict_contract import _is_currently_vulnerable
+        pr = {"from": "0.0.62", "deterministic": {"security": {
+            "vulnerableVersionRange": "< 0.0.66"}}}
+        self.assertTrue(_is_currently_vulnerable(pr))
+
+    def test_is_currently_vulnerable_false(self):
+        from verdict_contract import _is_currently_vulnerable
+        pr = {"from": "3.0.0", "deterministic": {"security": {
+            "vulnerableVersionRange": "< 2.11.2"}}}
+        self.assertFalse(_is_currently_vulnerable(pr))
+
+
 class TestStaleVerdictV2Clearing(unittest.TestCase):
     """The workflow calls verdict_contract.py --write twice (pre-probe and post-probe).
     A stale verdict_v2 from the first pass must not override the corrected second pass."""
