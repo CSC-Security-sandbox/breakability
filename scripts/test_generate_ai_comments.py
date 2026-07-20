@@ -944,5 +944,173 @@ class TestPipelineProvenanceFooter(unittest.TestCase):
         self.assertNotIn("claude-sonnet-5 (fallback)", comment)
 
 
+class TestApiDiffFabricationNone(unittest.TestCase):
+    """C1: When api_diff_tool is None, render Unavailable instead of No changes."""
+
+    def test_api_diff_tool_none_shows_unavailable(self):
+        pr = {**SAMPLE_PR, "deterministic": {"api_diff_tool": None, "api_changes": 0}}
+        comment = _fallback_comment(pr, "16", None, None, "test-model")
+        self.assertIn("Unavailable", comment)
+        self.assertNotIn("No changes", comment)
+
+    def test_api_diff_tool_semantic_with_zero_changes_shows_no_changes(self):
+        pr = {**SAMPLE_PR, "deterministic": {
+            "api_diff_tool": {"status": "semantic"}, "api_changes": 0
+        }}
+        comment = _fallback_comment(pr, "43", None, None, "test-model")
+        self.assertIn("No changes", comment)
+        self.assertNotIn("Unavailable", comment.split("API Diff")[1].split("\n")[0])
+
+    def test_api_diff_tool_unavailable_status_shows_unavailable(self):
+        pr = {**SAMPLE_PR, "deterministic": {
+            "api_diff_tool": {"status": "unavailable"}, "api_changes": None
+        }}
+        comment = _fallback_comment(pr, "37", None, None, "test-model")
+        self.assertIn("Unavailable", comment)
+
+
+class TestBlockedVerdictEvidence(unittest.TestCase):
+    """C2: BLOCKED verdicts must cite actual error text."""
+
+    def test_blocked_with_new_errors_shows_build_errors(self):
+        pr = {
+            **SAMPLE_PR,
+            "build": {"verdict": "fail", "pr_exit": 1, "new_errors": ["error TS2882: Cannot find module"]},
+            "test": {"ran": False},
+            "verdict_v2": {"verdict": "BLOCKED"},
+        }
+        comment = _fallback_comment(pr, "103", None, None, "test-model")
+        self.assertIn("Build Errors", comment)
+        self.assertIn("TS2882", comment)
+
+    def test_blocked_with_new_failures_shows_test_failures(self):
+        pr = {
+            **SAMPLE_PR,
+            "build": {"verdict": "fail", "pr_exit": 1},
+            "test": {"ran": True, "exit": 1, "new_failures": ["TestObservability"]},
+            "verdict_v2": {"verdict": "BLOCKED"},
+        }
+        comment = _fallback_comment(pr, "68", None, None, "test-model")
+        self.assertIn("Test Failures", comment)
+        self.assertIn("TestObservability", comment)
+
+    def test_blocked_with_output_tail_shows_excerpt(self):
+        pr = {
+            **SAMPLE_PR,
+            "build": {"verdict": "fail", "pr_exit": 1, "new_errors": [],
+                       "output_tail": "npm error ERESOLVE could not resolve"},
+            "test": {"ran": False},
+            "verdict_v2": {"verdict": "BLOCKED"},
+        }
+        comment = _fallback_comment(pr, "38", None, None, "test-model")
+        self.assertIn("ERESOLVE", comment)
+
+
+class TestConfidenceNotHardcoded(unittest.TestCase):
+    """C3: Confidence column must reflect actual data, not hardcoded MEDIUM."""
+
+    def test_probe_confidence_high_shown(self):
+        pr = {**SAMPLE_PR, "behavioral_grade": {"same_behavior": True, "confidence": "high"}}
+        comment = _fallback_comment(pr, "16", None, None, "test-model")
+        probe_row = [l for l in comment.splitlines() if "Behavioral Probe" in l][0]
+        self.assertIn("HIGH", probe_row)
+        self.assertNotIn("MEDIUM", probe_row)
+
+    def test_probe_unavailable_shows_dash(self):
+        pr = {**SAMPLE_PR, "behavioral_grade": {"rationale": "go executable not found"}}
+        comment = _fallback_comment(pr, "68", None, None, "test-model")
+        probe_row = [l for l in comment.splitlines() if "Behavioral Probe" in l][0]
+        self.assertIn("—", probe_row)
+
+    def test_changelog_missing_shows_dash(self):
+        pr = {**SAMPLE_PR, "deterministic": {"changelogSignal": {"status": "missing"}}}
+        comment = _fallback_comment(pr, "16", None, None, "test-model")
+        cl_row = [l for l in comment.splitlines() if "Changelog" in l and "|" in l][0]
+        self.assertIn("—", cl_row)
+
+    def test_api_diff_unavailable_shows_dash(self):
+        pr = {**SAMPLE_PR, "deterministic": {"api_diff_tool": None, "api_changes": 0}}
+        comment = _fallback_comment(pr, "16", None, None, "test-model")
+        api_row = [l for l in comment.splitlines() if "API Diff" in l][0]
+        self.assertIn("—", api_row)
+
+
+class TestSafePreExistingExplanation(unittest.TestCase):
+    """C4: SAFE + pre_existing build must have bridging explanation."""
+
+    def test_safe_with_pre_existing_has_explanation(self):
+        pr = {
+            **SAMPLE_PR,
+            "build": {"verdict": "pre_existing", "pr_exit": 2},
+            "verdict_v2": {"verdict": "SAFE"},
+        }
+        comment = _fallback_comment(pr, "16", None, None, "test-model")
+        self.assertIn("pre-existing", comment)
+        self.assertIn("not caused by this upgrade", comment)
+
+    def test_safe_without_pre_existing_no_explanation(self):
+        comment = _fallback_comment(SAMPLE_PR, "42", None, None, "test-model")
+        self.assertNotIn("not caused by this upgrade", comment)
+
+
+class TestMergeRiskRendering(unittest.TestCase):
+    """C5: merge_risk.tag and reason must be visible in comment."""
+
+    def test_merge_risk_medium_rendered(self):
+        pr = {
+            **SAMPLE_PR,
+            "merge_risk": {"tag": "Medium", "reason": "major version bump"},
+        }
+        comment = _fallback_comment(pr, "9", None, None, "test-model")
+        self.assertIn("Merge Risk", comment)
+        self.assertIn("Medium", comment)
+        self.assertIn("major version bump", comment)
+
+    def test_no_merge_risk_no_section(self):
+        comment = _fallback_comment(SAMPLE_PR, "42", None, None, "test-model")
+        self.assertNotIn("Merge Risk", comment)
+
+
+class TestCrossPrDepsRendering(unittest.TestCase):
+    """C6: cross_pr_deps must appear in per-PR comments."""
+
+    def test_cross_pr_deps_rendered(self):
+        pr = {**SAMPLE_PR}
+        deps = [
+            {"pr_a": 24, "pr_b": 42, "reason": "plugin/parser pair must stay in lockstep",
+             "merge_order": "merge together"},
+        ]
+        comment = _fallback_comment(pr, "42", None, None, "test-model", cross_pr_deps=deps)
+        self.assertIn("Coordinated Upgrades", comment)
+        self.assertIn("PR #24", comment)
+        self.assertIn("lockstep", comment)
+        self.assertIn("merge together", comment)
+
+    def test_no_cross_pr_deps_no_section(self):
+        comment = _fallback_comment(SAMPLE_PR, "42", None, None, "test-model", cross_pr_deps=[])
+        self.assertNotIn("Coordinated Upgrades", comment)
+
+    def test_unrelated_deps_not_shown(self):
+        deps = [
+            {"pr_a": 100, "pr_b": 200, "reason": "unrelated pair"},
+        ]
+        comment = _fallback_comment(SAMPLE_PR, "42", None, None, "test-model", cross_pr_deps=deps)
+        self.assertNotIn("Coordinated Upgrades", comment)
+
+
+class TestFooterDateFromMetadata(unittest.TestCase):
+    """C7: Footer date must use metadata.timestamp, not today's date."""
+
+    def test_footer_uses_metadata_timestamp(self):
+        meta = {"timestamp": "2026-07-17T05:06:14Z"}
+        comment = _fallback_comment(SAMPLE_PR, "42", None, None, "test-model", metadata=meta)
+        self.assertIn("2026-07-17", comment)
+        self.assertNotIn("T05:06:14Z", comment)
+
+    def test_footer_falls_back_to_today_without_metadata(self):
+        comment = _fallback_comment(SAMPLE_PR, "42", None, None, "test-model")
+        self.assertIn("Analyzed:", comment)
+
+
 if __name__ == "__main__":
     unittest.main()

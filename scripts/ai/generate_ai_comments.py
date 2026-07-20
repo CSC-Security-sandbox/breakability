@@ -615,7 +615,8 @@ def _near_valid(diagnostics: dict) -> bool:
 
 
 def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
-                      merge_plan_issue: Optional[str], model_name: str) -> str:
+                      merge_plan_issue: Optional[str], model_name: str,
+                      cross_pr_deps: list = None, metadata: Dict[str, Any] = None) -> str:
     """Generate an enriched fallback comment with available signal data."""
     pkg = pr.get("package", "unknown")
     from_ver = pr.get("from", "?")
@@ -676,10 +677,13 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
     }
     cl_short = _CL_STATUS_MAP.get(cl_status, "⏭️ Unknown" if changelog_signal is None else "⏭️ Unknown")
 
-    api_diff_tool = det.get("api_diff_tool") or {}
-    api_diff_status = api_diff_tool.get("status", "")
+    api_diff_tool = det.get("api_diff_tool")
     api_changes = det.get("api_changes")
-    if api_diff_status == "unavailable" or (api_changes is None and not api_diff_status):
+    if api_diff_tool is None:
+        a_status = "⏭️ Unavailable"
+    elif isinstance(api_diff_tool, dict) and api_diff_tool.get("status") == "unavailable":
+        a_status = "⏭️ Unavailable"
+    elif api_changes is None and not (isinstance(api_diff_tool, dict) and api_diff_tool.get("status")):
         a_status = "⏭️ Unavailable"
     elif api_changes:
         a_status = f"⚠️ {api_changes} changes"
@@ -694,18 +698,26 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
         "",
         "> **Note:** AI comment generation failed. This is an automated fallback with available signal data.",
         "",
+    ]
+    if verdict == "SAFE" and build_verdict == "pre_existing":
+        lines.extend([
+            "> **ℹ️ Build/test issues shown below are pre-existing** (identical on the main branch) "
+            "and are not caused by this upgrade.",
+            "",
+        ])
+    lines.extend([
         "### Signal Summary",
         "",
         "| Layer | Result | Confidence | Evidence |",
         "|-------|--------|------------|----------|",
         f"| Build | {b_emoji} {build_verdict.upper()} | HIGH | Exit: {build.get('pr_exit', 'N/A')} |",
         f"| Tests | {t_status} | {'HIGH' if test_exit == 0 else 'MEDIUM'} | {'Exit: ' + str(test_exit) if test_exit is not None else 'N/A'} |",
-        f"| Behavioral Probe | {p_status} | MEDIUM | — |",
+        f"| Behavioral Probe | {p_status} | {bg.get('confidence', '—').upper() if probe_same is not None else '—'} | — |",
         f"| Reachability | {r_status} | {'HIGH' if reach_count > 0 else 'LOW'} | {'Direct import' if reach_count > 0 else 'Not reached'} |",
-        f"| Changelog | {cl_short} | MEDIUM | — |",
-        f"| API Diff | {a_status} | MEDIUM | — |",
+        f"| Changelog | {cl_short} | {'—' if cl_status in ('missing', '') or changelog_signal is None else 'MEDIUM'} | — |",
+        f"| API Diff | {a_status} | {'—' if a_status.startswith('⏭️') else 'MEDIUM'} | — |",
         "",
-    ]
+    ])
 
     if cl_status == "breaking" and isinstance(changelog_signal, dict):
         bullets = changelog_signal.get("bullets") or changelog_signal.get("breaking_items") or []
@@ -727,6 +739,61 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
         f"- **Reason:** {av.get('reason', 'N/A')}",
         "",
     ])
+
+    if verdict == "BLOCKED":
+        new_errors = build.get("new_errors") or []
+        if new_errors:
+            lines.append("### Build Errors")
+            lines.append("")
+            lines.append("```")
+            for err in new_errors[:5]:
+                lines.append(str(err)[:200])
+            lines.append("```")
+            lines.append("")
+        elif new_failures:
+            lines.append("### Test Failures")
+            lines.append("")
+            for tf in new_failures[:10]:
+                lines.append(f"- `{tf}`")
+            lines.append("")
+        else:
+            output_tail = build.get("output_tail") or ""
+            if output_tail.strip():
+                excerpt = output_tail.strip()[:300]
+                lines.append("### Build Output (excerpt)")
+                lines.append("")
+                lines.append("```")
+                lines.append(excerpt)
+                lines.append("```")
+                lines.append("")
+
+    mr = pr.get("merge_risk") or (pr.get("deterministic") or {}).get("merge_risk") or {}
+    mr_tag = mr.get("tag", "")
+    if mr_tag:
+        mr_emoji = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}.get(mr_tag, "⚪")
+        lines.append("### Merge Risk")
+        lines.append("")
+        lines.append(f"**{mr_emoji} {mr_tag}**")
+        mr_reason = mr.get("reason", "")
+        if mr_reason:
+            lines.append(f"- {mr_reason}")
+        lines.append("")
+
+    relevant_deps = [
+        d for d in (cross_pr_deps or [])
+        if str(d.get("pr_a")) == pr_num or str(d.get("pr_b")) == pr_num
+    ]
+    if relevant_deps:
+        lines.append("### ⚠️ Coordinated Upgrades")
+        lines.append("")
+        for dep in relevant_deps:
+            other = str(dep["pr_b"]) if str(dep.get("pr_a")) == pr_num else str(dep["pr_a"])
+            reason = dep.get("reason", "related upgrade")
+            order = dep.get("merge_order", "")
+            lines.append(f"- **PR #{other}**: {reason}")
+            if order:
+                lines.append(f"  - Merge order: {order}")
+        lines.append("")
 
     cve_details = pr.get("cve_details") or []
     det_sec_fb = (pr.get("deterministic") or {}).get("security") or {}
@@ -827,10 +894,13 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
     ])
     if plan_ref:
         lines.extend([f"📋 Merge plan: {plan_ref}", ""])
+    analyzed_date = (metadata or {}).get("timestamp", date.today().isoformat())
+    if isinstance(analyzed_date, str) and "T" in analyzed_date:
+        analyzed_date = analyzed_date.split("T")[0]
     lines.extend([
         "---",
         f"Mode: Deterministic + Behavioral Probe · Model: template-fallback (no AI analysis performed) · "
-        f"Analyzed: {date.today().isoformat()}",
+        f"Analyzed: {analyzed_date}",
     ])
     if run_url:
         lines.append(f"[Analysis run]({run_url})")
@@ -994,7 +1064,8 @@ def generate_comments(
         else:
             print(f"PR#{pr_num}: AI failed after retry, using fallback", file=sys.stderr)
             comments[pr_num] = _fallback_comment(
-                pr_data, pr_num, run_url, merge_plan_issue, model
+                pr_data, pr_num, run_url, merge_plan_issue, model,
+                cross_pr_deps=cross_deps, metadata=metadata,
             )
 
     if diagnostics_log:

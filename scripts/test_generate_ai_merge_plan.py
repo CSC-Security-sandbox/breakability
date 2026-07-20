@@ -468,5 +468,46 @@ class TestCveFixesTable(unittest.TestCase):
         self.assertIn("—", row)
 
 
+class TestPrRowCveFallback(unittest.TestCase):
+    """C8: _pr_row must fall back to deterministic.security.cveIds when cve_details is empty."""
+
+    def test_cve_fallback_from_deterministic_security(self):
+        pr = {
+            "package": "golang.org/x/crypto", "from": "0.29.0", "to": "0.36.0",
+            "bump": "minor", "dep_type": "production", "verification_label": "L2",
+            "cve_details": [],
+            "deterministic": {"security": {
+                "isSecurity": True,
+                "cveIds": ["CVE-2025-22869", "CVE-2025-22868"],
+                "cvssScore": 10.0,
+            }},
+        }
+        row = _pr_row("109", pr)
+        self.assertIn("2 CVE(s)", row)
+        self.assertIn("🔴", row)
+
+    def test_no_cve_data_shows_dash(self):
+        pr = {
+            "package": "lodash", "from": "1.0", "to": "2.0",
+            "bump": "major", "dep_type": "production", "verification_label": "SAFE",
+            "cve_details": [],
+            "deterministic": {"security": {}},
+        }
+        row = _pr_row("1", pr)
+        self.assertIn("—", row)
+
+    def test_low_cvss_uses_yellow_emoji(self):
+        pr = {
+            "package": "test-pkg", "from": "1.0", "to": "2.0",
+            "bump": "major", "dep_type": "production", "verification_label": "L2",
+            "cve_details": [],
+            "deterministic": {"security": {
+                "isSecurity": True, "cveIds": ["CVE-2025-1234"], "cvssScore": 5.0,
+            }},
+        }
+        row = _pr_row("50", pr)
+        self.assertIn("🟡", row)
+
+
 if __name__ == "__main__":
     unittest.main()

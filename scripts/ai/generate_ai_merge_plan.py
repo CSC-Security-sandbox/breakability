@@ -79,6 +79,7 @@ def _pr_row(num: str, pr: Dict) -> str:
     dep = pr.get("dep_type", "?")
     vl = pr.get("verification_label", "?")
     cve_details = pr.get("cve_details") or []
+    det_sec = (pr.get("deterministic") or {}).get("security") or {}
     if cve_details:
         badges = ", ".join(
             f"{'🔴' if d.get('severity') in ('critical', 'high') else '🟡'} {d.get('cve_id') or d.get('id', '?')}"
@@ -86,6 +87,11 @@ def _pr_row(num: str, pr: Dict) -> str:
         )
         if len(cve_details) > 3:
             badges += f" +{len(cve_details) - 3}"
+    elif det_sec.get("isSecurity") and det_sec.get("cveIds"):
+        cve_ids = det_sec["cveIds"]
+        cvss = det_sec.get("cvssScore") or det_sec.get("cvss_score") or 0
+        sev_emoji = "🔴" if isinstance(cvss, (int, float)) and cvss >= 7.0 else "🟡"
+        badges = f"{sev_emoji} {len(cve_ids)} CVE(s)"
     else:
         badges = "—"
     return f"| #{num} | `{pkg}` | {frm} → {to} | {bump} | {dep} | {vl} | {badges} |"
