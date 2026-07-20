@@ -32,7 +32,7 @@ sys.path.insert(0, _HERE)
 sys.path.insert(0, os.path.dirname(_HERE))  # parent scripts/ dir
 
 from ai_backend import Backend
-from verdict_contract import authoritative_verdict as _authoritative_verdict
+from verdict_contract import authoritative_verdict as _authoritative_verdict, _is_currently_vulnerable
 
 
 def _get_verdict(pr: Dict) -> str:
@@ -221,7 +221,25 @@ def generate_template_plan(data: Dict[str, Any], run_url: Optional[str] = None,
     sec_posture = data.get("security_posture", {})
     if sec_posture:
         lines.append("## \U0001f512 Security Posture")
-        if sec_posture.get("total_open_alerts"):
+        if sec_posture.get("alerts_unavailable"):
+            lines.append("- Open Dependabot alerts: **⚠️ Unavailable** (token missing `security_events` permission)")
+            _derived_sev: Dict[str, int] = {}
+            for _pd in prs.values():
+                _ds = (_pd.get("deterministic") or {}).get("security") or {}
+                if _ds.get("isSecurity") and _ds.get("cveIds"):
+                    cvss = _ds.get("cvssScore") or _ds.get("cvss_score") or 0
+                    if isinstance(cvss, (int, float)):
+                        if cvss >= 9.0: _isev = "critical"
+                        elif cvss >= 7.0: _isev = "high"
+                        elif cvss >= 4.0: _isev = "medium"
+                        else: _isev = "low"
+                    else:
+                        _isev = "unknown"
+                    _derived_sev[_isev] = _derived_sev.get(_isev, 0) + len(_ds["cveIds"])
+            if _derived_sev:
+                sev_str = ", ".join(f"{s}: {c}" for s, c in sorted(_derived_sev.items()))
+                lines.append(f"- CVE severity from PR data (derived): {sev_str}")
+        elif sec_posture.get("total_open_alerts"):
             lines.append(f"- Open Dependabot alerts: {sec_posture['total_open_alerts']}")
             sev = sec_posture.get("severity_counts", {})
             if sev:
@@ -232,6 +250,29 @@ def generate_template_plan(data: Dict[str, Any], run_url: Optional[str] = None,
             lines.append(f"- PRs resolving alerts: **{cve_fix_count}** (see CVE Fixes table above)")
         if orphan_count:
             lines.append(f"- Unaddressed alerts: **{orphan_count}** (no Dependabot PR yet)")
+        # Derive CVE fix entries from deterministic.security when cve_fixes is empty
+        if not sec_posture.get("cve_fixes"):
+            _active_fixes = []
+            _historical = []
+            for _pn, _pd in prs.items():
+                _ds = (_pd.get("deterministic") or {}).get("security") or {}
+                if _ds.get("isSecurity") and _ds.get("cveIds"):
+                    _is_active = _is_currently_vulnerable(_pd)
+                    _target = _active_fixes if _is_active else _historical
+                    cvss = _ds.get("cvssScore") or _ds.get("cvss_score") or 0
+                    _target.append({"pr": _pn, "package": _pd.get("package", "?"),
+                                    "cve_count": len(_ds["cveIds"]), "cvss": cvss,
+                                    "cve_ids": _ds["cveIds"][:5]})
+            if _active_fixes:
+                lines.append("")
+                lines.append("### Active Security Fixes")
+                for af in sorted(_active_fixes, key=lambda x: -float(x.get("cvss") or 0)):
+                    lines.append(f"- **PR #{af['pr']}** `{af['package']}` — {af['cve_count']} CVE(s), max CVSS {af['cvss']}")
+            if _historical:
+                lines.append("")
+                lines.append("### Historical Advisories (not currently vulnerable)")
+                for hf in _historical:
+                    lines.append(f"- PR #{hf['pr']} `{hf['package']}` — {hf['cve_count']} CVE(s) (base version outside vulnerable range)")
         lines.append("")
 
     lines.append("## Merge Risk Summary")

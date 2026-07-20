@@ -19,7 +19,7 @@ try:
 except NameError:
     sys.path.insert(0, sys.path[0] if sys.path else ".")
 from ci_classifier import ci_review_tier
-from core.verdict_contract import authoritative_verdict, stamp_build_misattribution
+from core.verdict_contract import authoritative_verdict, stamp_build_misattribution, _is_currently_vulnerable
 
 with open("/tmp/build-results.json") as f:
     data = json.load(f)
@@ -87,13 +87,7 @@ def committed_v2_verdict(pr):
     if not isinstance(v2, dict):
         return "REVIEW"
     verdict = v2.get("verdict")
-    conf = v2.get("confidence")
-    prio = v2.get("priority")
     if verdict not in ("SAFE", "REVIEW", "BLOCKED"):
-        return "REVIEW"
-    if not isinstance(conf, str) or not _v2_re.fullmatch(r"L[0-5]", conf):
-        return "REVIEW"
-    if not isinstance(prio, str) or not _v2_re.fullmatch(r"P[0-3]", prio):
         return "REVIEW"
     return verdict
 
@@ -128,13 +122,7 @@ def headline_severity(pr):
     if not isinstance(v2, dict):
         return "medium"
     verdict = v2.get("verdict")
-    conf = v2.get("confidence")
-    prio = v2.get("priority")
     if verdict not in ("SAFE", "REVIEW", "BLOCKED"):
-        return "medium"
-    if not isinstance(conf, str) or not _v2_re.fullmatch(r"L[0-5]", conf):
-        return "medium"
-    if not isinstance(prio, str) or not _v2_re.fullmatch(r"P[0-3]", prio):
         return "medium"
     if verdict == "BLOCKED":
         return "high"
@@ -142,7 +130,7 @@ def headline_severity(pr):
     if g is not None:
         return g
     sev = v2.get("severity")
-    if sev in ("none", "low", "medium", "high"):
+    if sev in ("none", "low", "medium", "high", "critical"):
         base_sev = sev
     else:
         base_sev = {"SAFE": "low", "REVIEW": "medium"}.get(verdict, "medium")
@@ -1137,6 +1125,7 @@ if security:
 
     # V9.8 iter6 (B): precise CVE fixes with severity + advisory links
     cve_fixes = security.get("cve_fixes", [])
+    _historical_cve_fixes = []
     if not cve_fixes:
         for _pn, _pd in prs.items():
             _ds = (_pd.get("deterministic") or {}).get("security") or {}
@@ -1149,8 +1138,10 @@ if security:
                     else: _sev = "low"
                 else:
                     _sev = "unknown"
+                _is_active = _is_currently_vulnerable(_pd)
+                _target = cve_fixes if _is_active else _historical_cve_fixes
                 for _cid in _ds["cveIds"]:
-                    cve_fixes.append({
+                    _target.append({
                         "pr": _pn, "cve_id": _cid, "severity": _sev,
                         "package": _pd.get("package", "?"),
                         "from_version": _pd.get("from", "?"),
@@ -1204,6 +1195,22 @@ if security:
             for cid in sorted(_multi):
                 lines.append(f">   - `{cid}`: " + ", ".join(f"#{n}" for n in _multi[cid]))
             lines.append("")
+
+    if _historical_cve_fixes:
+        _hist_by_pr = {}
+        for f in _historical_cve_fixes:
+            _hist_by_pr.setdefault(f["pr"], []).append(f)
+        lines.append("### ℹ️ Historical Advisories (base version already outside vulnerable range)")
+        lines.append("")
+        lines.append("| PR | Package | Version | CVE(s) | Note |")
+        lines.append("|---|---|---|---|---|")
+        for pr_num in sorted(_hist_by_pr.keys(), key=lambda x: int(x) if x.isdigit() else 0):
+            flist = _hist_by_pr[pr_num]
+            pkg = flist[0]["package"]
+            fr = flist[0].get("from_version", ""); to = flist[0].get("to_version", "")
+            cve_cell = ", ".join(sorted(set(f["cve_id"] for f in flist if f["cve_id"])))
+            lines.append(f"| #{pr_num} | `{pkg}` | {fr}→{to} | {cve_cell} | Historical — not currently vulnerable |")
+        lines.append("")
 
     # V9.8 iter6 (B): orphan alerts (no PR fixes them) — needs manual attention
     orphans = security.get("orphan_alerts", [])

@@ -325,6 +325,10 @@ def _apply_cve_floor(pr: Mapping[str, Any], result: dict) -> dict:
         result["reason"] = (result.get("reason", "") +
                             f"; CVE floor applied (max CVSS {cvss:.1f}, {cve_count} CVE(s))").lstrip("; ")
         result["source"] = result.get("source", "") + "+cve_floor"
+        if result.get("severity") == "critical" and result.get("priority") == "P0":
+            if result.get("verdict") != BUCKET_BLOCKED:
+                result["verdict"] = BUCKET_BLOCKED
+                result["breakability_grade"] = GRADE_HIGH_BREAKING
     return result
 
 
@@ -630,11 +634,17 @@ def _raw_authoritative_verdict(pr: Mapping[str, Any]) -> dict:
     if tag in _TAG_TO_BUCKET:
         bucket = _TAG_TO_BUCKET[tag]
         sev = {"Low": "low", "Medium": "medium", "High": "high"}.get(tag, "medium")
+        reason = (mr.get("reason") if isinstance(mr, Mapping) else "") or tag
+        bg = pr.get("behavioral_grade") or {}
+        if isinstance(bg, Mapping) and bg.get("same_behavior") is True:
+            bg_conf = str(bg.get("confidence", "")).strip().lower()
+            if bg_conf in ("medium", "high"):
+                reason = f"behavioral probe confirmed same API surface ({bg_conf} confidence); {reason}"
         result = {
             "verdict": bucket, "severity": sev,
             "confidence": det.get("confidence") or "L2",
             "priority": "P3" if bucket == BUCKET_SAFE else "P2",
-            "reason": (mr.get("reason") if isinstance(mr, Mapping) else "") or tag,
+            "reason": reason,
             "source": "deterministic_merge_risk",
         }
         result["breakability_grade"] = assign_breakability_grade(pr, bucket)
@@ -895,6 +905,30 @@ if __name__ == "__main__":
             mr_fixed += 1
     if mr_fixed:
         print(f"ℹ️  Fixed {mr_fixed} merge_risk tag(s) via symbol verification override", file=sys.stderr)
+
+    # Escalate merge_risk.tag for Actions major bumps (C9)
+    mr_actions_fixed = 0
+    for pr_key, pr_data in prs.items():
+        if str(pr_data.get("ecosystem", "")).strip().lower() != "actions":
+            continue
+        bump = str(pr_data.get("bump", "")).strip().lower()
+        if bump != "major":
+            continue
+        top_mr = pr_data.get("merge_risk") or {}
+        det_mr = (pr_data.get("deterministic") or {}).get("merge_risk") or {}
+        for mr_obj in [top_mr, det_mr]:
+            if not isinstance(mr_obj, dict):
+                continue
+            if mr_obj.get("tag") == "Low":
+                mr_obj["tag"] = "Medium"
+                mr_obj["reason"] = (mr_obj.get("reason", "") + "; escalated due to major version bump").lstrip("; ")
+                mr_actions_fixed += 1
+        if isinstance(top_mr, dict) and top_mr.get("tag") == "Medium":
+            pr_data["merge_risk"] = top_mr
+        if isinstance(det_mr, dict) and det_mr.get("tag") == "Medium":
+            (pr_data.get("deterministic") or {})["merge_risk"] = det_mr
+    if mr_actions_fixed:
+        print(f"ℹ️  Escalated merge_risk for {mr_actions_fixed} Actions major-bump PR(s)", file=sys.stderr)
 
     # Fix verification_level for Actions PRs with passing builds (C8)
     vl_fixed = 0

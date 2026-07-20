@@ -640,8 +640,11 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
 
     test_ran = test.get("ran", False)
     test_exit = test.get("exit")
+    new_failures = test.get("new_failures") or []
     if test_ran and test_exit == 0:
         t_status = "✅ Passed"
+    elif test_ran and test_exit is not None and not new_failures:
+        t_status = f"⚠️ Failed — pre-existing (exit {test_exit})"
     elif test_ran and test_exit is not None:
         t_status = f"❌ Failed (exit {test_exit})"
     else:
@@ -673,8 +676,15 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
     }
     cl_short = _CL_STATUS_MAP.get(cl_status, "⏭️ Unknown" if changelog_signal is None else "⏭️ Unknown")
 
+    api_diff_tool = det.get("api_diff_tool") or {}
+    api_diff_status = api_diff_tool.get("status", "")
     api_changes = det.get("api_changes")
-    a_status = f"⚠️ {api_changes} changes" if api_changes else "✅ No changes"
+    if api_diff_status == "unavailable" or (api_changes is None and not api_diff_status):
+        a_status = "⏭️ Unavailable"
+    elif api_changes:
+        a_status = f"⚠️ {api_changes} changes"
+    else:
+        a_status = "✅ No changes"
 
     untested_qualifier = " (no test evidence)" if av.get("untested") else ""
     lines = [
@@ -789,6 +799,13 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
             f"go get {pkg}@{to_ver}",
             "go build ./...",
             "go test ./...",
+        ])
+    elif ecosystem == "actions":
+        lines.extend([
+            f"# Review the action's release notes and changelog:",
+            f"# https://github.com/{pkg}/releases",
+            f"git diff main -- .github/workflows/",
+            f"# Verify workflow files reference the correct version ({to_ver})",
         ])
     else:
         lines.extend([
