@@ -27,11 +27,13 @@ PASS_THRESHOLD="${PASS_THRESHOLD:-8.5}"
 # Model configuration — falls back gracefully
 MAIN_MODEL="${MAIN_MODEL:-claude-opus-4-6}"
 SUB_MODEL="${SUB_MODEL:-claude-sonnet-5}"
-FALLBACK_SUB_MODEL="${FALLBACK_SUB_MODEL:-claude-haiku-4.5}"
+FALLBACK_SUB_MODEL="${FALLBACK_SUB_MODEL:-claude-haiku-4-5-20251001}"
+SUB_CLI="${SUB_CLI:-copilot}"
 
 # CI configuration
 REPO="${REPO:-}"
 BRANCH="${BRANCH:-}"
+TARGET_REPO="${TARGET_REPO:-$CODE_DIR}"
 
 log() { echo "$(date '+%H:%M:%S') [v15:iter${ITER:-0}] $*"; }
 
@@ -39,9 +41,9 @@ log() { echo "$(date '+%H:%M:%S') [v15:iter${ITER:-0}] $*"; }
 detect_models() {
     log "Checking model availability..."
 
-    # Test sub-agent model (copilot)
+    # Test sub-agent model via copilot CLI
     if copilot -p "Reply with OK" --model "$SUB_MODEL" --effort low --no-ask-user >/dev/null 2>&1; then
-        log "Sub-agent model: $SUB_MODEL ✓"
+        log "Sub-agent model: $SUB_MODEL ✓ (copilot CLI)"
     elif copilot -p "Reply with OK" --model "$FALLBACK_SUB_MODEL" --effort low --no-ask-user >/dev/null 2>&1; then
         log "Sub-agent model: $SUB_MODEL unavailable, falling back to $FALLBACK_SUB_MODEL"
         SUB_MODEL="$FALLBACK_SUB_MODEL"
@@ -105,7 +107,7 @@ run_deterministic_gate() {
     log "Running deterministic gate..."
     local gate_out
     gate_out=$(python3 "$HARNESS_DIR/run_gate.py" "$EVAL_DIR/build-results.json" "$CORPUS" \
-        --repo "$CODE_DIR" --golden "$GOLDEN" 2>&1) || true
+        --repo "$TARGET_REPO" --golden "$GOLDEN" 2>&1) || true
     echo "$gate_out"
 
     GATE_SCORE=$(echo "$gate_out" | awk -F': ' '/^SCORE:/{print $2}')
@@ -264,29 +266,79 @@ run_generator() {
     local generator_prompt
     generator_prompt=$(cat "$HARNESS_DIR/generator/main_generator.md")
 
-    (cd "$CODE_DIR" && claude -p "You are the generator for iteration $ITER of the breakability v15 loop.
+    # Read structured findings from loop_state.json (primary handoff)
+    local findings_json
+    findings_json=$(python3 -c "
+import json, sys
+s = json.load(open('$STATE_FILE'))
+findings = s.get('evaluation', {}).get('critical_findings', [])
+if findings:
+    print(json.dumps(findings, indent=2))
+else:
+    print('NO_STRUCTURED_FINDINGS')
+")
 
-Read $EVAL_DIR/eval/consolidated_evaluation.md for the evaluator's findings.
-Read $EVAL_DIR/wiki/fixes_tried.md to avoid repeating failed fixes.
+    # Build generator prompt from structured JSON or fall back to markdown
+    local gen_prompt
+    if [[ "$findings_json" != "NO_STRUCTURED_FINDINGS" ]]; then
+        gen_prompt="## Structured Findings from Evaluator (loop_state.json)
 
-Plan fixes for CRITICAL findings only.
-For each fix, create a task JSON in $EVAL_DIR/eval/tasks/.
+\`\`\`json
+$findings_json
+\`\`\`
 
-For each task, you can spawn a copilot sub-agent:
-  copilot -p \"<task prompt>\" --model $SUB_MODEL --effort <effort> --yolo --no-ask-user --add-dir $CODE_DIR
+Apply each fix in the \`required_fix\` field. The file, function, line, and code_snippet are exact.
+Check \`positive_controls\` after each fix — those cases MUST NOT regress.
+Check \`previous_fix_attempt\` — do NOT repeat failed approaches."
+    else
+        # Fallback: read markdown evaluation + fix plan
+        local gen_input="$EVAL_DIR/eval/consolidated_evaluation.md"
+        local fix_plan=""
+        [[ -f "$EVAL_DIR/eval/fix_plan.md" ]] && fix_plan="$(cat "$EVAL_DIR/eval/fix_plan.md")"
+        gen_prompt="$(cat "$gen_input")
 
-After sub-agents complete, verify their work:
-  1. git diff --name-only — only expected files changed?
-  2. Syntax check modified files
-  3. Run relevant tests
+---
 
-If verification passes, commit. If not, revert and log the failure.
+The above is the consolidated evaluation. Below is the fix plan.
+Follow this plan precisely — do NOT improvise or deviate.
 
-Update $EVAL_DIR/loop_state.json: set persona to evaluator.
-Update $EVAL_DIR/wiki/fixes_tried.md with what you tried and outcomes." \
+$fix_plan"
+    fi
+
+    gen_prompt="$gen_prompt
+
+---
+
+EXECUTION INSTRUCTIONS:
+
+Wiki fixes_tried: $EVAL_DIR/wiki/fixes_tried.md
+Wiki known_issues: $EVAL_DIR/wiki/known_issues.md
+Loop state: $EVAL_DIR/loop_state.json
+
+Iteration: $ITER
+Code dir: $CODE_DIR
+Sub-agent model: $SUB_MODEL
+
+DO NOT use govulncheck — CVE data comes from Dependabot alerts via PAT only.
+
+For each finding in the structured JSON (or fix plan):
+1. Make the code change exactly as specified
+2. Add unit tests covering the fix AND positive controls
+3. Run: python3 -m pytest <relevant_test_file> -v
+4. If tests pass, move to the next fix
+5. If tests fail, fix the issue — do NOT skip or revert
+
+After ALL fixes:
+1. Re-compute verdicts: python3 scripts/core/verdict_contract.py /tmp/brk_eval/build-results.json --write
+2. Run deterministic gate: python3 harness/run_gate.py /tmp/brk_eval/build-results.json harness/corpus.json --repo $TARGET_REPO
+3. Commit all changes with a descriptive message
+4. Update $EVAL_DIR/wiki/fixes_tried.md with what you did and outcomes
+
+Update $EVAL_DIR/loop_state.json: set persona to evaluator."
+
+    (cd "$CODE_DIR" && claude -p "$gen_prompt" \
         --model "$MAIN_MODEL" \
         --append-system-prompt "$generator_prompt" \
-        --add-dir "$EVAL_DIR" \
         --allowedTools "Read,Write,Edit,Bash" \
         --dangerously-skip-permissions 2>&1 | tail -20)
 
@@ -362,10 +414,33 @@ init_workspace
 
 PREV_COMMIT=$(cd "$CODE_DIR" && git rev-parse --short HEAD 2>/dev/null || echo "none")
 
-for ITER in $(seq 1 "$MAX_ITERS"); do
+# Check if resuming from generator phase
+RESUME_FROM_GENERATOR=false
+START_ITER=1
+if [[ -f "$STATE_FILE" ]]; then
+    RESUME_PERSONA=$(python3 -c "import json; print(json.load(open('$STATE_FILE')).get('persona','evaluator'))")
+    RESUME_ITER=$(python3 -c "import json; print(json.load(open('$STATE_FILE')).get('iteration', 1))")
+    if [[ "$RESUME_PERSONA" == "generator" ]]; then
+        RESUME_FROM_GENERATOR=true
+        START_ITER="$RESUME_ITER"
+        log "Resuming from GENERATOR phase, iteration $START_ITER"
+    fi
+fi
+
+for ITER in $(seq "$START_ITER" "$MAX_ITERS"); do
     log "═══════════════════════════════════════"
     log "  ITERATION $ITER / $MAX_ITERS"
     log "═══════════════════════════════════════"
+
+    # Skip evaluator if resuming from generator
+    if [[ "$RESUME_FROM_GENERATOR" == "true" ]]; then
+        RESUME_FROM_GENERATOR=false
+        GATE_SCORE=$(python3 -c "import json; print(json.load(open('$STATE_FILE')).get('gate',{}).get('deterministic_score',0))")
+        GATE_ACCEPTED=$(python3 -c "import json; print(json.load(open('$STATE_FILE')).get('gate',{}).get('deterministic_accepted',False))")
+        GATE_FINDINGS=""
+        EVAL_SCORE=$(get_eval_score)
+        log "Skipping evaluator (resuming) — gate=$GATE_SCORE, eval=$EVAL_SCORE"
+    else
 
     # Update iteration state
     python3 -c "
@@ -416,6 +491,8 @@ json.dump(s, open('$STATE_FILE', 'w'), indent=2)
         log "Max iterations reached without passing. Final score: $EVAL_SCORE"
         break
     fi
+
+    fi  # end of evaluator phase (skipped when resuming from generator)
 
     # ── GENERATOR PHASE ───────────────────────────────────────
     log "── GENERATOR PHASE ──"

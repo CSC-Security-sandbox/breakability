@@ -95,7 +95,51 @@ Overall Score: X.X/10 (threshold: 8.5)
 ```
 
 ### 2. Update `loop_state.json`
-Set `persona` to `"generator"`. Populate `evaluation` with scores, findings, action list.
+Set `persona` to `"generator"`. Populate `evaluation` with scores AND structured findings.
+
+**Required JSON schema for `evaluation`:**
+```json
+{
+  "overall_score": 2.0,
+  "dimension_scores": {
+    "enduser": 4.0, "security": 2.0, "pipeline": 5.0, "accuracy": 2.0
+  },
+  "critical_findings": [
+    {
+      "id": "C1",
+      "title": "hard_fix_floor false-blocks pre_existing builds",
+      "dimension": "pipeline",
+      "severity": "P0",
+      "source_reviewers": ["Sam", "Jordan", "Riley", "Alex"],
+      "evidence": "PRs 16,21,28... have build.verdict=pre_existing, test.new_failures=[], yet verdict_v2.source=hard_fix_floor",
+      "affected_prs": [16, 21, 28, 29, 34, 37, 39, 40, 43, 44],
+      "required_fix": {
+        "file": "scripts/core/verdict_contract.py",
+        "function": "_hard_fix_floor",
+        "line": 190,
+        "description": "Add guard: when build.verdict=='pre_existing' AND test.new_failures==[], return False",
+        "code_snippet": "if build_verdict == 'pre_existing':\n    new_failures = (pr.get('test') or {}).get('new_failures')\n    if not new_failures:\n        return False",
+        "positive_controls": "PR#68,#69 with new_failures=['TestObservability'] MUST stay BLOCKED"
+      },
+      "repeated": true,
+      "first_seen_iter": 0,
+      "occurrence_count": 2,
+      "previous_fix_attempt": null
+    }
+  ],
+  "improvements": [
+    {
+      "id": "I1",
+      "title": "Probe-to-tier wiring gap",
+      "severity": "P2",
+      "description": "..."
+    }
+  ]
+}
+```
+
+The generator reads `critical_findings[]` directly from `loop_state.json` — this is the PRIMARY handoff, not the markdown.
+The markdown `consolidated_evaluation.md` is for human review only.
 
 ### 3. Update wiki files
 - `wiki/state.md` — current scores and key issues
