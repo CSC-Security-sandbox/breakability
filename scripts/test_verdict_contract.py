@@ -561,6 +561,48 @@ class TestCVEWiringFromDeterministicSecurity(unittest.TestCase):
         self.assertFalse(_is_currently_vulnerable(pr))
 
 
+    def test_cve_count_in_reason_uses_cveIds_fallback(self):
+        """C2 iter2: cve_count in reason string must use deterministic.security.cveIds
+        when cve_details is empty."""
+        from verdict_contract import _apply_cve_floor
+        pr = {"cve_details": [], "from": "0.45.0",
+              "deterministic": {"security": {"isSecurity": True, "cvssScore": 10.0,
+                                              "vulnerableVersionRange": "< 0.52.0",
+                                              "cveIds": ["CVE-2024-45337", "CVE-2024-45338"]}}}
+        result = {"verdict": "REVIEW", "severity": "medium", "priority": "P2", "source": "test"}
+        applied = _apply_cve_floor(pr, result)
+        self.assertIn("2 CVE(s)", applied["reason"])
+        self.assertNotIn("0 CVE(s)", applied["reason"])
+
+
+class TestUntestedSafeAnnotation(unittest.TestCase):
+    """C7: SAFE verdicts without test evidence must be annotated."""
+
+    def test_safe_without_tests_gets_unverified(self):
+        pr = {"build": {"verdict": "pass"}, "test": {"ran": False},
+              "policy_lowering": {"decision": {"verdict": "MERGE", "confidence": "high"}}}
+        v = authoritative_verdict(pr)
+        self.assertEqual(v["verdict"], BUCKET_SAFE)
+        self.assertEqual(v["confidence"], "UNVERIFIED")
+        self.assertTrue(v.get("untested"))
+        self.assertIn("no test evidence", v["reason"])
+
+    def test_safe_with_passing_tests_keeps_confidence(self):
+        pr = {"build": {"verdict": "pass"}, "test": {"ran": True, "exit": 0},
+              "policy_lowering": {"decision": {"verdict": "MERGE", "confidence": "high"}}}
+        v = authoritative_verdict(pr)
+        self.assertEqual(v["verdict"], BUCKET_SAFE)
+        self.assertNotEqual(v.get("confidence"), "UNVERIFIED")
+        self.assertFalse(v.get("untested", False))
+
+    def test_actions_prs_skip_untested_annotation(self):
+        pr = {"ecosystem": "actions", "build": {"verdict": "pass"}, "test": {"ran": False},
+              "policy_lowering": {"decision": {"verdict": "MERGE", "confidence": "high"}}}
+        v = authoritative_verdict(pr)
+        self.assertEqual(v["verdict"], BUCKET_SAFE)
+        self.assertNotEqual(v.get("confidence"), "UNVERIFIED")
+
+
 class TestStaleVerdictV2Clearing(unittest.TestCase):
     """The workflow calls verdict_contract.py --write twice (pre-probe and post-probe).
     A stale verdict_v2 from the first pass must not override the corrected second pass."""

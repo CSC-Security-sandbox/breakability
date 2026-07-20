@@ -159,6 +159,7 @@ def _build_per_pr_prompt(
         )
 
     cve_details = pr.get("cve_details") or []
+    det_sec = (pr.get("deterministic") or {}).get("security") or {}
     if cve_details:
         sections.append(
             f"\n### CVE/Vulnerability Data for This PR\n"
@@ -171,6 +172,20 @@ def _build_per_pr_prompt(
             f"summary, and advisory link\n"
             f"- NEVER write 'No CVEs associated with this upgrade' — this PR has {len(cve_details)} CVE(s)\n\n"
             f"```json\n{json.dumps(cve_details, indent=2)}\n```\n"
+        )
+    elif det_sec.get("isSecurity") and det_sec.get("cveIds"):
+        cve_ids = det_sec["cveIds"]
+        cvss = det_sec.get("cvssScore") or det_sec.get("cvss_score") or "N/A"
+        sections.append(
+            f"\n### CVE/Vulnerability Data for This PR (from deterministic.security)\n"
+            f"**CRITICAL FRAMING RULE:** These CVEs are vulnerabilities present in the OLD "
+            f"(FROM) version that are FIXED/REMEDIATED by upgrading to the new (TO) version. "
+            f"This PR REMEDIATES these CVEs — it does NOT introduce them.\n\n"
+            f"- CVE IDs: {', '.join(cve_ids[:10])}{' (and more)' if len(cve_ids) > 10 else ''}\n"
+            f"- Max CVSS: {cvss}\n"
+            f"- Vulnerable range: {det_sec.get('vulnerableVersionRange', 'N/A')}\n\n"
+            f"You MUST include a '### Security Impact' section mentioning the CVE count ({len(cve_ids)}) "
+            f"and CVSS score.\n"
         )
 
     security_posture = top_level.get("security_posture")
@@ -559,7 +574,9 @@ def _validate_comment(comment: str, pr_num: str, pr_data: Dict[str, Any] = None)
 
     if pr_data is not None:
         cve_details = pr_data.get("cve_details") or []
-        if cve_details:
+        det_sec = (pr_data.get("deterministic") or {}).get("security") or {}
+        has_cve_data = bool(cve_details) or (det_sec.get("isSecurity") and det_sec.get("cveIds"))
+        if has_cve_data:
             has_cve = bool(re.search(r'CVE-\d{4}|GHSA-|[Ss]ecurity\s+[Ii]mpact|[Vv]ulnerabilit', comment))
             diagnostics["has_cve_section"] = {"passed": has_cve, "value": has_cve}
 
@@ -649,10 +666,11 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
     api_changes = det.get("api_changes")
     a_status = f"⚠️ {api_changes} changes" if api_changes else "✅ No changes"
 
+    untested_qualifier = " (no test evidence)" if av.get("untested") else ""
     lines = [
         "<!-- breakability-check -->",
         "<!-- ai-fallback -->",
-        f"## {emoji} {verdict} — `{pkg}` {from_ver} → {to_ver} • {dep_type} • {bump}",
+        f"## {emoji} {verdict}{untested_qualifier} — `{pkg}` {from_ver} → {to_ver} • {dep_type} • {bump}",
         "",
         "> **Note:** AI comment generation failed. This is an automated fallback with available signal data.",
         "",
@@ -677,6 +695,7 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
     ]
 
     cve_details = pr.get("cve_details") or []
+    det_sec_fb = (pr.get("deterministic") or {}).get("security") or {}
     if cve_details:
         lines.append("### Security Impact")
         lines.append("")
@@ -691,6 +710,18 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
             advisory = cve.get("advisory_url")
             if advisory:
                 lines.append(f"  - Advisory: {advisory}")
+        lines.append("")
+    elif det_sec_fb.get("isSecurity") and det_sec_fb.get("cveIds"):
+        cve_ids = det_sec_fb["cveIds"]
+        cvss = det_sec_fb.get("cvssScore") or det_sec_fb.get("cvss_score") or "N/A"
+        lines.append("### Security Impact")
+        lines.append("")
+        lines.append(f"This PR remediates {len(cve_ids)} CVE(s) (max CVSS: {cvss}):")
+        lines.append("")
+        for cid in cve_ids[:10]:
+            lines.append(f"- **{cid}**")
+        if len(cve_ids) > 10:
+            lines.append(f"- … and {len(cve_ids) - 10} more")
         lines.append("")
 
     probe_hashes = bg.get("hashes") or bg.get("sha256")

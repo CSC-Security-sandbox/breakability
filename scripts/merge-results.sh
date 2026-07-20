@@ -437,6 +437,8 @@ pr_cves = {}
 total_cve_count = 0
 for num, pr in prs.items():
     cves = pr.get("cves", [])
+    if not cves:
+        cves = ((pr.get("deterministic") or {}).get("security") or {}).get("cveIds") or []
     if cves:
         pr_cves[num] = cves
         total_cve_count += len(cves)

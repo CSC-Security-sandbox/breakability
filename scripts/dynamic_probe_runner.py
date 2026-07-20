@@ -189,12 +189,34 @@ class ProbeResult:
         }
 
 
+def _find_go_binary() -> Optional[str]:
+    """Locate the Go binary, searching PATH and common CI installation directories."""
+    found = shutil.which("go")
+    if found:
+        return found
+    search_dirs = [
+        "/usr/local/go/bin",
+        os.path.expanduser("~/go/bin"),
+    ]
+    goroot = os.environ.get("GOROOT")
+    if goroot:
+        search_dirs.insert(0, os.path.join(goroot, "bin"))
+    for hd in Path("/opt/hostedtoolcache/go").glob("*/x64/bin") if Path("/opt/hostedtoolcache/go").exists() else []:
+        search_dirs.append(str(hd))
+    for d in search_dirs:
+        candidate = os.path.join(d, "go")
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+            return candidate
+    return None
+
+
 def run_probe(spec: ProbeSpec, *, scratch_root: Optional[Path] = None, output_limit: int = DEFAULT_OUTPUT_LIMIT) -> ProbeResult:
     try:
         spec.validate()
     except Exception as exc:
         return ProbeResult(ProbeClassification.PROBE_FAILED, spec, None, None, str(exc))
-    if shutil.which("go") is None:
+    if _find_go_binary() is None:
         return ProbeResult(ProbeClassification.PROBE_FAILED, spec, None, None, "go executable not found")
 
     scratch = Path(scratch_root or DEFAULT_SCRATCH_ROOT)

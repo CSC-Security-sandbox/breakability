@@ -40,7 +40,7 @@ __all__ = [
     "_SEVERITY_RANK", "_ACTION_TO_BUCKET", "_ACTION_DEFAULT_SEVERITY", "_BUCKET_TO_PREDICTION",
     "_confidence_to_level", "_priority", "map_policy_decision", "_policy_decision",
     "_is_preexisting_test_failure", "_hard_fix_floor", "_valid_v2", "_probe_escalation", "_is_currently_vulnerable",
-    "_max_cvss", "_apply_cve_floor",
+    "_max_cvss", "_apply_cve_floor", "_annotate_untested_safe",
     "_has_declared_breaking", "_tests_ran_successfully", "_breaking_changelog_reachable_floor",
     "_is_major_bump", "assign_breakability_grade", "authoritative_verdict",
     "prediction_for_pr", "StageNoOpError", "assert_stage_did_work", "stage_report",
@@ -316,6 +316,8 @@ def _apply_cve_floor(pr: Mapping[str, Any], result: dict) -> dict:
         result["cve_floor_applied"] = True
     if result.get("cve_floor_applied"):
         cve_count = len(pr.get("cve_details") or [])
+        if cve_count == 0:
+            cve_count = len(((pr.get("deterministic") or {}).get("security") or {}).get("cveIds") or [])
         result["reason"] = (result.get("reason", "") +
                             f"; CVE floor applied (max CVSS {cvss:.1f}, {cve_count} CVE(s))").lstrip("; ")
         result["source"] = result.get("source", "") + "+cve_floor"
@@ -457,14 +459,34 @@ def assign_breakability_grade(pr: Mapping[str, Any], verdict_bucket: str, signal
     return GRADE_MEDIUM_BREAKING if verdict_bucket == BUCKET_REVIEW else GRADE_SAFE
 
 
+def _annotate_untested_safe(pr: Mapping[str, Any], result: dict) -> dict:
+    """Annotate SAFE verdicts that lack test evidence with a confidence downgrade."""
+    if result.get("verdict") != BUCKET_SAFE:
+        return result
+    test = pr.get("test") or {}
+    if test.get("ran"):
+        return result
+    eco = str(pr.get("ecosystem", "")).strip().lower()
+    if eco == "actions":
+        return result
+    result = dict(result)
+    result["confidence"] = "UNVERIFIED"
+    result["untested"] = True
+    if "no test evidence" not in (result.get("reason") or ""):
+        result["reason"] = ((result.get("reason") or "") + "; no test evidence — confidence downgraded").lstrip("; ")
+    return result
+
+
 def authoritative_verdict(pr: Mapping[str, Any]) -> dict:
     """THE one accessor. Returns the authoritative rendered verdict object for a PR.
 
     Wraps _raw_authoritative_verdict with a CVE-severity floor so high-CVSS
-    PRs can never fall below P1/high (CVSS >= 7.0) or P0/high (CVSS >= 9.0).
+    PRs can never fall below P1/high (CVSS >= 7.0) or P0/high (CVSS >= 9.0),
+    and annotates SAFE verdicts missing test evidence.
     """
     result = _raw_authoritative_verdict(pr)
-    return _apply_cve_floor(pr, result)
+    result = _apply_cve_floor(pr, result)
+    return _annotate_untested_safe(pr, result)
 
 
 def _raw_authoritative_verdict(pr: Mapping[str, Any]) -> dict:
@@ -837,19 +859,29 @@ if __name__ == "__main__":
     # Fix merge_risk when symbol verification overrides (C3: PR#44 overclaim)
     mr_fixed = 0
     for pr_key, pr_data in prs.items():
-        mr = pr_data.get("merge_risk") or {}
-        if mr.get("tag") != "High" or "signature" not in (mr.get("reason") or "").lower():
-            continue
         det = pr_data.get("deterministic") or {}
         verification = det.get("verification") or {}
         if verification.get("compatible") is not True:
             continue
         sr = verification.get("symbol_results") or verification.get("symbolResults") or {}
-        if sr and all(v == "COMPATIBLE" for v in sr.values()):
-            mr = dict(mr)
-            mr["tag"] = "Low"
-            mr["reason"] = "API diff detected but symbol verification confirms COMPATIBLE"
-            pr_data["merge_risk"] = mr
+        if not sr or not all(v == "COMPATIBLE" for v in sr.values()):
+            continue
+        top_mr = pr_data.get("merge_risk") or {}
+        det_mr = det.get("merge_risk") or {}
+        needs_fix = False
+        if top_mr.get("tag") == "High" and "signature" in (top_mr.get("reason") or "").lower():
+            top_mr = dict(top_mr)
+            top_mr["tag"] = "Low"
+            top_mr["reason"] = "API diff detected but symbol verification confirms COMPATIBLE"
+            pr_data["merge_risk"] = top_mr
+            needs_fix = True
+        if isinstance(det_mr, dict) and det_mr.get("tag") == "High" and "signature" in (det_mr.get("reason") or "").lower():
+            det_mr = dict(det_mr)
+            det_mr["tag"] = "Low"
+            det_mr["reason"] = "API diff detected but symbol verification confirms COMPATIBLE"
+            det["merge_risk"] = det_mr
+            needs_fix = True
+        if needs_fix:
             mr_fixed += 1
     if mr_fixed:
         print(f"ℹ️  Fixed {mr_fixed} merge_risk tag(s) via symbol verification override", file=sys.stderr)
