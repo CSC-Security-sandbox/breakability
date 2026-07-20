@@ -365,9 +365,11 @@ trigger_ci() {
         return 1
     fi
 
-    log "Triggering CI run on $REPO @ $BRANCH..."
+    log "Triggering CI run on $REPO @ $BRANCH (pr_filter=${PR_FILTER:-all})..."
+    local ci_args=(-f skip_agent=false -f batch_count="${CI_BATCH_COUNT:-4}")
+    [[ -n "${PR_FILTER:-}" ]] && ci_args+=(-f pr_filter="$PR_FILTER")
     gh workflow run breakability.yml --repo "$REPO" --ref "$BRANCH" \
-        -f skip_agent=false -f batch_count=4 2>&1 || {
+        "${ci_args[@]}" 2>&1 || {
         log "CI trigger failed"
         return 1
     }
@@ -388,12 +390,20 @@ trigger_ci() {
     gh run watch "$run_id" --repo "$REPO" --exit-status 2>&1 || true
 
     log "Downloading artifacts from run $run_id..."
+    rm -rf "$EVAL_DIR/ci-artifacts"
     gh run download "$run_id" --repo "$REPO" --name build-results --dir "$EVAL_DIR/ci-artifacts" 2>&1 || true
-    gh run download "$run_id" --repo "$REPO" --name pr-comments --dir "$EVAL_DIR/ci-artifacts" 2>&1 || true
+    gh run download "$run_id" --repo "$REPO" --name pr-comments --dir "$EVAL_DIR/ci-artifacts/comments" 2>&1 || true
 
     if [[ -f "$EVAL_DIR/ci-artifacts/build-results.json" ]]; then
         cp "$EVAL_DIR/ci-artifacts/build-results.json" "$EVAL_DIR/build-results.json"
         log "Updated build-results.json from CI run $run_id"
+    fi
+
+    # Copy fresh CI-generated comments into eval dir for evaluator
+    if ls "$EVAL_DIR/ci-artifacts/comments/"*.md >/dev/null 2>&1; then
+        mkdir -p "$EVAL_DIR/eval/current_comments"
+        cp "$EVAL_DIR/ci-artifacts/comments/"*.md "$EVAL_DIR/eval/current_comments/" 2>/dev/null || true
+        log "Updated $(ls "$EVAL_DIR/ci-artifacts/comments/"*.md 2>/dev/null | wc -l | tr -d ' ') comment files from CI"
     fi
 
     python3 -c "
