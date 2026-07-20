@@ -1101,7 +1101,25 @@ if security:
         lines.append("- Open Dependabot alerts: **⚠️ Unavailable** (token missing `security_events` permission — set `BREAKABILITY_PAT` repo secret)")
         _derived_sev = {}
         for _p in prs.values():
-            for _cve in (_p.get("cve_details") or []):
+            cve_list = _p.get("cve_details") or []
+            if not cve_list:
+                det_sec = (_p.get("deterministic") or {}).get("security") or {}
+                if det_sec.get("isSecurity") and det_sec.get("cveIds"):
+                    cvss = det_sec.get("cvssScore") or det_sec.get("cvss_score") or 0
+                    if isinstance(cvss, (int, float)):
+                        if cvss >= 9.0:
+                            inferred_sev = "critical"
+                        elif cvss >= 7.0:
+                            inferred_sev = "high"
+                        elif cvss >= 4.0:
+                            inferred_sev = "medium"
+                        else:
+                            inferred_sev = "low"
+                    else:
+                        inferred_sev = "unknown"
+                    _derived_sev[inferred_sev] = _derived_sev.get(inferred_sev, 0) + len(det_sec["cveIds"])
+                    continue
+            for _cve in cve_list:
                 s = (_cve.get("severity") or "unknown").lower()
                 _derived_sev[s] = _derived_sev.get(s, 0) + 1
         if _derived_sev:
@@ -1119,6 +1137,26 @@ if security:
 
     # V9.8 iter6 (B): precise CVE fixes with severity + advisory links
     cve_fixes = security.get("cve_fixes", [])
+    if not cve_fixes:
+        for _pn, _pd in prs.items():
+            _ds = (_pd.get("deterministic") or {}).get("security") or {}
+            if _ds.get("isSecurity") and _ds.get("cveIds"):
+                _cvss = _ds.get("cvssScore") or _ds.get("cvss_score") or 0
+                if isinstance(_cvss, (int, float)):
+                    if _cvss >= 9.0: _sev = "critical"
+                    elif _cvss >= 7.0: _sev = "high"
+                    elif _cvss >= 4.0: _sev = "medium"
+                    else: _sev = "low"
+                else:
+                    _sev = "unknown"
+                for _cid in _ds["cveIds"]:
+                    cve_fixes.append({
+                        "pr": _pn, "cve_id": _cid, "severity": _sev,
+                        "package": _pd.get("package", "?"),
+                        "from_version": _pd.get("from", "?"),
+                        "to_version": _pd.get("to", "?"),
+                        "via": "primary",
+                    })
     if cve_fixes:
         _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "moderate": 2, "low": 3, "unknown": 4}
         # Group by PR so one PR fixing multiple CVEs appears once

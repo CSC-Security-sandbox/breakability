@@ -632,5 +632,49 @@ class TestStaleVerdictV2Clearing(unittest.TestCase):
                          "Genuine build fail with direct imports must stay BLOCKED")
 
 
+class TestProbeEscalationOverridesStaleV2(unittest.TestCase):
+    """C7: PR#29 same_behavior=False must escalate SAFE to REVIEW."""
+
+    def test_stale_safe_v2_escalated_by_probe(self):
+        pr = {
+            "build": {"verdict": "pre_existing"},
+            "bump": "patch",
+            "behavioral_grade": {
+                "same_behavior": False,
+                "behavior_changed": True,
+                "source": "probe",
+                "confidence": "high",
+            },
+            "merge_risk": {"tag": "Low", "reason": "patch bump, clean changelog"},
+            "deterministic": {"merge_risk": {"tag": "Low", "reason": "patch bump, clean changelog"}},
+            "verdict_v2": {
+                "verdict": BUCKET_SAFE,
+                "source": "deterministic_merge_risk",
+                "severity": "low",
+                "confidence": "PARTIAL",
+                "priority": "P3",
+                "reason": "patch bump, changelog only bug fixes",
+            },
+        }
+        v = authoritative_verdict(pr)
+        self.assertEqual(v["verdict"], BUCKET_REVIEW)
+        self.assertIn("probe_escalation", v["source"])
+
+    def test_same_behavior_true_stays_safe(self):
+        pr = {
+            "build": {"verdict": "pre_existing"},
+            "bump": "patch",
+            "behavioral_grade": {"same_behavior": True, "source": "probe", "confidence": "high"},
+            "merge_risk": {"tag": "Low", "reason": "patch bump"},
+            "deterministic": {"merge_risk": {"tag": "Low"}},
+            "verdict_v2": {
+                "verdict": BUCKET_SAFE, "source": "deterministic_merge_risk",
+                "severity": "low", "confidence": "PARTIAL", "priority": "P3", "reason": "patch bump",
+            },
+        }
+        v = authoritative_verdict(pr)
+        self.assertEqual(v["verdict"], BUCKET_SAFE)
+
+
 if __name__ == "__main__":
     unittest.main()

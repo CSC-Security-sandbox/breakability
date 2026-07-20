@@ -724,11 +724,13 @@ def main():
         5: "L5_fully_verified"
     }
 
-    # V8 FIX (H3): Actions PRs should NOT show L2_type_checked -- no type-checking
-    # was performed. They get a distinct label so the merge plan doesn't lie.
     if eco == "actions":
-        pr_data["verification_level"] = -1
-        pr_data["verification_label"] = "CI_ONLY"
+        if build_verdict in ("pass", "pre_existing") and level >= 0:
+            pr_data["verification_level"] = max(level, 2)
+            pr_data["verification_label"] = f"L{max(level, 2)}_ci_verified"
+        else:
+            pr_data["verification_level"] = -1
+            pr_data["verification_label"] = "CI_ONLY"
     else:
         pr_data["verification_level"] = level
         pr_data["verification_label"] = LEVEL_LABELS.get(level, f"L{level}")

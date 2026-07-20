@@ -844,5 +844,105 @@ class TestGoldenFeatureValidation(unittest.TestCase):
         self.assertFalse(passed)
 
 
+class TestChangelogStatusRendering(unittest.TestCase):
+    """C1: Changelog table row must read changelogSignal.status."""
+
+    def _make_pr(self, changelog_signal):
+        pr = dict(SAMPLE_PR)
+        pr["deterministic"] = {"changelogSignal": changelog_signal}
+        return pr
+
+    def test_breaking_status_shows_warning(self):
+        pr = self._make_pr({"status": "breaking", "bullets": ["removed X"]})
+        comment = _fallback_comment(pr, "42", None, None, "test-model")
+        self.assertIn("⚠️ Breaking changes detected", comment)
+        self.assertNotIn("No breaking changes", comment)
+
+    def test_missing_status_shows_unavailable(self):
+        pr = self._make_pr({"status": "missing"})
+        comment = _fallback_comment(pr, "42", None, None, "test-model")
+        self.assertIn("⏭️ Unavailable", comment)
+
+    def test_clean_status_shows_no_breaking(self):
+        pr = self._make_pr({"status": "clean"})
+        comment = _fallback_comment(pr, "42", None, None, "test-model")
+        self.assertIn("✅ No breaking changes", comment)
+        self.assertNotIn("low confidence", comment)
+
+    def test_none_status_shows_low_confidence(self):
+        pr = self._make_pr({"status": "none"})
+        comment = _fallback_comment(pr, "42", None, None, "test-model")
+        self.assertIn("low confidence", comment)
+
+    def test_null_signal_shows_unknown(self):
+        pr = dict(SAMPLE_PR)
+        pr["deterministic"] = {}
+        comment = _fallback_comment(pr, "42", None, None, "test-model")
+        self.assertIn("⏭️ Unknown", comment)
+
+    def test_breaking_bullets_rendered(self):
+        pr = self._make_pr({"status": "breaking", "bullets": ["removed foo", "changed bar"]})
+        comment = _fallback_comment(pr, "42", None, None, "test-model")
+        self.assertIn("removed foo", comment)
+        self.assertIn("changed bar", comment)
+
+
+class TestCVEApplicabilityInComment(unittest.TestCase):
+    """C2: CVE section must check version applicability before claiming 'remediates'."""
+
+    def _make_pr(self, from_ver, vuln_range, cve_ids):
+        pr = dict(SAMPLE_PR)
+        pr["from"] = from_ver
+        pr["deterministic"] = {
+            "security": {
+                "isSecurity": True,
+                "cveIds": cve_ids,
+                "cvssScore": 9.8,
+                "vulnerableVersionRange": vuln_range,
+            }
+        }
+        return pr
+
+    def test_vulnerable_version_says_remediates(self):
+        pr = self._make_pr("0.45.0", "< 0.52.0", ["CVE-2024-1234"] * 26)
+        comment = _fallback_comment(pr, "109", None, None, "test-model")
+        self.assertIn("remediates 26 CVE(s)", comment)
+
+    def test_non_vulnerable_version_says_historical(self):
+        pr = self._make_pr("11.1.18", ">= 11.0.0, < 11.0.16", ["CVE-2024-5678"])
+        comment = _fallback_comment(pr, "16", None, None, "test-model")
+        self.assertIn("Historical advisory", comment)
+        self.assertNotIn("remediates", comment)
+
+    def test_equal_range_outside(self):
+        pr = self._make_pr("2.17.4", "= 2.17.3", ["CVE-2024-9999"] * 10)
+        comment = _fallback_comment(pr, "28", None, None, "test-model")
+        self.assertIn("Historical advisory", comment)
+
+
+class TestIssueNumberPlaceholder(unittest.TestCase):
+    """C3: ISSUE_NUMBER placeholder must never appear in comments."""
+
+    def test_no_issue_number_without_merge_plan(self):
+        comment = _fallback_comment(SAMPLE_PR, "42", None, None, "test-model")
+        self.assertNotIn("ISSUE_NUMBER", comment)
+        self.assertNotIn("Merge plan:", comment)
+
+    def test_merge_plan_shown_when_provided(self):
+        comment = _fallback_comment(SAMPLE_PR, "42", None, "123", "test-model")
+        self.assertIn("#123", comment)
+        self.assertIn("Merge plan:", comment)
+
+
+class TestPipelineProvenanceFooter(unittest.TestCase):
+    """C6: Footer must say 'template-fallback' when AI didn't run."""
+
+    def test_fallback_footer_no_model_name(self):
+        comment = _fallback_comment(SAMPLE_PR, "42", None, None, "claude-sonnet-5")
+        self.assertIn("template-fallback", comment)
+        self.assertIn("no AI analysis performed", comment)
+        self.assertNotIn("claude-sonnet-5 (fallback)", comment)
+
+
 if __name__ == "__main__":
     unittest.main()

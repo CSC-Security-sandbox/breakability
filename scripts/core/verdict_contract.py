@@ -258,28 +258,32 @@ def _is_currently_vulnerable(pr: Mapping[str, Any]) -> bool:
     try:
         from packaging.version import Version
         v = Version(from_ver)
-        parts = [p.strip() for p in vuln_range.split(",")]
-        for part in parts:
-            if part.startswith("<= "):
-                if not (v <= Version(part[3:].strip())):
-                    return False
-            elif part.startswith("< "):
-                if not (v < Version(part[2:].strip())):
-                    return False
-            elif part.startswith(">= "):
-                if not (v >= Version(part[3:].strip())):
-                    return False
-            elif part.startswith("> "):
-                if not (v > Version(part[2:].strip())):
-                    return False
-            elif part.startswith("= "):
-                if not (v == Version(part[2:].strip())):
-                    return False
-            else:
-                return True
-        return True
     except Exception:
-        pass
+        return True
+    parts = [p.strip() for p in vuln_range.split(",")]
+    _OPS = [("<= ", 3), ("< ", 2), (">= ", 3), ("> ", 2), ("= ", 2)]
+    for part in parts:
+        matched = False
+        for prefix, skip in _OPS:
+            if part.startswith(prefix):
+                matched = True
+                try:
+                    bound = Version(part[skip:].strip())
+                except Exception:
+                    break
+                if prefix == "<= " and not (v <= bound):
+                    return False
+                elif prefix == "< " and not (v < bound):
+                    return False
+                elif prefix == ">= " and not (v >= bound):
+                    return False
+                elif prefix == "> " and not (v > bound):
+                    return False
+                elif prefix == "= " and not (v == bound):
+                    return False
+                break
+        if not matched:
+            continue
     return True
 
 
@@ -842,19 +846,25 @@ if __name__ == "__main__":
         pr["verdict_v2"] = verdict
         processed += 1
 
-    # Propagate verdict_v2 and build_misattributed back to prs{}
-    # results[] and prs{} are separate objects after JSON deserialization
+    # Compute verdicts from prs{} (canonical source with probe data)
+    # results[] may lack behavioral_grade/probe data added after initial assembly
+    for pr_key, pr_data in prs.items():
+        pr_data.pop("verdict_v2", None)
+        verdict = authoritative_verdict(pr_data)
+        pr_data["verdict_v2"] = verdict
+
+    # Propagate verdict_v2 and build_misattributed from results[] to prs{}
+    # (only for fields results[] has that prs{} doesn't)
     propagated = 0
     for pr in results:
         pr_key = str(pr.get("pr_num", pr.get("pr_number", "")))
         if pr_key and pr_key in prs:
-            prs[pr_key]["verdict_v2"] = pr.get("verdict_v2")
             if pr.get("build_misattributed"):
                 prs[pr_key]["build_misattributed"] = True
                 prs[pr_key]["misattribution_peers"] = pr.get("misattribution_peers", [])
             propagated += 1
     if propagated:
-        print(f"ℹ️  Propagated verdict_v2 to {propagated} prs{{}} entries", file=sys.stderr)
+        print(f"ℹ️  Computed verdicts for {propagated} prs{{}} entries directly", file=sys.stderr)
 
     # Fix merge_risk when symbol verification overrides (C3: PR#44 overclaim)
     mr_fixed = 0
@@ -885,6 +895,19 @@ if __name__ == "__main__":
             mr_fixed += 1
     if mr_fixed:
         print(f"ℹ️  Fixed {mr_fixed} merge_risk tag(s) via symbol verification override", file=sys.stderr)
+
+    # Fix verification_level for Actions PRs with passing builds (C8)
+    vl_fixed = 0
+    for pr_key, pr_data in prs.items():
+        if str(pr_data.get("ecosystem", "")).strip().lower() != "actions":
+            continue
+        build_v = (pr_data.get("build") or {}).get("verdict", "")
+        if build_v in ("pass", "pre_existing") and pr_data.get("verification_level", -1) < 0:
+            pr_data["verification_level"] = 2
+            pr_data["verification_label"] = "L2_ci_verified"
+            vl_fixed += 1
+    if vl_fixed:
+        print(f"ℹ️  Fixed verification_level for {vl_fixed} Actions PR(s) with passing builds", file=sys.stderr)
 
     # Write back or print
     if write_back:

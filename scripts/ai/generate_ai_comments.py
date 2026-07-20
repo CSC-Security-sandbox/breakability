@@ -36,7 +36,7 @@ sys.path.insert(0, _HERE)
 sys.path.insert(0, os.path.dirname(_HERE))  # parent scripts/ dir
 
 from ai_backend import Backend
-from verdict_contract import authoritative_verdict
+from verdict_contract import authoritative_verdict, _is_currently_vulnerable
 
 
 def _read_prompt(prompt_path: str) -> str:
@@ -101,13 +101,13 @@ def _build_per_pr_prompt(
         if str(d.get("pr_a")) == pr_num or str(d.get("pr_b")) == pr_num
     ]
 
-    plan_ref = f"#{merge_plan_issue}" if merge_plan_issue else "#ISSUE_NUMBER"
+    plan_ref = f"#{merge_plan_issue}" if merge_plan_issue else ""
 
     sections = [
         base_prompt,
         "\n\n---\n\n## CONTEXT FOR THIS PR\n",
         f"You are generating a comment for **PR #{pr_num}**.\n",
-        f"Replace `#ISSUE_NUMBER` with `{plan_ref}` in the merge plan link.\n",
+        (f"Use `{plan_ref}` for the merge plan link.\n" if plan_ref else "Omit the merge plan link line.\n"),
         f"\n### PR Data (from build-results.json)\n```json\n{pr_json}\n```\n",
     ]
 
@@ -622,7 +622,7 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
     to_ver = pr.get("to", "?")
     dep_type = pr.get("dep_type", "unknown")
     bump = pr.get("bump", "unknown")
-    plan_ref = f"#{merge_plan_issue}" if merge_plan_issue else "#ISSUE_NUMBER"
+    plan_ref = f"#{merge_plan_issue}" if merge_plan_issue else ""
 
     av = authoritative_verdict(pr)
     verdict = av.get("verdict", "REVIEW")
@@ -658,10 +658,20 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
     reach_count = len(files_importing)
     r_status = f"📦 {reach_count} file(s)" if reach_count > 0 else "✅ Not imported"
 
-    changelog_raw = det.get("changelogSignal", "unknown")
-    if isinstance(changelog_raw, dict):
-        changelog_raw = json.dumps(changelog_raw)
-    cl_short = (str(changelog_raw)[:50] + "…") if len(str(changelog_raw)) > 50 else str(changelog_raw)
+    changelog_signal = det.get("changelogSignal")
+    if isinstance(changelog_signal, dict):
+        cl_status = (changelog_signal.get("status") or "").lower()
+    elif isinstance(changelog_signal, str):
+        cl_status = changelog_signal.lower()
+    else:
+        cl_status = ""
+    _CL_STATUS_MAP = {
+        "breaking": "⚠️ Breaking changes detected",
+        "missing": "⏭️ Unavailable",
+        "clean": "✅ No breaking changes",
+        "none": "✅ No breaking changes (low confidence)",
+    }
+    cl_short = _CL_STATUS_MAP.get(cl_status, "⏭️ Unknown" if changelog_signal is None else "⏭️ Unknown")
 
     api_changes = det.get("api_changes")
     a_status = f"⚠️ {api_changes} changes" if api_changes else "✅ No changes"
@@ -685,6 +695,20 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
         f"| Changelog | {cl_short} | MEDIUM | — |",
         f"| API Diff | {a_status} | MEDIUM | — |",
         "",
+    ]
+
+    if cl_status == "breaking" and isinstance(changelog_signal, dict):
+        bullets = changelog_signal.get("bullets") or changelog_signal.get("breaking_items") or []
+        if bullets:
+            lines.append("#### Changelog Breaking Changes")
+            lines.append("")
+            for b in bullets[:10]:
+                lines.append(f"- {b}")
+            if len(bullets) > 10:
+                lines.append(f"- … and {len(bullets) - 10} more")
+            lines.append("")
+
+    lines.extend([
         "### Verdict Logic",
         "",
         f"- **Authoritative verdict:** {verdict} (source: `{av.get('source', 'unknown')}`)",
@@ -692,7 +716,7 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
         f"- **Severity:** {av.get('severity', 'N/A')} · **Priority:** {av.get('priority', 'N/A')}",
         f"- **Reason:** {av.get('reason', 'N/A')}",
         "",
-    ]
+    ])
 
     cve_details = pr.get("cve_details") or []
     det_sec_fb = (pr.get("deterministic") or {}).get("security") or {}
@@ -714,9 +738,13 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
     elif det_sec_fb.get("isSecurity") and det_sec_fb.get("cveIds"):
         cve_ids = det_sec_fb["cveIds"]
         cvss = det_sec_fb.get("cvssScore") or det_sec_fb.get("cvss_score") or "N/A"
+        is_vuln = _is_currently_vulnerable(pr)
         lines.append("### Security Impact")
         lines.append("")
-        lines.append(f"This PR remediates {len(cve_ids)} CVE(s) (max CVSS: {cvss}):")
+        if is_vuln:
+            lines.append(f"This PR remediates {len(cve_ids)} CVE(s) (max CVSS: {cvss}):")
+        else:
+            lines.append(f"Historical advisory — base version already outside vulnerable range. {len(cve_ids)} CVE(s) listed (max CVSS: {cvss}):")
         lines.append("")
         for cid in cve_ids[:10]:
             lines.append(f"- **{cid}**")
@@ -779,10 +807,12 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
         "2. Run the project's test suite locally",
         "3. Check the files listed above for breaking API usage",
         "",
-        f"📋 Merge plan: {plan_ref}",
-        "",
+    ])
+    if plan_ref:
+        lines.extend([f"📋 Merge plan: {plan_ref}", ""])
+    lines.extend([
         "---",
-        f"Mode: Deterministic + Behavioral Probe · Model: {model_name} (fallback) · "
+        f"Mode: Deterministic + Behavioral Probe · Model: template-fallback (no AI analysis performed) · "
         f"Analyzed: {date.today().isoformat()}",
     ])
     if run_url:

@@ -48,8 +48,12 @@ def check_pipeline_completeness(results):
 
     if pf:
         if pf.get("skip_agent_requested"):
-            findings.append(("P0", "AI_SKIPPED",
-                             "skip_agent=true — AI layer explicitly disabled, all comments are thin templates"))
+            if pf.get("ai_comments_generated"):
+                findings.append(("P1", "AI_SKIPPED",
+                                 "skip_agent=true — deterministic fallback comments generated"))
+            else:
+                findings.append(("P0", "AI_SKIPPED",
+                                 "skip_agent=true — AI layer explicitly disabled, all comments are thin templates"))
         elif not pf.get("ai_comments_generated"):
             findings.append(("P0", "AI_FAILED",
                              "AI agent ran but produced no comments — 1,257-line prompt unused"))
