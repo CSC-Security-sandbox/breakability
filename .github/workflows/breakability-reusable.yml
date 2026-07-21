@@ -229,6 +229,10 @@ jobs:
         with:
           node-version: ${{ inputs.node_version }}
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go_version }}
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.python_version }}

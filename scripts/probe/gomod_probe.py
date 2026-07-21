@@ -7,14 +7,41 @@ import subprocess
 import tempfile
 import time
 
+from pathlib import Path
+
 from .config import REPO_ROOT, GOMOD_PROBE_TIMEOUT, GOMOD_PROBE_ROOT, _GOMOD_RE, _GOMOD_VERSION_RE
 
 __all__ = [
     "is_gomod_probe_candidate", "gomod_unavailable_grade",
     "gomod_grade_from_snapshots", "run_gomod_differential_probe",
     # Private names exported for backward compatibility
-    "_valid_gomod_ref", "_go_doc_snapshot",
+    "_valid_gomod_ref", "_go_doc_snapshot", "_find_go_binary",
 ]
+
+
+def _find_go_binary():
+    """Locate the Go binary, searching PATH and common CI installation directories."""
+    found = shutil.which("go")
+    if found:
+        return found
+    search_dirs = ["/usr/local/go/bin", os.path.expanduser("~/go/bin")]
+    goroot = os.environ.get("GOROOT")
+    if goroot:
+        search_dirs.insert(0, os.path.join(goroot, "bin"))
+    tool_cache_roots = [Path("/opt/hostedtoolcache/go")]
+    runner_tool_cache = os.environ.get("RUNNER_TOOL_CACHE")
+    if runner_tool_cache:
+        tool_cache_roots.insert(0, Path(runner_tool_cache) / "go")
+    for hc in tool_cache_roots:
+        if hc.exists():
+            for hd in hc.glob("*/x64/bin"):
+                search_dirs.append(str(hd))
+    for d in search_dirs:
+        candidate = os.path.join(d, "go")
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+            return candidate
+    return None
 
 
 def is_gomod_probe_candidate(pr):
@@ -157,7 +184,7 @@ def run_gomod_differential_probe(num, pr):
     ]
     if not _valid_gomod_ref(pkg, from_version) or not _valid_gomod_ref(pkg, to_version):
         return gomod_unavailable_grade("invalid Go module/version reference", commands, source="fallback")
-    if shutil.which("go") is None:
+    if _find_go_binary() is None:
         return gomod_unavailable_grade("go executable not found", commands, source="fallback")
 
     os.makedirs(GOMOD_PROBE_ROOT, exist_ok=True)
