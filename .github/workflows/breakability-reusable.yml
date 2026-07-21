@@ -250,6 +250,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.token || github.token }}
           GITHUB_TOKEN: ${{ secrets.token || github.token }}
+          BREAKABILITY_PAT: ${{ secrets.breakability_pat }}
 
       - name: Show build results summary
         if: always()
