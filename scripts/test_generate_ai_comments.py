@@ -22,6 +22,9 @@ from generate_ai_comments import (
     _strip_govulncheck,
     _sanitize_comment,
     _downgrade_mismatched_probe,
+    _guard_empty_build_output,
+    _strip_wrong_ecosystem_refs,
+    _validate_merge_risk_tag,
 )
 
 
@@ -1327,6 +1330,245 @@ class TestDenyListInPrompt(unittest.TestCase):
         )
         self.assertIn("govulncheck", prompt)
         self.assertIn("DENY LIST", prompt)
+
+
+class TestEnforceVerdictFloorAIFormats(unittest.TestCase):
+    """C1: _enforce_verdict_floor must handle AI output formats with compound verdict words."""
+
+    def test_review_risk_rewritten_to_blocked_in_header(self):
+        comment = (
+            "<!-- breakability-check -->\n"
+            "## 🚨 REVIEW RISK — `github.com/jackc/pgx/v5` 5.7.4 → 5.9.2\n"
+            "Body text here"
+        )
+        pr = {"package": "github.com/jackc/pgx/v5", "build": {"verdict": "fail"}, "test": {"ran": False}}
+        result = _enforce_verdict_floor(comment, pr, "23")
+        self.assertIn("## 🚫 BLOCKED", result)
+        self.assertNotIn("REVIEW RISK", result)
+
+    def test_security_risk_rewritten_to_blocked_in_header(self):
+        comment = (
+            "<!-- breakability-check -->\n"
+            "## 🚨 SECURITY_RISK — `pkg` 1.0 → 2.0\n"
+            "verdict = SECURITY_RISK\n"
+        )
+        pr = {"package": "pkg", "build": {"verdict": "fail"}, "test": {"ran": False}}
+        result = _enforce_verdict_floor(comment, pr, "23")
+        self.assertIn("## 🚫 BLOCKED", result)
+        self.assertNotIn("SECURITY_RISK", result)
+
+    def test_governance_override_stripped_for_blocked(self):
+        comment = (
+            "<!-- breakability-check -->\n"
+            "## 🚨 REVIEW RISK — `pkg` 1.0 → 2.0\n"
+            "**Rule applied:** SECURITY OVERRIDE (Rule 0.5) — merge for CVE.\n"
+            "security_override = MERGE_REQUIRED\n"
+        )
+        pr = {"package": "pkg", "build": {"verdict": "fail"}, "test": {"ran": False}}
+        result = _enforce_verdict_floor(comment, pr, "23")
+        self.assertNotIn("SECURITY OVERRIDE", result)
+        self.assertNotIn("MERGE_REQUIRED", result)
+        self.assertIn("human review", result)
+
+    def test_must_be_merged_rewritten_for_blocked(self):
+        comment = (
+            "<!-- breakability-check -->\n"
+            "## 🚨 REVIEW RISK — `pkg` 1.0 → 2.0\n"
+            "This PR MUST be merged for security reasons.\n"
+        )
+        pr = {"package": "pkg", "build": {"verdict": "fail"}, "test": {"ran": False}}
+        result = _enforce_verdict_floor(comment, pr, "54")
+        self.assertNotIn("MUST be merged", result)
+        self.assertIn("Do not merge", result)
+
+    def test_positive_control_fallback_blocked_unchanged(self):
+        comment = (
+            "<!-- breakability-check -->\n"
+            "## 🚫 BLOCKED — `pgx/v5` 5.7.4 → 5.9.2\n"
+            "verdict = BLOCKED\n"
+        )
+        pr = {"package": "pgx/v5", "build": {"verdict": "fail"}, "test": {"ran": False}}
+        result = _enforce_verdict_floor(comment, pr, "9")
+        self.assertIn("## 🚫 BLOCKED", result)
+
+    def test_review_verdict_pr_keeps_merge_recommendation(self):
+        """Positive control: REVIEW PRs must keep their merge recommendations."""
+        comment = (
+            "<!-- breakability-check -->\n"
+            "## ⚠️ REVIEW — `pkg` 1.0 → 2.0\n"
+            "Merge recommended after review.\n"
+        )
+        pr = {
+            "package": "pkg", "build": {"verdict": "pass"},
+            "test": {"ran": True, "exit": 0},
+            "policy_lowering": {"decision": {"verdict": "REVIEW"}},
+        }
+        result = _enforce_verdict_floor(comment, pr, "41")
+        self.assertIn("Merge recommended after review", result)
+
+
+class TestGuardEmptyBuildOutput(unittest.TestCase):
+    """C3: Strip fabricated infra causes when build.output_tail is empty."""
+
+    def test_strips_go_toolchain_unavailable(self):
+        comment = "Build not run (Go toolchain unavailable)\nGo is not installed on runner"
+        pr = {"build": {"output_tail": "", "pr_exit": -1}}
+        result = _guard_empty_build_output(comment, pr, "23")
+        self.assertNotIn("Go toolchain unavailable", result)
+        self.assertNotIn("Go is not installed", result)
+        self.assertIn("no diagnostic output captured", result)
+
+    def test_strips_missing_path(self):
+        comment = "Build failed: missing PATH configuration for Go"
+        pr = {"build": {"output_tail": "\n", "pr_exit": -1}}
+        result = _guard_empty_build_output(comment, pr, "54")
+        self.assertIn("no diagnostic output captured", result)
+
+    def test_preserves_when_output_tail_present(self):
+        comment = "Build failed: Go toolchain unavailable"
+        pr = {"build": {"output_tail": "no space left on device", "pr_exit": -1}}
+        result = _guard_empty_build_output(comment, pr, "10")
+        self.assertIn("Go toolchain unavailable", result)
+
+    def test_preserves_when_pr_exit_not_negative_one(self):
+        comment = "Build failed: Go toolchain unavailable"
+        pr = {"build": {"output_tail": "", "pr_exit": 1}}
+        result = _guard_empty_build_output(comment, pr, "42")
+        self.assertIn("Go toolchain unavailable", result)
+
+    def test_positive_control_disk_space_kept(self):
+        """PR#10/#11 must keep correct disk-space diagnosis."""
+        comment = "Build failed: no space left on device"
+        pr = {"build": {"output_tail": "no space left on device", "pr_exit": 1}}
+        result = _guard_empty_build_output(comment, pr, "10")
+        self.assertIn("no space left on device", result)
+
+
+class TestStripWrongEcosystemRefs(unittest.TestCase):
+    """C5: Strip Node.js/npm references from Go-only repo comments."""
+
+    def test_strips_npm_install_from_gomod(self):
+        comment = (
+            "## REVIEW\n"
+            "Verify that Node.js 20 is installed and npm cache is restored correctly\n"
+            "```bash\nnpm install pkg@1.0\nnpm run build\n```\n"
+        )
+        pr = {
+            "ecosystem": "gomod",
+            "_top_level": {"codebase_context": {"has_package_json": False}},
+        }
+        result = _strip_wrong_ecosystem_refs(comment, pr, "20")
+        self.assertNotIn("Node.js 20 is installed", result)
+        self.assertNotIn("npm install", result)
+
+    def test_strips_npm_from_actions_go_only(self):
+        comment = "Verify that Node.js 20 is installed and npm cache is restored correctly\n"
+        pr = {
+            "ecosystem": "actions",
+            "_top_level": {"codebase_context": {"has_package_json": False}},
+        }
+        result = _strip_wrong_ecosystem_refs(comment, pr, "4")
+        self.assertNotIn("Node.js 20 is installed", result)
+
+    def test_keeps_npm_for_mixed_repo(self):
+        comment = "```bash\nnpm install pkg@1.0\n```"
+        pr = {
+            "ecosystem": "gomod",
+            "_top_level": {"codebase_context": {"has_package_json": True}},
+        }
+        result = _strip_wrong_ecosystem_refs(comment, pr, "42")
+        self.assertIn("npm install", result)
+
+    def test_keeps_npm_for_npm_ecosystem(self):
+        comment = "```bash\nnpm install pkg@1.0\n```"
+        pr = {
+            "ecosystem": "npm",
+            "_top_level": {"codebase_context": {"has_package_json": True}},
+        }
+        result = _strip_wrong_ecosystem_refs(comment, pr, "42")
+        self.assertIn("npm install", result)
+
+
+class TestValidateMergeRiskTag(unittest.TestCase):
+    """C7: Validate merge_risk tag against enum {Low,Medium,High,None}."""
+
+    def test_invalid_tag_replaced_with_ground_truth(self):
+        comment = "## REVIEW\n\nMerge Risk: BLOCKED\nSome content"
+        pr = {"merge_risk": {"tag": "High"}}
+        result = _validate_merge_risk_tag(comment, pr, "52")
+        self.assertIn("Merge Risk: High", result)
+        self.assertNotIn("Merge Risk: BLOCKED", result)
+
+    def test_valid_tag_unchanged(self):
+        comment = "## REVIEW\n\nMerge Risk: High\nSome content"
+        pr = {"merge_risk": {"tag": "High"}}
+        result = _validate_merge_risk_tag(comment, pr, "53")
+        self.assertIn("Merge Risk: High", result)
+
+    def test_no_merge_risk_in_comment_unchanged(self):
+        comment = "## REVIEW\nSome content"
+        pr = {"merge_risk": {"tag": "High"}}
+        result = _validate_merge_risk_tag(comment, pr, "42")
+        self.assertEqual(result, comment)
+
+
+class TestSanitizeCommentFabricatedSHA(unittest.TestCase):
+    """C4: Strip fabricated 40-char hex strings (commit SHAs) not in PR metadata."""
+
+    def test_strips_fabricated_sha(self):
+        comment = "Commit fa0a91b85d4f404e444e00e005971372dc801d16 introduced changes"
+        pr = {"commit_sha": "", "base_sha": ""}
+        result = _sanitize_comment(comment, pr, "4")
+        self.assertNotIn("fa0a91b85d4f404e444e00e005971372dc801d16", result)
+
+    def test_keeps_real_sha(self):
+        real_sha = "abcdef1234567890abcdef1234567890abcdef12"
+        comment = f"Commit {real_sha} introduced changes"
+        pr = {"commit_sha": real_sha}
+        result = _sanitize_comment(comment, pr, "4")
+        self.assertIn(real_sha, result)
+
+
+class TestMergeRiskReasonEnrichment(unittest.TestCase):
+    """C8: merge_risk.reason must include reachability/probe evidence."""
+
+    def test_zero_imports_in_reason(self):
+        from verdict_contract import authoritative_verdict
+        pr = {
+            "package": "some-pkg", "from": "1.0", "to": "2.0",
+            "build": {"verdict": "pass"}, "test": {"ran": False},
+            "files_importing": [], "usages": [],
+            "deterministic": {
+                "merge_risk": {"tag": "Medium", "reason": "missing or unparsable changelog; default caution"},
+            },
+        }
+        av = authoritative_verdict(pr)
+        self.assertIn("not imported by application code", av.get("reason", ""))
+
+    def test_nonzero_imports_in_reason(self):
+        from verdict_contract import authoritative_verdict
+        pr = {
+            "package": "some-pkg", "from": "1.0", "to": "2.0",
+            "build": {"verdict": "pass"}, "test": {"ran": False},
+            "files_importing": ["src/auth.go", "src/api.go"], "usages": [],
+            "deterministic": {
+                "merge_risk": {"tag": "Medium", "reason": "missing or unparsable changelog; default caution"},
+            },
+        }
+        av = authoritative_verdict(pr)
+        self.assertIn("imported by 2 file(s)", av.get("reason", ""))
+
+    def test_positive_control_nonempty_usages_no_double_annotation(self):
+        """PRs with non-empty usages must NOT get 'not imported' annotation."""
+        from verdict_contract import authoritative_verdict
+        pr = {
+            "package": "lodash", "from": "4.17.20", "to": "4.17.21",
+            "build": {"verdict": "pass"}, "test": {"ran": True, "exit": 0},
+            "files_importing": ["src/utils.ts"], "usages": ["debounce", "throttle"],
+            "verdict_v2": {"verdict": "SAFE", "severity": "low", "confidence": "L4", "priority": "P3"},
+        }
+        av = authoritative_verdict(pr)
+        self.assertNotIn("not imported", av.get("reason", ""))
 
 
 if __name__ == "__main__":

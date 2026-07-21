@@ -2,44 +2,88 @@
 
 ## Verdict header contradicts ground truth on CVE-floor BLOCKED PRs (VERDICT_HEADER_MISMATCH)
 - First seen: v15 ndm-fresh iter 1
-- Occurrence count: 5 (ndm×3 + VCP×2)
-- Status: **FIXED** (VCP iter 1) — _enforce_verdict_floor() enhanced to rewrite body text + all 17 comments regenerated.
-- Impact: Was: 4/6 BLOCKED PRs showed "REVIEW RISK" headline. Now: all show "🚫 BLOCKED".
+- Occurrence count: 6 (ndm×3 + VCP×3)
+- Status: **OPEN — REGRESSED** (was marked FIXED in VCP iter 1, but fix only worked on fallback-regenerated comments; fresh AI-generated comments from CI run 29813885743 still show wrong headline)
+- Impact: 4/6 BLOCKED PRs (PR#23, #52, #53, #54) render "🚨 REVIEW RISK" headline while verdict_v2.verdict=BLOCKED. Fallback comments (PR#9, #32) are correct. Pattern: every fallback correct, every AI-generated wrong.
+- Root cause: _enforce_verdict_floor() either does not run on AI-generated comments, or the regex doesn't match the AI's output format.
+- LESSON: Validating fixes against fallback-regenerated comments does NOT prove the fix works on AI-generated comments. Must test against actual AI output.
+
+## AI fabricates governance override language on BLOCKED PRs (AI_FABRICATED_GOVERNANCE)
+- First seen: v15 VCP iter 1 (PR#54 "MERGE IMMEDIATELY")
+- Occurrence count: 2
+- Status: **OPEN** — PR#23 "SECURITY OVERRIDE (Rule 0.5)", PR#54 "security_override = MERGE_REQUIRED", PR#52 "Merge immediately" + "MERGE IMMEDIATELY". None of these strings exist in build-results.json.
+- Impact: Gate manufactures its own override authority to bypass BLOCKED verdict. Developer following instructions merges unverified (L0) PRs on CVSS-10.0 CVEs.
+- Previous fix: VCP iter 1 added "MERGE IMMEDIATELY" → "Do not merge" rewrite. Applied to fallback comments only, not AI-generated.
+
+## AI fabricates specific root cause with no evidence (AI_FABRICATED_ROOT_CAUSE)
+- First seen: v15 VCP iter 2
+- Occurrence count: 1
+- Status: **OPEN** — PR#23 (7x "Go toolchain unavailable"), PR#54 (8x "Go toolchain not accessible"/"missing PATH"). build.output_tail is empty. main_build.go shows disk exhaustion ("no space left on device"). Same run correctly diagnoses disk-space on PR#10/#11.
+- Impact: Sends developer down wrong debugging path.
+
+## AI fabricates file paths, line numbers, and commit SHAs (AI_FABRICATED_CITATIONS)
+- First seen: v15 VCP iter 2
+- Occurrence count: 1
+- Status: **OPEN** — PR#54 invents `utils/crypto/encryption.go` (not in files_importing). PR#22 invents `ci.yml`, `release.yml`, `dependabot.yml` (files_importing=[]). PR#4 fabricates commit SHA `fa0a91b85d4f404`.
+- Impact: Developer could trust fabricated file paths for blast-radius assessment or copy fabricated SHA into workflow.
+
+## AI invents non-canonical verdict category (AI_VERDICT_INVENTION)
+- First seen: v15 VCP iter 2
+- Occurrence count: 1
+- Status: **OPEN** — PR#23 produces "SECURITY_RISK" / "SECURITY RISK" verdict. Schema only has SAFE/REVIEW/BLOCKED. Three different verdict strings in one comment.
+
+## PR#52 merge_risk.tag renders invalid enum value (MERGE_RISK_ENUM_VIOLATION)
+- First seen: v15 VCP iter 2
+- Occurrence count: 1
+- Status: **OPEN** — PR#52 comment shows "Merge Risk: BLOCKED". Ground truth tag="High". Enum is Low/Medium/High/None.
+
+## Actions PRs cite Node.js artifacts in Go-only repo (ACTIONS_WRONG_ECOSYSTEM)
+- First seen: v15 VCP iter 1
+- Occurrence count: 2
+- Status: **OPEN — REGRESSED** (was marked FIXED, but fresh AI-generated comments reintroduce Node.js/TypeScript references; PR#20 line 91 has actionable "Verify that Node.js 20 is installed" instruction in a Go-only repo)
+- Previous fix: VCP iter 1 added ecosystem context to AI prompt. Fix didn't survive fresh AI generation.
+
+## merge_risk.reason ignores reachability/probe evidence (MERGE_RISK_REASON_BLIND)
+- First seen: v15 VCP iter 1 (as CVE_FLOOR_REASON_DROP)
+- Occurrence count: 2
+- Status: **OPEN** — 12/17 PRs have reason = "missing changelog; default caution" despite usages=[], api_diff available.
+- Note: verdict_v2.reason includes probe evidence for some PRs but merge_risk.reason doesn't.
 
 ## PR comment is broken artifact — leaked LLM narration (BROKEN_COMMENT_ARTIFACT)
 - First seen: v15 VCP iter 1
 - Occurrence count: 1
-- Status: **FIXED** (VCP iter 1) — _sanitize_comment() strips QA notes, fabricated URLs. _strip_agent_narration strips leaked narration. Comment regenerated via _fallback_comment().
+- Status: **FIXED** (VCP iter 1) — PR#8 now clean fallback comment. VERIFIED in iter 2.
 
 ## CVE-floor reason drops high-confidence probe evidence (CVE_FLOOR_REASON_DROP)
 - First seen: v15 ndm-fresh iter 6 (as PR43_VERDICT_REASON)
 - Occurrence count: 2
-- Status: **FIXED** (VCP iter 1) — same_behavior=False branch already existed in code (ndm iter 6). VCP data already correct. STALE_COMMENTS pattern — regeneration fixed.
+- Status: **FIXED in verdict_v2** (VCP iter 1). merge_risk.reason still affected — tracked as MERGE_RISK_REASON_BLIND.
 
 ## PR#8 behavioral probe hides PACKAGE-MISMATCH caveat (PROBE_MISMATCH_HIDDEN)
 - First seen: v15 VCP iter 1
 - Occurrence count: 1
-- Status: **FIXED** (VCP iter 1) — _fallback_comment now checks reconciliation_note for MISMATCH. Shows LOW confidence with "⚠️ package mismatch" caveat.
+- Status: **FIXED** (VCP iter 1) — fallback comment shows LOW confidence with "⚠️ package mismatch" caveat. VERIFIED in iter 2.
 
 ## merge_risk.tag not escalated on CVE floor (MERGE_RISK_CVE_FLOOR)
 - First seen: v15 VCP iter 1
 - Occurrence count: 1
-- Status: **FIXED** (VCP iter 1) — CLI post-processing already escalated to High. STALE_COMMENTS — regeneration fixed. All 6 BLOCKED PRs show "🔴 High".
-
-## Actions PRs cite Node.js artifacts in Go-only repo (ACTIONS_WRONG_ECOSYSTEM)
-- First seen: v15 VCP iter 1
-- Occurrence count: 1
-- Status: **FIXED** (VCP iter 1) — Added ecosystem context to AI prompt. _fallback_comment uses ecosystem-aware verification (git diff, not npm). 0 Node.js references in PRs 4,19,20,21,22.
+- Status: **FIXED** (VCP iter 1) — All 6 BLOCKED PRs show merge_risk.tag="High" in data layer. VERIFIED in iter 2.
 
 ## govulncheck recommended despite permanent ban (GOVULNCHECK_POLICY_LEAK)
 - First seen: v15 VCP iter 1
 - Occurrence count: 1
-- Status: **FIXED** (VCP iter 1) — Added DENY LIST to AI prompt. _strip_govulncheck post-gen strip existed. 0 govulncheck refs in PRs 10,53,54.
+- Status: **FIXED** (VCP iter 1) — 0 govulncheck references in all 17 comments. VERIFIED in iter 2.
 
 ## Template fallback on highest-priority security PR (TEMPLATE_FALLBACK_CRITICAL)
 - First seen: v15 VCP iter 1
-- Occurrence count: 1
-- Status: **FIXED** (VCP iter 1) — Added CVE-floor security urgency banner. Fallback now shows per-CVE data from cve_details. PR#32 has 91-line enriched comment with 3 CVEs and CVSS scores.
+- Occurrence count: 2
+- Status: **OPEN** — PR#9 and PR#32 (both pgx/v5, CVSS 9.8, P0/critical) fell back to template. Fallback content is correct (BLOCKED headline, CVE data) but less detailed. 2/3 fallbacks are P0 PRs.
+
+## Dependabot Alerts Unavailable (ALERTS_BLIND)
+- First seen: pre-v15
+- Occurrence count: 10
+- Status: **FIXED — VERIFIED** in CI run 29813885743. alerts_unavailable=false, total_open_alerts=156, severity_counts={medium:43, critical:64, high:45, low:4}, prs_fixing_alerts populated for 12/17 PRs with real CVE IDs, CVSS scores, advisory URLs. Root cause fix: 93e2b00 (BREAKABILITY_PAT passed to finalize merge step).
+- Resolution: 10-iteration saga resolved. Do NOT re-open unless a future run regresses.
 
 ## API Diff row fabricates "No changes" when tool never ran (API_DIFF_FABRICATION)
 - First seen: v15 ndm-fresh iter 6
@@ -85,34 +129,31 @@
 - First seen: v15 ndm-fresh iter 6
 - Occurrence count: 1
 - Status: **PARTIALLY FIXED** (iter 6) — reason now includes probe evidence; verdict stays REVIEW per corpus
-- Impact: PR#43 reason was "change evidence is limited; default caution" despite having same_behavior=true probe data.
-- Fix applied: merge_risk fallback now includes behavioral probe evidence in reason string.
-- Note: Verdict stays REVIEW (not SAFE) because corpus ground truth expects true_review for build=pre_existing PRs.
 
 ## Merge-plan headline severity summary fabricated (MERGE_PLAN_SEVERITY_FABRICATION)
 - First seen: v15 ndm-fresh iter 6
 - Occurrence count: 1
-- Status: **FIXED** (iter 6) — removed L[0-5] regex gate from both headline_severity() and committed_v2_verdict()
+- Status: **FIXED** (iter 6)
 
 ## Merge plan security fix in dead code (MERGE_PLAN_DEAD_CODE)
 - First seen: v15 ndm-fresh iter 6
 - Occurrence count: 1
-- Status: **FIXED** (iter 6) — ported security posture fallback to generate_ai_merge_plan.py with active/historical split
+- Status: **FIXED** (iter 6)
 
 ## Merge plan CVE table overclaims active security fixes (MERGE_PLAN_CVE_OVERCLAIM)
 - First seen: v15 ndm-fresh iter 6
 - Occurrence count: 1
-- Status: **FIXED** (iter 6) — added _is_currently_vulnerable() check, split into Active vs Historical Advisories
+- Status: **FIXED** (iter 6)
 
 ## Actions PRs get nonsensical npm install commands (ACTIONS_NPM_COMMANDS)
 - First seen: v15 ndm-fresh iter 6
 - Occurrence count: 1
-- Status: **FIXED** (iter 6) — added ecosystem=actions branch with git diff and release notes link
+- Status: **FIXED** (iter 6)
 
 ## Test row does not distinguish pre-existing from new failures (TEST_ROW_PRE_EXISTING)
 - First seen: v15 ndm-fresh iter 6
 - Occurrence count: 1
-- Status: **FIXED** (iter 6) — renders "⚠️ Failed — pre-existing" when new_failures=[] and test.exit!=0
+- Status: **FIXED** (iter 6)
 
 ## P0/critical CVE-floor PRs get REVIEW not BLOCKED (CVE_FLOOR_VERDICT_INCONSISTENCY)
 - First seen: v15 ndm-fresh iter 6
@@ -122,12 +163,12 @@
 ## Changelog table row ignores changelogSignal.status (CHANGELOG_FABRICATION)
 - First seen: v15 ndm-fresh iter 5
 - Occurrence count: 1
-- Status: **FIXED** (iter 5) — fallback renderer reads changelogSignal.status
+- Status: **FIXED** (iter 5)
 
 ## CVE remediation overclaim in comment body (CVE_OVERCLAIM)
 - First seen: v15 ndm-fresh iter 5
 - Occurrence count: 1
-- Status: **FIXED** (iter 5) — _is_currently_vulnerable() handles non-PEP440 versions
+- Status: **FIXED** (iter 5)
 
 ## Broken merge-plan link placeholder (ISSUE_NUMBER_PLACEHOLDER)
 - First seen: v15 ndm-fresh iter 5
@@ -164,13 +205,6 @@
 - Occurrence count: 4
 - Status: **FIXED** (iter 3 comments)
 
-## Dependabot Alerts Unavailable (ALERTS_BLIND)
-- First seen: pre-v15
-- Occurrence count: 10
-- Status: **OPEN** — Root cause found: BREAKABILITY_PAT not passed to finalize merge step. Fix committed (93e2b00) but CI run 29805118237 predates fix by 5 minutes. UNVERIFIED.
-- Impact: alerts_unavailable=true, total_open_alerts=0, severity_counts={}. Cannot correlate alerts with PRs.
-- Note: 10th consecutive occurrence. Root cause finally identified as workflow YAML config, not PAT scope. Do NOT mark fixed until post-fix CI run shows non-empty prs_fixing_alerts.
-
 ## security_posture aggregation reports 0 CVEs (SEC_POSTURE_ZEROS)
 - First seen: v15 ndm-fresh iter 1
 - Occurrence count: 4
@@ -179,7 +213,7 @@
 ## Merge plan security section functionally empty (MERGE_PLAN_SECURITY_EMPTY)
 - First seen: v15 ndm-fresh iter 5
 - Occurrence count: 2
-- Status: **FIXED** (iter 6) — ported to generate_ai_merge_plan.py (see MERGE_PLAN_DEAD_CODE)
+- Status: **FIXED** (iter 6)
 
 ## Cross-PR duplicate misadvice (WRONG_DEDUP)
 - First seen: v15 ndm-fresh iter 1
@@ -199,11 +233,8 @@
 ## Go behavioral probe fabricates "go not found" (GO_PROBE_FABRICATED)
 - First seen: v15 ndm-fresh iter 2
 - Occurrence count: 5
-- Status: **FIXED** (d0eda1a) — **VERIFIED** in CI runs 29805118237 (VCP) and 29805125441 (NDM).
-- Root cause: finalize job in breakability-reusable.yml never ran actions/setup-go@v5.
-- Fix: added setup-go to finalize job + _find_go_binary() fallback.
-- Results: NDM 4/6 Go PRs now have source=probe with high confidence. VCP 7/12 gomod probes succeed.
-- Remaining: 2 NDM + 5 VCP Go PRs fall back on "go doc did not produce output" for umbrella modules (golang.org/x/net, golang.org/x/crypto) — secondary data-quality issue, NOT binary-not-found.
+- Status: **FIXED** (d0eda1a) — **VERIFIED** in CI runs 29805118237 and 29813885743.
+- Results: 7/12 gomod probes succeed with source=probe, confidence=high. 5 umbrella modules fall back ("go doc did not produce output") — secondary data-quality issue.
 
 ## SAFE verdict without test evidence (UNTESTED_SAFE)
 - First seen: v15 ndm-fresh iter 1
@@ -228,7 +259,7 @@
 ## PR#9 three-way merge_risk contradiction (PR9_MERGE_RISK)
 - First seen: v15 ndm-fresh iter 1
 - Occurrence count: 4
-- Status: **FIXED** (iter 6) — --write post-processing escalates merge_risk.tag to Medium for Actions major bumps
+- Status: **FIXED** (iter 6)
 
 ## IMPORTANT CONTEXT
 - Target repos: CSC-Security-sandbox/ndm-fresh-breakability (41 PRs, Node.js + Go monorepo) AND CSC-Security-sandbox/vcp-fresh-breakability (17 PRs, all Go)
@@ -238,8 +269,7 @@
 - LESSON LEARNED (ITER 2-3): Fixing code logic without regenerating comments = invisible fix.
 - LESSON LEARNED (ITER 5): Regenerating comments revealed renderer bugs hidden by staleness.
 - LESSON LEARNED (ITER 6): Fixes must land in the file the workflow actually calls, not just a file that has the right name.
-- LESSON LEARNED (ITER 1 current): Data-layer fixes to merge_risk, cross_pr_deps etc. are invisible if _fallback_comment() never reads them. Fix the renderer, not just the data.
-- LESSON LEARNED: AI layer IS working (31/31 AI comments, 0 fallbacks in run 29802178785). Previous failures were from older runs. Cursor agent CLI generates rich breakability grading.
-- Do NOT mark CI-dependent fixes (Go probe, alerts) as FIXED without a new CI run proving it.
-- VCP was completely ignored until now — first CI run with all fixes is 29805118237.
-- LESSON LEARNED (VCP ITER 1): ndm fixes don't auto-propagate to VCP comments. VCP comments must be regenerated with current codebase. Most VCP issues are STALE_COMMENTS pattern recurring on a new target.
+- LESSON LEARNED (VCP ITER 1): ndm fixes don't auto-propagate to VCP comments. VCP comments must be regenerated with current codebase.
+- LESSON LEARNED (VCP ITER 2): **Fixes validated against fallback-regenerated comments do NOT prove they work on AI-generated comments.** The AI path produces different output formats, invents non-canonical terms, and bypasses post-processing safeguards. All post-processing must be tested against actual AI output, not just fallback templates.
+- LESSON LEARNED: AI layer IS working (31/31 AI comments, 0 fallbacks in run 29802178785). Previous failures were from older runs.
+- Do NOT mark CI-dependent fixes as FIXED without a new CI run proving it.

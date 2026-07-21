@@ -358,28 +358,97 @@ except:
 "
 }
 
+# ── External input (inbox) ────────────────────────────────────────
+# External operators drop a JSON file at $EVAL_DIR/inbox.json to inject
+# CI run IDs, pre-built artifacts, or phase-skip signals into the loop.
+consume_inbox() {
+    local inbox="$EVAL_DIR/inbox.json"
+    INBOX_USE_RUN_ID=""
+    INBOX_USE_ARTIFACTS=""
+    INBOX_SKIP_GENERATOR=""
+    INBOX_SKIP_CI=""
+    INBOX_MESSAGE=""
+
+    [[ -f "$inbox" ]] || return 0
+
+    log "Found inbox.json — reading external input"
+
+    INBOX_USE_RUN_ID=$(python3 -c "import json; print(json.load(open('$inbox')).get('use_run_id',''))" 2>/dev/null || true)
+    INBOX_USE_ARTIFACTS=$(python3 -c "import json; print(json.load(open('$inbox')).get('use_artifacts',''))" 2>/dev/null || true)
+    INBOX_SKIP_GENERATOR=$(python3 -c "import json; print(json.load(open('$inbox')).get('skip_generator',''))" 2>/dev/null || true)
+    INBOX_SKIP_CI=$(python3 -c "import json; print(json.load(open('$inbox')).get('skip_ci',''))" 2>/dev/null || true)
+    INBOX_MESSAGE=$(python3 -c "import json; print(json.load(open('$inbox')).get('message',''))" 2>/dev/null || true)
+
+    if [[ -n "$INBOX_MESSAGE" ]]; then
+        log "Inbox message: $INBOX_MESSAGE"
+        echo "- $(date -u +%Y-%m-%dT%H:%M:%SZ) [external] $INBOX_MESSAGE" >> "$WIKI_DIR/log.md"
+    fi
+
+    rm -f "$inbox"
+    log "Inbox consumed: run_id=${INBOX_USE_RUN_ID:-none} artifacts=${INBOX_USE_ARTIFACTS:-none} skip_gen=${INBOX_SKIP_GENERATOR:-false} skip_ci=${INBOX_SKIP_CI:-false}"
+}
+
 # ── Trigger CI and wait ───────────────────────────────────────────
 trigger_ci() {
+    # External artifacts provided — skip CI entirely
+    if [[ -n "${INBOX_USE_ARTIFACTS:-}" ]]; then
+        log "Using external artifacts from $INBOX_USE_ARTIFACTS"
+        if [[ -f "$INBOX_USE_ARTIFACTS/build-results.json" ]]; then
+            cp "$INBOX_USE_ARTIFACTS/build-results.json" "$EVAL_DIR/build-results.json"
+            if ls "$INBOX_USE_ARTIFACTS/"*.md >/dev/null 2>&1; then
+                mkdir -p "$EVAL_DIR/eval/current_comments"
+                cp "$INBOX_USE_ARTIFACTS/"*.md "$EVAL_DIR/eval/current_comments/"
+            fi
+            log "Loaded external artifacts"
+            INBOX_USE_ARTIFACTS=""
+            return 0
+        else
+            log "External artifacts dir missing build-results.json — falling through to CI"
+        fi
+    fi
+
     if [[ -z "$REPO" ]] || [[ -z "$BRANCH" ]]; then
         log "No REPO/BRANCH configured — skipping CI trigger"
         return 1
     fi
 
-    log "Triggering CI run on $REPO @ $BRANCH (pr_filter=${PR_FILTER:-all})..."
-    local ci_args=(-f skip_agent=false -f batch_count="${CI_BATCH_COUNT:-4}")
-    [[ -n "${PR_FILTER:-}" ]] && ci_args+=(-f pr_filter="$PR_FILTER")
-    gh workflow run breakability.yml --repo "$REPO" --ref "$BRANCH" \
-        "${ci_args[@]}" 2>&1 || {
-        log "CI trigger failed"
-        return 1
-    }
+    local run_id=""
 
-    log "Waiting for CI to start..."
-    sleep 15
+    # External run ID provided — watch it
+    if [[ -n "${INBOX_USE_RUN_ID:-}" ]]; then
+        run_id="$INBOX_USE_RUN_ID"
+        log "Using externally provided CI run $run_id"
+        INBOX_USE_RUN_ID=""
+    else
+        # Check for in-flight runs before triggering a new one
+        local inflight
+        inflight=$(gh run list --repo "$REPO" --branch "$BRANCH" \
+            --workflow breakability.yml --limit 3 \
+            --json databaseId,status \
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued")] | .[0].databaseId // empty' 2>/dev/null || true)
 
-    local run_id
-    run_id=$(gh run list --repo "$REPO" --branch "$BRANCH" \
-        --workflow breakability.yml --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
+        if [[ -n "$inflight" ]]; then
+            log "Found in-flight CI run $inflight — reusing instead of triggering new one"
+            run_id="$inflight"
+        else
+            # No existing run — trigger new one
+            log "Triggering CI run on $REPO @ $BRANCH (pr_filter=${PR_FILTER:-all})..."
+            local ci_args=(-f skip_agent=false -f batch_count="${CI_BATCH_COUNT:-4}")
+            [[ -n "${PR_FILTER:-}" ]] && ci_args+=(-f pr_filter="$PR_FILTER")
+            gh workflow run breakability.yml --repo "$REPO" --ref "$BRANCH" \
+                "${ci_args[@]}" 2>&1 || {
+                log "CI trigger failed"
+                return 1
+            }
+
+            log "Waiting for CI to start..."
+            sleep 15
+
+            run_id=$(gh run list --repo "$REPO" --branch "$BRANCH" \
+                --workflow breakability.yml --limit 1 \
+                --json databaseId --jq '.[0].databaseId' 2>/dev/null)
+        fi
+    fi
 
     if [[ -z "$run_id" ]]; then
         log "Could not find CI run"
@@ -391,15 +460,16 @@ trigger_ci() {
 
     log "Downloading artifacts from run $run_id..."
     rm -rf "$EVAL_DIR/ci-artifacts"
-    gh run download "$run_id" --repo "$REPO" --name build-results --dir "$EVAL_DIR/ci-artifacts" 2>&1 || true
-    gh run download "$run_id" --repo "$REPO" --name pr-comments --dir "$EVAL_DIR/ci-artifacts/comments" 2>&1 || true
+    gh run download "$run_id" --repo "$REPO" --name build-results \
+        --dir "$EVAL_DIR/ci-artifacts" 2>&1 || true
+    gh run download "$run_id" --repo "$REPO" --name pr-comments \
+        --dir "$EVAL_DIR/ci-artifacts/comments" 2>&1 || true
 
     if [[ -f "$EVAL_DIR/ci-artifacts/build-results.json" ]]; then
         cp "$EVAL_DIR/ci-artifacts/build-results.json" "$EVAL_DIR/build-results.json"
         log "Updated build-results.json from CI run $run_id"
     fi
 
-    # Copy fresh CI-generated comments into eval dir for evaluator
     if ls "$EVAL_DIR/ci-artifacts/comments/"*.md >/dev/null 2>&1; then
         mkdir -p "$EVAL_DIR/eval/current_comments"
         cp "$EVAL_DIR/ci-artifacts/comments/"*.md "$EVAL_DIR/eval/current_comments/" 2>/dev/null || true
@@ -441,6 +511,9 @@ for ITER in $(seq "$START_ITER" "$MAX_ITERS"); do
     log "═══════════════════════════════════════"
     log "  ITERATION $ITER / $MAX_ITERS"
     log "═══════════════════════════════════════"
+
+    # Check for external input
+    consume_inbox
 
     # Skip evaluator if resuming from generator
     if [[ "$RESUME_FROM_GENERATOR" == "true" ]]; then
@@ -505,16 +578,21 @@ json.dump(s, open('$STATE_FILE', 'w'), indent=2)
     fi  # end of evaluator phase (skipped when resuming from generator)
 
     # ── GENERATOR PHASE ───────────────────────────────────────
-    log "── GENERATOR PHASE ──"
+    if [[ "${INBOX_SKIP_GENERATOR:-}" == "true" || "${INBOX_SKIP_GENERATOR:-}" == "True" ]]; then
+        log "Skipping generator (external signal)"
+        INBOX_SKIP_GENERATOR=""
+    else
+        log "── GENERATOR PHASE ──"
 
-    python3 -c "
+        python3 -c "
 import json
 s = json.load(open('$STATE_FILE'))
 s['status'] = 'generating'
 json.dump(s, open('$STATE_FILE', 'w'), indent=2)
 "
 
-    run_generator
+        run_generator
+    fi
 
     # Check if code changed
     NEW_COMMIT=$(cd "$CODE_DIR" && git rev-parse --short HEAD 2>/dev/null || echo "none")
@@ -522,7 +600,10 @@ json.dump(s, open('$STATE_FILE', 'w'), indent=2)
         log "Generator committed changes ($PREV_COMMIT → $NEW_COMMIT)"
 
         # Trigger CI if configured
-        if trigger_ci; then
+        if [[ "${INBOX_SKIP_CI:-}" == "true" || "${INBOX_SKIP_CI:-}" == "True" ]]; then
+            log "Skipping CI trigger (external signal)"
+            INBOX_SKIP_CI=""
+        elif trigger_ci; then
             log "CI completed — new results available"
         else
             log "Skipping CI — will re-evaluate with current results"

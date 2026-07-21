@@ -635,6 +635,15 @@ def _raw_authoritative_verdict(pr: Mapping[str, Any]) -> dict:
         bucket = _TAG_TO_BUCKET[tag]
         sev = {"Low": "low", "Medium": "medium", "High": "high"}.get(tag, "medium")
         reason = (mr.get("reason") if isinstance(mr, Mapping) else "") or tag
+        files_importing = pr.get("files_importing") or []
+        usages = pr.get("usages") or []
+        if not files_importing and not usages:
+            reason = f"not imported by application code; {reason}"
+        elif files_importing:
+            reason = f"imported by {len(files_importing)} file(s); {reason}"
+        api_diff = det.get("api_diff_tool") or {}
+        if isinstance(api_diff, Mapping) and api_diff.get("status") == "semantic":
+            reason = f"API diff: semantic analysis available; {reason}"
         bg = pr.get("behavioral_grade") or {}
         if isinstance(bg, Mapping) and bg.get("same_behavior") is True:
             bg_conf = str(bg.get("confidence", "")).strip().lower()
@@ -966,6 +975,38 @@ if __name__ == "__main__":
             vl_fixed += 1
     if vl_fixed:
         print(f"ℹ️  Fixed verification_level for {vl_fixed} Actions PR(s) with passing builds", file=sys.stderr)
+
+    # Enrich merge_risk.reason with reachability/probe/api_diff evidence (VCP C8)
+    mr_reason_enriched = 0
+    for pr_key, pr_data in prs.items():
+        for mr_obj in [pr_data.get("merge_risk"), (pr_data.get("deterministic") or {}).get("merge_risk")]:
+            if not isinstance(mr_obj, dict):
+                continue
+            reason = mr_obj.get("reason") or ""
+            enrichments = []
+            files_importing = pr_data.get("files_importing") or []
+            usages = pr_data.get("usages") or []
+            if not files_importing and not usages and "not imported" not in reason:
+                enrichments.append("not imported by application code")
+            elif files_importing and "import" not in reason.lower():
+                enrichments.append(f"imported by {len(files_importing)} file(s)")
+            det = pr_data.get("deterministic") or {}
+            api_diff = det.get("api_diff_tool") or {}
+            if isinstance(api_diff, dict) and api_diff.get("status") == "semantic" and "api" not in reason.lower():
+                enrichments.append("API diff tool ran (semantic analysis)")
+            bg = pr_data.get("behavioral_grade") or {}
+            if isinstance(bg, dict) and bg.get("same_behavior") is True and "probe" not in reason.lower():
+                bg_conf = str(bg.get("confidence", "")).strip().lower()
+                if bg_conf in ("medium", "high"):
+                    enrichments.append(f"behavioral probe: same API surface ({bg_conf})")
+            elif isinstance(bg, dict) and bg.get("same_behavior") is False and "probe" not in reason.lower():
+                enrichments.append("behavioral probe: API changes detected")
+            if enrichments:
+                enrichment_str = "; ".join(enrichments)
+                mr_obj["reason"] = (reason + "; " + enrichment_str).lstrip("; ")
+                mr_reason_enriched += 1
+    if mr_reason_enriched:
+        print(f"ℹ️  Enriched merge_risk.reason for {mr_reason_enriched} merge_risk object(s) with reachability/probe evidence", file=sys.stderr)
 
     # Write back or print
     if write_back:
