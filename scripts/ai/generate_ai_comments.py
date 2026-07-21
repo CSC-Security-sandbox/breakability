@@ -294,30 +294,34 @@ def _strip_govulncheck(comment: str) -> str:
 def _enforce_verdict_floor(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
     """Post-processing guard: ensure AI verdict matches authoritative_verdict() exactly.
 
-    Both upward and downward corrections are applied so the comment headline always
-    reflects the computed verdict (fixes C4: PR#105 SAFE rendered as REVIEW).
+    Rewrites the entire H2 header line so the verdict word, emoji, and any trailing
+    text ("REVIEW RISK") are all corrected in one pass.
     """
     av = authoritative_verdict(pr)
     contract_verdict = av.get("verdict", "REVIEW")
-    m = re.search(r'^(##\s+[^\n]*?\b)(SAFE|GLANCE|REVIEW|BLOCKED|BUILD_FAILS)\b', comment, re.MULTILINE)
+    emoji_map = {"SAFE": "✅", "REVIEW": "⚠️", "BLOCKED": "🚫"}
+    header_re = re.compile(
+        r'^##\s+\S+\s+'
+        r'(SAFE|GLANCE|REVIEW|BLOCKED|BUILD_FAILS)'
+        r'(?:\s+\w+)*'
+        r'(\s+—\s+.*)',
+        re.MULTILINE,
+    )
+    m = header_re.search(comment)
     if not m:
         return comment
-    ai_verdict = m.group(2)
+    ai_verdict = m.group(1)
     ai_normalized = _VERDICT_MAP.get(ai_verdict, ai_verdict)
-    if ai_normalized != contract_verdict:
-        print(
-            f"PR#{pr_num}: verdict match enforcement — AI said {ai_verdict}, "
-            f"contract says {contract_verdict} (source={av.get('source', '?')}). Overriding.",
-            file=sys.stderr,
-        )
-        emoji_map = {"SAFE": "✅", "REVIEW": "⚠️", "BLOCKED": "🚫", "BUILD_FAILS": "❌", "GLANCE": "👀"}
-        old_emoji = emoji_map.get(ai_verdict, "")
-        new_emoji = emoji_map.get(contract_verdict, "⚠️")
-        comment = comment.replace(m.group(0), m.group(0).replace(ai_verdict, contract_verdict))
-        if old_emoji and new_emoji and old_emoji != new_emoji:
-            comment = comment.replace(old_emoji, new_emoji, 1)
+    if ai_normalized == contract_verdict:
         return comment
-    return comment
+    print(
+        f"PR#{pr_num}: verdict match enforcement — AI said {ai_verdict}, "
+        f"contract says {contract_verdict} (source={av.get('source', '?')}). Overriding.",
+        file=sys.stderr,
+    )
+    new_emoji = emoji_map.get(contract_verdict, "⚠️")
+    new_header = f"## {new_emoji} {contract_verdict}{m.group(2)}"
+    return comment[:m.start()] + new_header + comment[m.end():]
 
 
 def _normalize_verdict_text(comment: str, pr_num: str) -> str:
