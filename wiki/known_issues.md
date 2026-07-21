@@ -158,9 +158,10 @@
 ## Go behavioral probe fabricates "go not found" (GO_PROBE_FABRICATED)
 - First seen: v15 ndm-fresh iter 2
 - Occurrence count: 5
-- Status: **COMMITTED_UNVERIFIED** — _find_go_binary() committed iter 2, never re-run. 5th consecutive confirmation of failure.
-- Impact: All 6 Go PRs get fallback/low-confidence. Go is provably available in same run (main_build.go.exit=0).
-- Note: Do NOT mark as FIXED without a fresh CI run proving it — this is the 5th confirmation of the same failure mode.
+- Status: **ROOT CAUSE FOUND, FIX PUSHED** (d0eda1a) — CI run pending verification.
+- Root cause: finalize job in breakability-reusable.yml never ran actions/setup-go@v5. Build step ran in deterministic job (which had setup-go), but probe ran in finalize job (which didn't). Fix: added setup-go to finalize job + _find_go_binary() fallback with RUNNER_TOOL_CACHE for self-hosted runners.
+- Impact: All 6 Go PRs in NDM + all Go PRs in VCP get fallback medium/unverified.
+- Note: CI runs 29805118237 (VCP) and 29805125441 (NDM) triggered with fix. Do NOT mark FIXED until CI confirms.
 
 ## SAFE verdict without test evidence (UNTESTED_SAFE)
 - First seen: v15 ndm-fresh iter 1
@@ -188,7 +189,7 @@
 - Status: **FIXED** (iter 6) — --write post-processing escalates merge_risk.tag to Medium for Actions major bumps
 
 ## IMPORTANT CONTEXT
-- Target repo: CSC-Security-sandbox/ndm-fresh-breakability (41 PRs, Node.js + Go monorepo)
+- Target repos: CSC-Security-sandbox/ndm-fresh-breakability (41 PRs, Node.js + Go monorepo) AND CSC-Security-sandbox/vcp-fresh-breakability (17 PRs, all Go)
 - Do NOT suggest govulncheck — permanently removed.
 - PR#68/#69 are genuine new failures (TestObservability) — positive controls. Do NOT change their verdicts.
 - prs dict is canonical source in build-results.json; results array has known discrepancies.
@@ -196,4 +197,6 @@
 - LESSON LEARNED (ITER 5): Regenerating comments revealed renderer bugs hidden by staleness.
 - LESSON LEARNED (ITER 6): Fixes must land in the file the workflow actually calls, not just a file that has the right name.
 - LESSON LEARNED (ITER 1 current): Data-layer fixes to merge_risk, cross_pr_deps etc. are invisible if _fallback_comment() never reads them. Fix the renderer, not just the data.
+- LESSON LEARNED: AI layer IS working (31/31 AI comments, 0 fallbacks in run 29802178785). Previous failures were from older runs. Cursor agent CLI generates rich breakability grading.
 - Do NOT mark CI-dependent fixes (Go probe, alerts) as FIXED without a new CI run proving it.
+- VCP was completely ignored until now — first CI run with all fixes is 29805118237.

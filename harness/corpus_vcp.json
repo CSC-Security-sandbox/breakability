@@ -1,0 +1,176 @@
+{
+  "_comment": "Ground truth corpus for vcp-fresh-breakability (17 PRs). Generated 2026-07-21.",
+  "ecosystem": "multi",
+  "cases": [
+    {
+      "pr_id": "4",
+      "ecosystem": "actions",
+      "package": "actions/download-artifact",
+      "from_version": "4",
+      "to_version": "8",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pass",
+      "notes": "verdict_v2=REVIEW, build=pass, probe_grade=?"
+    },
+    {
+      "pr_id": "7",
+      "ecosystem": "gomod",
+      "package": "go.opentelemetry.io/otel/sdk",
+      "from_version": "1.39.0",
+      "to_version": "1.43.0",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_unknown",
+      "notes": "verdict_v2=REVIEW, build=error, probe_grade=low"
+    },
+    {
+      "pr_id": "8",
+      "ecosystem": "gomod",
+      "package": "go.opentelemetry.io/otel",
+      "from_version": "1.40.0",
+      "to_version": "1.41.0",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_unknown",
+      "notes": "verdict_v2=REVIEW, build=error, probe_grade=low"
+    },
+    {
+      "pr_id": "9",
+      "ecosystem": "gomod",
+      "package": "github.com/jackc/pgx/v5",
+      "from_version": "5.7.4",
+      "to_version": "5.9.2",
+      "expected_label": "true_block",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=BLOCKED, build=pre_existing, probe_grade=medium"
+    },
+    {
+      "pr_id": "10",
+      "ecosystem": "gomod",
+      "package": "github.com/go-chi/chi/v5",
+      "from_version": "5.2.1",
+      "to_version": "5.2.2",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=REVIEW, build=pre_existing, probe_grade=medium"
+    },
+    {
+      "pr_id": "11",
+      "ecosystem": "gomod",
+      "package": "github.com/go-jose/go-jose/v4",
+      "from_version": "4.1.3",
+      "to_version": "4.1.4",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=REVIEW, build=pre_existing, probe_grade=low"
+    },
+    {
+      "pr_id": "19",
+      "ecosystem": "actions",
+      "package": "actions/setup-python",
+      "from_version": "5",
+      "to_version": "6",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pass",
+      "notes": "verdict_v2=REVIEW, build=pass, probe_grade=?"
+    },
+    {
+      "pr_id": "20",
+      "ecosystem": "actions",
+      "package": "actions/setup-node",
+      "from_version": "4",
+      "to_version": "6",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pass",
+      "notes": "verdict_v2=REVIEW, build=pass, probe_grade=?"
+    },
+    {
+      "pr_id": "21",
+      "ecosystem": "actions",
+      "package": "actions/upload-artifact",
+      "from_version": "4",
+      "to_version": "7",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pass",
+      "notes": "verdict_v2=REVIEW, build=pass, probe_grade=?"
+    },
+    {
+      "pr_id": "22",
+      "ecosystem": "actions",
+      "package": "actions/checkout",
+      "from_version": "4",
+      "to_version": "7",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pass",
+      "notes": "verdict_v2=REVIEW, build=pass, probe_grade=?"
+    },
+    {
+      "pr_id": "23",
+      "ecosystem": "gomod",
+      "package": "github.com/jackc/pgx/v5",
+      "from_version": "5.7.4",
+      "to_version": "5.9.2",
+      "expected_label": "true_block",
+      "expected_evidence_class": "build_unknown",
+      "notes": "verdict_v2=BLOCKED, build=error, probe_grade=medium"
+    },
+    {
+      "pr_id": "32",
+      "ecosystem": "gomod",
+      "package": "github.com/jackc/pgx/v5",
+      "from_version": "5.7.4",
+      "to_version": "5.9.2",
+      "expected_label": "true_block",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=BLOCKED, build=pre_existing, probe_grade=medium"
+    },
+    {
+      "pr_id": "41",
+      "ecosystem": "gomod",
+      "package": "golang.org/x/net",
+      "from_version": "0.48.0",
+      "to_version": "0.55.0",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=REVIEW, build=pre_existing, probe_grade=medium"
+    },
+    {
+      "pr_id": "42",
+      "ecosystem": "gomod",
+      "package": "golang.org/x/net",
+      "from_version": "0.48.0",
+      "to_version": "0.55.0",
+      "expected_label": "true_review",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=REVIEW, build=pre_existing, probe_grade=medium"
+    },
+    {
+      "pr_id": "52",
+      "ecosystem": "gomod",
+      "package": "golang.org/x/crypto",
+      "from_version": "0.46.0",
+      "to_version": "0.52.0",
+      "expected_label": "true_block",
+      "expected_evidence_class": "build_unknown",
+      "notes": "verdict_v2=BLOCKED, build=error, probe_grade=medium"
+    },
+    {
+      "pr_id": "53",
+      "ecosystem": "gomod",
+      "package": "golang.org/x/crypto",
+      "from_version": "0.46.0",
+      "to_version": "0.52.0",
+      "expected_label": "true_block",
+      "expected_evidence_class": "build_pre_existing",
+      "notes": "verdict_v2=BLOCKED, build=pre_existing, probe_grade=medium"
+    },
+    {
+      "pr_id": "54",
+      "ecosystem": "gomod",
+      "package": "golang.org/x/crypto",
+      "from_version": "0.46.0",
+      "to_version": "0.52.0",
+      "expected_label": "true_block",
+      "expected_evidence_class": "build_pass",
+      "notes": "verdict_v2=BLOCKED, build=pass, probe_grade=medium"
+    }
+  ]
+}

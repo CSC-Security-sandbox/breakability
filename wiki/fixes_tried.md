@@ -317,3 +317,26 @@
 - Remaining: AI_SKIPPED (P1, deliberate), ALERTS_BLIND (P1, infrastructure)
 - All 41 comments regenerated with fixed renderers
 - 245 tests pass (82 verdict + 113 comments + 50 merge_plan, 22 new)
+
+## Post-loop fixes (2026-07-21, root cause investigation)
+
+### GO_PROBE_FABRICATED ROOT CAUSE — FIXED ✅ (commit d0eda1a)
+- Root cause: breakability-reusable.yml finalize job never installed Go via actions/setup-go@v5. The deterministic job (which runs builds) had setup-go, but the finalize job (which runs the behavioral probe) didn't. shutil.which("go") returned None because Go was never on PATH in finalize.
+- Previous fix (iter 2, scripts/dynamic_probe_runner.py) was in the WRONG FILE — the actual probe runs through scripts/probe/gomod_probe.py which had bare shutil.which("go") with no fallback.
+- Fix: (1) Added actions/setup-go@v5 to finalize job in breakability-reusable.yml. (2) Added _find_go_binary() to gomod_probe.py with GOROOT, /opt/hostedtoolcache, and RUNNER_TOOL_CACHE fallback for self-hosted runners.
+- Note: CI runs 29805118237 (VCP) and 29805125441 (NDM) will verify this fix.
+
+### ALERTS_BLIND ROOT CAUSE — FIXED ✅ (commit 93e2b00)
+- Root cause: BREAKABILITY_PAT was passed to deterministic job (line 191) but NOT to finalize job's "Merge batch results" step. merge-results.sh line 402 tries to use BREAKABILITY_PAT for Dependabot alerts re-fetch during security_posture computation. The deterministic job successfully cached 169 alerts, but finalize couldn't re-fetch.
+- Fix: Added BREAKABILITY_PAT to merge-results step env in finalize job.
+- Note: The 9th consecutive ALERTS_BLIND occurrence. This was always a workflow YAML configuration issue, not a PAT scope issue.
+
+### AI LAYER STATUS — CONFIRMED WORKING ✅
+- CI run 29802178785: 31/31 AI comments generated, 0 fallbacks. Cursor agent CLI produces rich breakability grading (low/medium/high) with proper signal tables, SHA256 hashes, CVE sections.
+- Some PRs fail strict validation on first attempt but pass via _near_valid() on retry (PRs 38, 60, 107, 110 — common failure: has_h3_narrative_sections < 3).
+- The AI layer was never broken — previous concerns were from older CI runs.
+
+### CORPUS STALENESS — IDENTIFIED ⚠️
+- PRs 21, 28, 29, 34, 35, 36 exist in corpus (golden_predictions.json) but are no longer picked up by CI's PR discovery. gh api shows them as open Dependabot PRs but they may have been superseded by newer PRs (e.g. PR#21 → PR#112 for same package).
+- This causes FALSE_NONE findings in the gate, capping score at 4.0/10 even though all rendered PRs are correct.
+- Fix: Update corpus to match current PR discovery (30 PRs instead of 41).

@@ -18,6 +18,7 @@ Usage:
 __all__ = [
     "_read_prompt", "_extract_pr_data", "_build_per_pr_prompt",
     "_reject_false_cve_claim", "_reject_cve_direction_error", "_reject_fabricated_probe",
+    "_strip_agent_narration", "_strip_govulncheck",
     "_enforce_verdict_floor", "_enforce_merge_risk_tag", "_normalize_verdict_text", "_inject_verdict_logic",
     "_ensure_marker", "_signal_table_ok", "_validate_comment", "_near_valid",
     "_fallback_comment", "generate_comments", "main",
@@ -268,6 +269,26 @@ def _build_per_pr_prompt(
 
 
 _VERDICT_MAP = {"BUILD_FAILS": "BLOCKED", "GLANCE": "SAFE"}
+
+_AGENT_NARRATION_RE = re.compile(
+    r"^(Now let me|I'll create|Let me (draft|write|create|analyze|generate)|"
+    r"Here'?s the (complete|final|full)|I will now|Let me now)\b.*$",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+
+def _strip_agent_narration(comment: str) -> str:
+    """Remove LLM scratch-pad / self-narration lines that leak into comments."""
+    return _AGENT_NARRATION_RE.sub("", comment).lstrip("\n")
+
+
+def _strip_govulncheck(comment: str) -> str:
+    """Remove any recommendation to install or run govulncheck (permanently banned)."""
+    comment = re.sub(
+        r"^.*govulncheck.*$", "", comment, flags=re.MULTILINE | re.IGNORECASE
+    )
+    comment = re.sub(r"\n{3,}", "\n\n", comment)
+    return comment
 
 
 def _enforce_verdict_floor(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
@@ -1056,6 +1077,8 @@ def generate_comments(
         if comment:
             comment = _reject_fabricated_probe(comment, pr_data, pr_num)
         if comment:
+            comment = _strip_agent_narration(comment)
+            comment = _strip_govulncheck(comment)
             comment = _enforce_verdict_floor(comment, pr_data, pr_num)
             comment = _normalize_verdict_text(comment, pr_num)
             comment = _enforce_merge_risk_tag(comment, pr_data, pr_num)

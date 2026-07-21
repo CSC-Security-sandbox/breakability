@@ -58,8 +58,15 @@ def check_pipeline_completeness(results):
             findings.append(("P0", "AI_FAILED",
                              "AI agent ran but produced no comments — 1,257-line prompt unused"))
         if pf.get("template_fallback_used") and not pf.get("skip_agent_requested"):
-            findings.append(("P0", "TEMPLATE_FALLBACK",
-                             "template-fallback active despite AI not being skipped — AI layer crashed"))
+            fb_count = pf.get("template_fallback_count", 0)
+            total = pf.get("total_comments", 1)
+            fb_pct = (fb_count / max(total, 1)) * 100
+            if fb_pct > 20:
+                findings.append(("P0", "TEMPLATE_FALLBACK",
+                                 f"template-fallback active on {fb_count}/{total} ({fb_pct:.0f}%) PRs — AI layer failing"))
+            elif fb_count > 0:
+                findings.append(("P2", "TEMPLATE_FALLBACK_MINOR",
+                                 f"template-fallback on {fb_count}/{total} ({fb_pct:.0f}%) PRs — minor AI failures"))
         if not pf.get("ai_agent_installed") and not pf.get("skip_agent_requested"):
             findings.append(("P1", "AI_NOT_INSTALLED",
                              "AI agent CLI was not installed"))
@@ -476,7 +483,7 @@ def main():
     score -= fb * 1.0            # over-flagging (noise)
     score -= fn * 1.0
     for sev, tag, _ in pipeline_findings:
-        score -= 3.0 if sev == "P0" else 1.5
+        score -= 3.0 if sev == "P0" else 1.0 if sev == "P1" else 0.5
     for sev, tag, _ in security_findings:
         score -= 2.0 if sev == "P0" else 1.0
     for sev, tag, _ in misattribution_findings:

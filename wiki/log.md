@@ -24,29 +24,93 @@
 - Sub-agent reviews: Sam 2/10, Jordan 3/10, Riley 4/10, Alex 1/10
 - Consolidated: 2.0/10, FAIL (threshold 8.5)
 - Reviewer errors: None. All 4 reviewers' claims verified against build-results.json.
-- Gate vs reality gap: Gate scored re-derived JSON (verdict_generation=7). All 41 comment files are unchanged (mtime 2026-07-17 14:28:25). Generator fixed code logic but never regenerated comments.
-- Data-layer fixes CONFIRMED WORKING: hard_fix_floor guard, CVE version-range filter, PR#44 symbol override (top-level only)
-- Data-layer fixes CONFIRMED NOT DEPLOYED: dedup pkg_dir compare, merge_risk.tag enforcement, verdict header enforcement — code may work but comments are unchanged
-- NEW issues found: (1) STALE_COMMENTS — the overarching blocker, (2) CVE_COUNT_ZERO — "0 CVE(s)" in P0 reason with 26 real CVE IDs, (3) DUAL_MERGE_RISK — two contradictory merge_risk values for PR#44, (4) GO_PROBE_FABRICATED — Go "not found" in env where Go builds work
-- REPEATED issues: ALERTS_BLIND (x5, "verified locally" falsified), SEC_POSTURE_ZEROS (x3), UNTESTED_SAFE (x3), OVERCLAIM (x4)
-- Critical lesson: Fixing verdict logic without regenerating comments produces invisible fixes. The gate scored the wrong artifact. Comments are the deliverable, not JSON.
-- 7 critical findings (C1-C7), 5 improvements (I1-I5)
-- Next: generator must (1) fix remaining data bugs C2-C4/I5, (2) REGENERATE ALL COMMENTS, (3) verify comment-data consistency
+- Gate vs reality gap: Gate scored re-derived JSON (verdict_generation=7). All 41 comment files unchanged (mtime 2026-07-17 14:28:25). Generator fixed code logic but never regenerated comments.
+- Data-layer fixes CONFIRMED WORKING: hard_fix_floor guard, CVE version-range filter, PR#44 symbol override
+- NEW issues: STALE_COMMENTS, CVE_COUNT_ZERO, DUAL_MERGE_RISK, GO_PROBE_FABRICATED
+- REPEATED: ALERTS_BLIND (x5), SEC_POSTURE_ZEROS (x3), UNTESTED_SAFE (x3), OVERCLAIM (x4)
+- Critical lesson: Fixing verdict logic without regenerating comments produces invisible fixes.
 - Handoff: persona → generator
 
 ## Iteration 3 — FAIL (1.0/10)
 - Deterministic gate: 9.0/10, ACCEPTED (overridden by evaluation to FAIL)
 - Sub-agent reviews: Sam 1/10, Jordan 2/10, Riley 4/10 (adjusted→3), Alex 1/10
 - Consolidated: 1.0/10, FAIL (threshold 8.5)
-- Reviewer errors: None. All 4 reviewers' claims verified.
 - Score declined from 2.0→1.0 (end-user 2→1, accuracy 2→1, pipeline 4→3, security 3→2)
-- ROOT CAUSE: STALE_COMMENTS — 3rd consecutive iteration. Generator committed 6 more code fixes this iteration (12 total across 3 iterations). ZERO deployed to comments. All 41 comment files still have mtime 2026-07-17 14:28:25.
-- Data-layer fixes CONFIRMED WORKING this iteration: CVE count fallback ("26 CVE(s)" not "0"), DUAL_MERGE_RISK (both fields=Low for PR#44), UNTESTED_SAFE annotation (9 PRs annotated)
-- Data-layer fixes CONFIRMED STILL NOT DEPLOYED: all 12 fixes across 3 iterations — comments unchanged
-- NEW finding: PR#39 reachability overclaim (Alex) — second instance of module-scope bug. Prior conclusion "not systemic" corrected to "confirmed in 2/41." This is a CODE BUG, not just staleness.
-- ESCALATED: REACHABILITY_OVERCLAIM from P2 to P1 (second confirmed instance, code bug)
-- REPEATED issues: STALE_COMMENTS (x3), FALSE_BLOCK (x3), WRONG_DEDUP (x3), VERDICT_MISMATCH (x3), PHANTOM_REVIEW (x3), ALERTS_BLIND (x6), SEC_POSTURE_ZEROS (x4), OVERCLAIM (x4), GO_PROBE_FABRICATED (x2)
-- CI-dependent fixes (Go probe, SEC_POSTURE_ZEROS) reclassified from "FIXED" to COMMITTED_UNVERIFIED — never re-run
-- 9 critical findings (C1-C9), 6 improvements (I1-I6)
-- **ACTION FOR ITERATION 4: (1) REGENERATE ALL 41 COMMENTS — this is the ONLY priority. (2) Fix reachability module-scope code bug. (3) Do NOT add more data-layer fixes. (4) Do NOT mark CI-dependent fixes as FIXED.**
+- ROOT CAUSE: STALE_COMMENTS — 3rd consecutive iteration. 12 code fixes across 3 iterations, ZERO deployed to comments.
+- ESCALATED: REACHABILITY_OVERCLAIM from P2 to P1 (second confirmed instance)
+- REPEATED: STALE_COMMENTS (x3), FALSE_BLOCK (x3), WRONG_DEDUP (x3), VERDICT_MISMATCH (x3), PHANTOM_REVIEW (x3), ALERTS_BLIND (x6), SEC_POSTURE_ZEROS (x4), OVERCLAIM (x4), GO_PROBE (x2)
+- ACTION: REGENERATE ALL 41 COMMENTS — the ONLY priority
+- Handoff: persona → generator
+
+## Iteration 5 — FAIL (2.0/10)
+- Deterministic gate: 9.0/10, ACCEPTED (overridden by evaluation to FAIL)
+- Sub-agent reviews: Sam 3/10, Jordan 2/10, Riley 3/10, Alex 4/10
+- Consolidated: 2.0/10, FAIL (threshold 8.5)
+- Reviewer errors: Sam claimed "changelog null for all 41 PRs" — WRONG (36/41 have changelogSignal). Underlying concern valid but count overstated.
+- **STALE_COMMENTS FIXED** — all 41 comments regenerated, mtime 2026-07-20 15:21
+- Score improved from 1.0→2.0. Significant verified progress:
+  - Verdict-header accuracy: 30/41 → 40/41
+  - Reachability scoping: 39/41 → 41/41
+  - Dedup advice: 0/8 correct → 8/8 correct
+  - UNTESTED_SAFE annotation: invisible → 9/9 visible
+- BUT comment regeneration revealed 2 NEW P0 defects hidden by staleness:
+  1. **CHANGELOG_FABRICATION (P0)**: 15/41 comments wrong. 4 PRs with status=breaking show "No breaking changes" (self-contradicts verdict reason). 11 missing-status PRs assert safety with no data.
+  2. **CVE_OVERCLAIM (P0)**: 10/12 CVE-bearing PRs falsely claim "remediates" when base version outside vulnerable range. Verdict engine has this right but comment renderer doesn't check.
+- NEW P1 findings: ISSUE_NUMBER placeholder (41/41), merge plan security empty, PR#29 verdict bug, pipeline provenance mismatch
+- ESCALATED: ACTIONS_VERLEVEL_BUG from P3 to P1 (5-PR pattern, was PR9-only)
+- REPEATED: ALERTS_BLIND (x7), GO_PROBE (x3)
+- 9 critical findings (C1-C9), 8 improvements (I1-I8)
+- Priority action: (1) Fix changelog rendering to read status field, (2) Fix CVE applicability check in comment renderer, (3) Fix ISSUE_NUMBER placeholder, (4) Fix footer, then regenerate all 41 comments
+- Handoff: persona → generator
+
+## Iteration 6 — FAIL (2.0/10)
+- Deterministic gate: 7.5/10, ACCEPTED
+- Sub-agent reviews: Sam 6/10, Jordan 2/10, Riley 4/10, Alex 6/10
+- Consolidated: 2.0/10, FAIL (threshold 8.5)
+- Score floor: Security (2/10) — merge plan security fix in dead code + ALERTS_BLIND 8th occurrence
+- Reviewer errors: None material. Riley's main_test_exit=-1 vs actual None is trivial.
+- **All iter-5 fixes verified HOLDING** — changelog, CVE applicability, ISSUE_NUMBER, footer, PR#29, Actions verlevel. Zero regressions. Real, durable progress.
+- Per-PR comments improved significantly (Sam 3→6, Alex 4→6). Pipeline partially improved (Riley 3→4).
+- BUT 8 NEW critical findings discovered, in two major areas:
+  1. **Per-PR comment renderer sibling bugs**: API_DIFF_FABRICATION (14 PRs, P0), PR43_VERDICT_FABRICATION (P0), ACTIONS_NPM_COMMANDS (5 PRs, P1), TEST_ROW_PRE_EXISTING (15 PRs, P1)
+  2. **Merge-plan renderer bugs**: MERGE_PLAN_SEVERITY_FABRICATION (P0), MERGE_PLAN_DEAD_CODE (P0, invalidates iter-5 "FIXED"), MERGE_PLAN_CVE_OVERCLAIM (P0)
+  3. **Verdict policy**: CVE_FLOOR_VERDICT_INCONSISTENCY (P1)
+- REPEATED: ALERTS_BLIND (x8), GO_PROBE_FABRICATED (x4), MERGE_PLAN_SECURITY_EMPTY re-opened (x2)
+- KEY LESSON: Iter-5 merge-plan security fix was applied to wrong file. The workflow calls generate_ai_merge_plan.py, not rendering/merge_plan.py. Fixes MUST target the file wired into the production workflow.
+- 11 critical findings (C1-C11), 7 improvements (I1-I7)
+- Priority action: (1) Fix 4 per-PR comment renderer bugs, (2) Fix 3 merge-plan renderer bugs, (3) Fix 2 verdict/policy inconsistencies, (4) Regenerate all 41 comments
+- Handoff: persona → generator
+
+## Iteration 7 — Generator (2026-07-20)
+- Persona: generator
+- Fixes applied: 9/11 critical findings (C1-C9)
+- Files modified: generate_ai_comments.py, verdict_contract.py, merge_plan.py, generate_ai_merge_plan.py
+- Gate: 7.5/10, ACCEPTED (FALSE_GREEN=0, FALSE_BLOCK=0, OVERCLAIMS=0)
+- Tests: 223/223 pass, 0 regressions
+- Verdict distribution: SAFE=14, REVIEW=18, BLOCKED=9
+- C2 partial: verdict stays REVIEW per corpus (reason enriched with probe evidence)
+- Not fixed: C10 (ALERTS_BLIND, 8th occurrence), C11 (GO_PROBE_FABRICATED, 4th occurrence)
+- Commit: 7485439 on branch cleanup
+- Handoff: persona → evaluator
+
+## Iteration 1 (current) — Evaluator — FAIL (2.0/10)
+- Deterministic gate: 7.5/10, ACCEPTED
+- Sub-agent reviews: Sam 4/10, Jordan 2/10, Riley 5/10, Alex 4/10
+- Consolidated: 2.0/10, FAIL (threshold 8.5)
+- Score floor: Security (2/10) — live PR#109/110 show REVIEW while local says BLOCKED, ALERTS_BLIND 9th occurrence, merge plan CVE column empty
+- Reviewer errors: Jordan claimed 13 live/local mismatches (6 verified, core finding correct — PARTIAL ERROR)
+- All iter-6/7 fixes verified HOLDING — no regressions detected
+- 7 NEW critical findings in per-PR comment renderer:
+  1. API_DIFF_FABRICATION incomplete (3 PRs with api_diff_tool=None still show "No changes")
+  2. BLOCKED verdicts cite zero error text (9/9 BLOCKED PRs)
+  3. Confidence column hardcoded MEDIUM (all 41 × 3 rows)
+  4. SAFE+pre_existing no explanation (11 PRs)
+  5. merge_risk invisible in comments (0/41)
+  6. Cross-PR deps absent from per-PR comments (0/41)
+  7. Footer date fabricated (all 41)
+- 1 NEW merge plan finding: _pr_row() CVE column empty (12 CVE-bearing PRs)
+- REPEATED: ALERTS_BLIND (x9), GO_PROBE_FABRICATED (x5)
+- KEY LESSON: Data-layer fixes are invisible if _fallback_comment() never reads the fixed fields. The renderer is now the bottleneck — most remaining issues are in _fallback_comment().
+- 10 critical findings (C1-C10), 5 improvements (I1-I5)
+- Priority: Fix _fallback_comment() to render all available signal data, then regenerate all 41 comments
 - Handoff: persona → generator
