@@ -93,24 +93,37 @@
 - Commit: 7485439 on branch cleanup
 - Handoff: persona → evaluator
 
-## Iteration 1 (current) — Evaluator — FAIL (2.0/10)
+## Iteration 1 (ndm, previous) — Evaluator — FAIL (2.0/10)
 - Deterministic gate: 7.5/10, ACCEPTED
 - Sub-agent reviews: Sam 4/10, Jordan 2/10, Riley 5/10, Alex 4/10
 - Consolidated: 2.0/10, FAIL (threshold 8.5)
 - Score floor: Security (2/10) — live PR#109/110 show REVIEW while local says BLOCKED, ALERTS_BLIND 9th occurrence, merge plan CVE column empty
 - Reviewer errors: Jordan claimed 13 live/local mismatches (6 verified, core finding correct — PARTIAL ERROR)
 - All iter-6/7 fixes verified HOLDING — no regressions detected
-- 7 NEW critical findings in per-PR comment renderer:
-  1. API_DIFF_FABRICATION incomplete (3 PRs with api_diff_tool=None still show "No changes")
-  2. BLOCKED verdicts cite zero error text (9/9 BLOCKED PRs)
-  3. Confidence column hardcoded MEDIUM (all 41 × 3 rows)
-  4. SAFE+pre_existing no explanation (11 PRs)
-  5. merge_risk invisible in comments (0/41)
-  6. Cross-PR deps absent from per-PR comments (0/41)
-  7. Footer date fabricated (all 41)
-- 1 NEW merge plan finding: _pr_row() CVE column empty (12 CVE-bearing PRs)
+- 7 NEW critical findings in per-PR comment renderer
 - REPEATED: ALERTS_BLIND (x9), GO_PROBE_FABRICATED (x5)
-- KEY LESSON: Data-layer fixes are invisible if _fallback_comment() never reads the fixed fields. The renderer is now the bottleneck — most remaining issues are in _fallback_comment().
-- 10 critical findings (C1-C10), 5 improvements (I1-I5)
-- Priority: Fix _fallback_comment() to render all available signal data, then regenerate all 41 comments
+- KEY LESSON: Data-layer fixes are invisible if _fallback_comment() never reads the fixed fields.
+- Handoff: persona → generator
+
+## Iteration 1 (VCP) — Evaluator — FAIL (2.0/10)
+- Target: CSC-Security-sandbox/vcp-fresh-breakability (17 PRs, Go monorepo)
+- CI run: 29805118237, timestamp 2026-07-21T05:50:29Z
+- Deterministic gate: 4.5/10, REJECTED
+- Sub-agent reviews: Sam 3/10, Jordan 2/10, Riley 5/10, Alex 3/10
+- Consolidated: 2.0/10, FAIL (threshold 8.5)
+- Score floor: Security (2/10) — verdict-label chaos on all 6 critical-CVE PRs, ALERTS_BLIND 10th occurrence
+- Reviewer errors: Riley claimed 8/17 test.ran=true (actual 7/17, minor)
+- 11 critical findings (C1-C11), 5 improvements (I1-I5)
+- KEY NEW findings:
+  1. VERDICT_HEADER_MISMATCH — 4/6 BLOCKED PRs show "REVIEW RISK" (P0, C1)
+  2. PR#54 "MERGE IMMEDIATELY" on BLOCKED/P0 verdict (P0, C2)
+  3. PR#8 broken artifact — leaked LLM narration, fabricated URLs (P0, C3)
+  4. CVE-floor reason drops probe evidence for same_behavior=False (P1, C5)
+  5. merge_risk.tag not escalated on CVE floor (P1, C9)
+  6. PR#8 PACKAGE-MISMATCH caveat hidden (P1, C6)
+  7. govulncheck recommended despite permanent ban (P1, C11)
+  8. Actions PRs cite Node.js in Go-only repo (P1, C10)
+- REPEATED: ALERTS_BLIND (x10), VERDICT_MISMATCH (x5)
+- ROOT CAUSE: VCP comments were generated in CI run 29805118237, which ran BEFORE or WITHOUT many ndm iter 1-7 fixes propagating to VCP comments. This is the STALE_COMMENTS pattern recurring on a new target.
+- CRITICAL ACTION: Regenerate all 17 VCP comments using current codebase (post-iter-7 fixes). Then fix C5 (reason enrichment for same_behavior=False), C9 (merge_risk escalation), C6 (reconciliation_note rendering), C11 (govulncheck deny list).
 - Handoff: persona → generator

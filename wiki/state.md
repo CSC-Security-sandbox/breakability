@@ -1,43 +1,37 @@
 # Loop State
 
-## Current: ITERATION 1 — FAIL (2.0/10), PENDING GENERATOR
-- Target repo: CSC-Security-sandbox/ndm-fresh-breakability (41 PRs)
-- Deterministic gate: 7.5/10, ACCEPTED
+## Current: ITERATION 1 (VCP) — FAIL (2.0/10), PENDING GENERATOR
+- Target repo: CSC-Security-sandbox/vcp-fresh-breakability (17 PRs, Go monorepo)
+- Deterministic gate: 4.5/10, REJECTED
 - Evaluator score: 2.0/10, FAIL (threshold 8.5)
-- Score floor: Security (2/10) — live PR#109/110 verdict drift, alerts blind, merge plan CVE column empty
-- 10 critical findings (C1-C10), 5 improvements (I1-I5)
+- Score floor: Security (2/10) — verdict-label chaos on all 6 critical-CVE PRs, ALERTS_BLIND 10th occurrence
+- 11 critical findings (C1-C11), 5 improvements (I1-I5)
 - Next persona: generator
-- Updated: 2026-07-20
+- Updated: 2026-07-21
 
 ## Score Breakdown
-- End-User (Sam): 4/10 — merge_risk invisible, AI layer 0%
-- Security (Jordan): 2/10 — live verdict drift on critical CVE PRs, ALERTS_BLIND 9th occurrence
-- Pipeline (Riley): 5/10 — AI skipped, Go probe fabricated, verification_level ignores probe
-- Accuracy (Alex): 4/10 — API_DIFF fix incomplete, BLOCKED no evidence, confidence hardcoded
+- End-User (Sam): 3/10 — verdict header contradicts ground truth on 4/6 BLOCKED PRs, PR#54 MERGE IMMEDIATELY, PR#8 broken
+- Security (Jordan): 2/10 — ALERTS_BLIND 10th occurrence, verdict chaos on all 6 P0 PRs, zero dynamic vuln scanning
+- Pipeline (Riley): 5/10 — 24% builds never ran, 0% L3+, CVE-floor reason drops probe evidence, changelog 82% missing
+- Accuracy (Alex): 3/10 — 4/17 comments contradict verdict_v2, PR#54 MERGE IMMEDIATELY on BLOCKED/P0, PR#8 broken artifact
 
 ## Top Blockers for Generator
-1. **API_DIFF_FABRICATION incomplete** — 3 PRs (16, 100, 105) still fabricate "No changes" when api_diff_tool=None (P0)
-2. **BLOCKED verdicts cite zero error text** — 9/9 BLOCKED PRs have generic reasons (P0)
-3. **Confidence column hardcoded MEDIUM** — 3/6 signal rows, self-contradictory for unavailable signals (P0)
-4. **SAFE+pre_existing no explanation** — 11 PRs show SAFE above failure rows with no bridging text (P1)
-5. **merge_risk invisible in comments** — 0/41 comments render merge_risk data (P1)
-6. **Cross-PR deps absent from per-PR comments** — 0/41 comments mention coordination (P1)
-7. **Footer date fabricated** — shows today's date, not CI run date (P1)
-8. **Merge plan CVE column empty** — _pr_row() missing deterministic.security fallback (P1)
-9. **ALERTS_BLIND** — 9th occurrence, infrastructure (P1)
-10. **GO_PROBE_FABRICATED** — 5th occurrence, needs CI re-run (P1)
+1. **REGENERATE ALL 17 VCP COMMENTS** — most critical single action. ndm iter 1-7 fixes never applied to VCP comments (P0)
+2. **CVE-floor reason drops probe evidence** — same_behavior=False branch not enriched (P1, C5)
+3. **merge_risk.tag not escalated on CVE floor** — all 6 BLOCKED PRs show Medium (P1, C9)
+4. **reconciliation_note not rendered** — PR#8 HIGH confidence with PACKAGE-MISMATCH caveat hidden (P1, C6)
+5. **govulncheck recommended despite ban** — PRs 10,53,54 instruct installation (P1, C11)
+6. **Actions PRs cite Node.js in Go-only repo** — 5 PRs with irrelevant boilerplate (P1, C10)
+7. **ALERTS_BLIND** — 10th occurrence, infrastructure fix committed but unverified (P1, C4)
 
-## Confirmed Working (data + comments)
-- All iter-5 fixes: changelog, CVE applicability, ISSUE_NUMBER, footer model name, PR#29, Actions verlevel
-- All iter-6 fixes: API_DIFF (14/17 PRs), test row pre_existing label, CVE floor BLOCKED, merge_risk escalation, merge plan severity, merge plan security posture
-- hard_fix_floor pre_existing guard: 10 PRs correctly SAFE/REVIEW (all iterations)
-- pkg_dir dedup: 4 pairs correctly advise "merge both" (iter 1+3)
-- Reachability scoping: 41/41 accurate (iter 3)
-- PR#68/#69 positive controls: remain correctly BLOCKED (all iterations)
-- Cross-PR verdict consistency: all 6 duplicate groups consistent
+## Confirmed Working (from ndm loop, should propagate on regeneration)
+- All ndm iter-5 fixes: changelog, CVE applicability, ISSUE_NUMBER, footer model name, PR#29, Actions verlevel
+- All ndm iter-6 fixes: API_DIFF, test row pre_existing label, CVE floor BLOCKED, merge plan severity
+- All ndm iter-7 fixes: API_DIFF None guard, BLOCKED evidence, confidence column, SAFE+pre_existing, merge_risk visible, cross-PR deps, footer date, merge plan CVE column
+- hard_fix_floor pre_existing guard
+- _enforce_verdict_floor() — works when called (verified by Jordan)
+- Fallback comment generator with full signal data
 
 ## Reviewer Error Log
-- Iteration 1 (original): Riley claimed behavioral_grade absent from all 41 PRs. WRONG — 36/41 have it.
-- Iteration 5: Sam claimed "changelog field is null for all 41 PRs, zero exceptions." WRONG — 36/41 have changelogSignal.
-- Iteration 6: No material reviewer errors detected.
-- Iteration 1 (current): Jordan claimed 13 live/local verdict mismatches — PARTIALLY WRONG (6 verified, core finding correct). Exact count overstated.
+- Riley claimed 8/17 PRs have test.ran=true — actual is 7/17 (PR#11 has ran=False). Minor, doesn't affect conclusions.
+- Jordan's ndm iter 1 "13 mismatches" was partially wrong (6 verified). VCP iter 1 claims are accurate.

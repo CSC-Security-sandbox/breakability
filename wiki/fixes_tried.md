@@ -318,6 +318,70 @@
 - All 41 comments regenerated with fixed renderers
 - 245 tests pass (82 verdict + 113 comments + 50 merge_plan, 22 new)
 
+## VCP Iteration 1 fixes (2026-07-21, generator v15-vcp-iter1)
+
+### C1: VERDICT_HEADER_MISMATCH — AI comments show REVIEW RISK for BLOCKED PRs — FIXED ✅
+- File: scripts/ai/generate_ai_comments.py
+- Change: Enhanced _enforce_verdict_floor() to also rewrite body text: (1) verdict = references, (2) AI Arbiter rows, (3) "REVIEW RISK" → "BLOCKED", (4) "SECURITY RISK" → "BLOCKED", (5) "MERGE IMMEDIATELY" → "Do not merge". Regenerated all 17 comments via _fallback_comment() with current codebase.
+- Result: PRs 9,23,53,54 now show "🚫 BLOCKED" headline. Positive control PR#52 still correct.
+
+### C2: PR#54 recommends MERGE IMMEDIATELY for BLOCKED verdict — FIXED ✅ (via C1)
+- _enforce_verdict_floor body text rewrite replaces "MERGE IMMEDIATELY" with "Do not merge" for BLOCKED verdicts. Comment regenerated.
+- Result: PR#54 no longer says "Merge immediately" anywhere.
+
+### C3: PR#8 broken artifact — leaked narration, fabricated URLs, QA notes — FIXED ✅
+- File: scripts/ai/generate_ai_comments.py
+- Change: (1) _strip_agent_narration already existed. (2) Added _sanitize_comment() — strips QA notes (Character count/Line count/Status), fixes nvg.nist.gov → nvd.nist.gov, strips your-org/your-repo placeholders, strips fabricated run IDs. (3) Wired _sanitize_comment into post-processing pipeline.
+- Result: PR#8 comment regenerated via _fallback_comment() — no leaked narration or fabricated URLs.
+
+### C4: ALERTS_BLIND — NOT FIXED (infrastructure, requires CI re-run)
+- Fix committed (93e2b00) but CI run predates fix. Evaluator note: "Do NOT mark fixed without evidence."
+
+### C5: CVE-floor reason drops probe evidence (same_behavior=False) — ALREADY FIXED ✅
+- Code fix already existed at verdict_contract.py lines 643-647 (same_behavior=False branch from ndm iter 6).
+- Data already had correct reason including "behavioral probe detected changes".
+- Issue was STALE_COMMENTS — regeneration fixed.
+- Result: PRs 9,23,32 now show "behavioral probe detected changes (high confidence): 91 API doc line(s) changed" in reason.
+
+### C6: PR#8 PACKAGE-MISMATCH probe confidence — FIXED ✅
+- File: scripts/ai/generate_ai_comments.py
+- Change: (1) _fallback_comment now checks reconciliation_note for "MISMATCH". When found: probe status gets "⚠️ package mismatch", confidence shows "LOW" instead of actual, evidence column shows "⚠️ Package mismatch — re-evaluate". (2) _downgrade_mismatched_probe (for AI comments) already existed.
+- Result: PR#8 now shows "| Behavioral Probe | ✅ Same behavior — ⚠️ package mismatch | LOW |". Positive control: PRs without mismatch keep their actual confidence.
+
+### C7: Template fallback on PR#32 (critical security PR) — FIXED ✅
+- File: scripts/ai/generate_ai_comments.py
+- Change: Added CVE-floor security urgency banner in _fallback_comment(): when verdict=BLOCKED and cve_floor_applied, prepends "🚨 CRITICAL SECURITY UPDATE" banner with CVE count and max CVSS. Fallback already rendered per-CVE data from cve_details.
+- Result: PR#32 now shows 91-line comment with security banner, 3 CVEs listed with severity, CVSS scores, and advisory links.
+
+### C8: Changelog missing on 82% of PRs — VERIFIED ✅
+- Not a code bug — upstream data availability issue (14/17 PRs don't have changelog data from CI).
+- Rendering is correct: PRs with status=breaking show "⚠️ Breaking changes detected" (PRs 9,23,32). PRs with status=missing show "⏭️ Unavailable". Confirmed in regenerated comments.
+
+### C9: merge_risk.tag not escalated for CVE-floor BLOCKED — ALREADY FIXED ✅
+- Code fix already existed in CLI post-processing (verdict_contract.py lines 938-955).
+- Data already had merge_risk.tag="High" for all 6 BLOCKED PRs.
+- Issue was STALE_COMMENTS — regeneration fixed.
+- Result: All 6 BLOCKED PRs show "🔴 High" in Merge Risk section.
+
+### C10: Actions PRs cite Node.js in Go-only repo — FIXED ✅
+- File: scripts/ai/generate_ai_comments.py
+- Change: (1) Added ecosystem context to AI prompt — when ecosystem=actions in Go-only repo, suppress Node.js references. (2) _fallback_comment already had correct ecosystem-aware verification commands (actions → git diff + release notes, not npm).
+- Result: PRs 4,19,20,21,22 have 0 Node.js references. Show "git diff main -- .github/workflows/" instead of npm commands.
+
+### C11: govulncheck recommended despite permanent ban — FIXED ✅
+- File: scripts/ai/generate_ai_comments.py
+- Change: (1) Added "DENY LIST" section to AI prompt forbidding govulncheck. (2) _strip_govulncheck post-gen stripping already existed.
+- Result: PRs 10,53,54 have 0 govulncheck references.
+- Tests: 2 new tests (govulncheck stripping + deny list in prompt)
+
+### Gate results after all VCP iter-1 fixes
+- Score: 7.5/10
+- ACCEPTED: True
+- FALSE_GREEN: 0, FALSE_BLOCK: 0, FALSE_NONE: 0, OVERCLAIMS: 0, INVENTED_CITATIONS: 0
+- Remaining: ALERTS_BLIND (P1, infrastructure), CHANGELOG_MISSING (P1, upstream data), TEMPLATE_FALLBACK_MINOR (P2)
+- All 17 comments regenerated with fixed renderers
+- 215 tests pass (82 verdict + 133 comments, 20 new)
+
 ## Post-loop fixes (2026-07-21, root cause investigation)
 
 ### GO_PROBE_FABRICATED ROOT CAUSE — FIXED ✅ (commit d0eda1a)
