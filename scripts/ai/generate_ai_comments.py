@@ -18,7 +18,7 @@ Usage:
 __all__ = [
     "_read_prompt", "_extract_pr_data", "_build_per_pr_prompt",
     "_reject_false_cve_claim", "_reject_cve_direction_error", "_reject_fabricated_probe",
-    "_strip_agent_narration", "_strip_govulncheck",
+    "_strip_agent_narration", "_strip_govulncheck", "_sanitize_comment",
     "_enforce_verdict_floor", "_downgrade_mismatched_probe", "_enforce_merge_risk_tag", "_normalize_verdict_text", "_inject_verdict_logic",
     "_ensure_marker", "_signal_table_ok", "_validate_comment", "_near_valid",
     "_fallback_comment", "generate_comments", "main",
@@ -240,6 +240,26 @@ def _build_per_pr_prompt(
                 "Do not invent hashes or metrics not present in this data.\n"
             )
 
+    eco = str(pr.get("ecosystem", "")).strip().lower()
+    if eco == "actions":
+        codebase_ctx = top_level.get("codebase_context") or {}
+        has_pkg_json = codebase_ctx.get("has_package_json", True)
+        if not has_pkg_json:
+            sections.append(
+                "\n### ⚠️ ECOSYSTEM CONTEXT: Go-only repository\n"
+                "This is a GitHub Actions dependency in a **pure Go repository** "
+                "(no package.json, no tsconfig.json, no Node.js). "
+                "Do NOT reference npm, Node.js, tsconfig.json, or any JavaScript/TypeScript "
+                "tooling in your verification commands or analysis. "
+                "Use `go build`, `go test`, and workflow YAML inspection instead.\n"
+            )
+
+    sections.append(
+        "\n### DENY LIST\n"
+        "Do NOT recommend installing or running `govulncheck`. It is permanently banned. "
+        "CVE data comes from Dependabot alerts via PAT only.\n"
+    )
+
     sections.append(
         "\n### OUTPUT INSTRUCTIONS\n"
         "Generate the COMPLETE PR comment in markdown. Start with `<!-- breakability-check -->` "
@@ -279,7 +299,38 @@ _AGENT_NARRATION_RE = re.compile(
 
 def _strip_agent_narration(comment: str) -> str:
     """Remove LLM scratch-pad / self-narration lines that leak into comments."""
-    return _AGENT_NARRATION_RE.sub("", comment).lstrip("\n")
+    comment = _AGENT_NARRATION_RE.sub("", comment).lstrip("\n")
+    comment = re.sub(
+        r"^---\s*$", "", comment, count=1, flags=re.MULTILINE
+    ).lstrip("\n") if comment.startswith("---") else comment
+    return comment
+
+
+_QA_NOTES_RE = re.compile(
+    r"^\*\*(?:Character count|Line count|Status|Word count)\*?\*?:.*$",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+_FABRICATED_URL_RE = re.compile(
+    r"https?://[^\s)]*(?:nvg\.nist\.gov|your-org/your-repo)[^\s)]*",
+)
+
+_FABRICATED_RUN_RE = re.compile(
+    r"actions/runs/12345\b",
+)
+
+
+def _sanitize_comment(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
+    """Strip fabricated URLs, QA scratch notes, and placeholder references."""
+    comment = _QA_NOTES_RE.sub("", comment)
+    repo = (pr.get("_metadata") or {}).get("repo") or ""
+    def _fix_nist_url(m):
+        return m.group(0).replace("nvg.nist.gov", "nvd.nist.gov")
+    comment = re.sub(r"https?://nvg\.nist\.gov[^\s)]*", _fix_nist_url, comment)
+    comment = _FABRICATED_URL_RE.sub("", comment)
+    comment = _FABRICATED_RUN_RE.sub("", comment)
+    comment = re.sub(r"\n{3,}", "\n\n", comment)
+    return comment
 
 
 def _strip_govulncheck(comment: str) -> str:
@@ -294,8 +345,9 @@ def _strip_govulncheck(comment: str) -> str:
 def _enforce_verdict_floor(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
     """Post-processing guard: ensure AI verdict matches authoritative_verdict() exactly.
 
-    Rewrites the entire H2 header line so the verdict word, emoji, and any trailing
-    text ("REVIEW RISK") are all corrected in one pass.
+    Rewrites: (1) the H2 header line, (2) body rows mentioning the wrong verdict
+    (AI Arbiter, signal table, verdict logic), (3) contradictory action text like
+    "MERGE IMMEDIATELY" when verdict is BLOCKED.
     """
     av = authoritative_verdict(pr)
     contract_verdict = av.get("verdict", "REVIEW")
@@ -321,7 +373,44 @@ def _enforce_verdict_floor(comment: str, pr: Dict[str, Any], pr_num: str) -> str
     )
     new_emoji = emoji_map.get(contract_verdict, "⚠️")
     new_header = f"## {new_emoji} {contract_verdict}{m.group(2)}"
-    return comment[:m.start()] + new_header + comment[m.end():]
+    comment = comment[:m.start()] + new_header + comment[m.end():]
+
+    wrong_verdicts = {ai_verdict, ai_normalized} - {contract_verdict}
+    for wrong in wrong_verdicts:
+        comment = re.sub(
+            rf'(?i)\bverdict\s*[:=]\s*{re.escape(wrong)}\b',
+            f'verdict = {contract_verdict}',
+            comment,
+        )
+        comment = re.sub(
+            rf'(?i)(AI\s+Arbiter\s*[:\|]\s*){re.escape(wrong)}',
+            rf'\g<1>{contract_verdict}',
+            comment,
+        )
+        comment = re.sub(
+            rf'(?i)→\s*headline\s*=\s*"[^"]*{re.escape(wrong)}[^"]*"',
+            f'→ headline = "{new_emoji} {contract_verdict}"',
+            comment,
+        )
+
+    if contract_verdict == "BLOCKED":
+        comment = re.sub(
+            r'(?im)^.*\bmerge\s+immediately\b.*$',
+            f'**Do not merge** — verdict is BLOCKED. Review required.',
+            comment,
+        )
+        comment = re.sub(
+            r'(?i)\bREVIEW\s+RISK\b',
+            'BLOCKED',
+            comment,
+        )
+        comment = re.sub(
+            r'(?i)\bSECURITY\s+RISK\b',
+            'BLOCKED',
+            comment,
+        )
+
+    return comment
 
 
 def _normalize_verdict_text(comment: str, pr_num: str) -> str:
@@ -697,12 +786,15 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
         t_status = "⏭️ Not executed"
 
     probe_same = bg.get("same_behavior")
+    probe_mismatch = "MISMATCH" in (bg.get("reconciliation_note") or "").upper()
     if probe_same is True:
         p_status = "✅ Same behavior"
     elif probe_same is False:
         p_status = "⚠️ Different behavior"
     else:
         p_status = "⏭️ Not available"
+    if probe_mismatch:
+        p_status += " — ⚠️ package mismatch"
 
     reach_count = len(files_importing)
     r_status = f"📦 {reach_count} file(s)" if reach_count > 0 else "✅ Not imported"
@@ -744,6 +836,20 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
         "> **Note:** AI comment generation failed. This is an automated fallback with available signal data.",
         "",
     ]
+    if verdict == "BLOCKED" and av.get("cve_floor_applied"):
+        cve_details_fb = pr.get("cve_details") or []
+        cve_count = len(cve_details_fb)
+        if cve_count == 0:
+            cve_count = len(((pr.get("deterministic") or {}).get("security") or {}).get("cveIds") or [])
+        cvss = av.get("reason", "")
+        cvss_match = re.search(r'max CVSS ([\d.]+)', cvss)
+        cvss_str = cvss_match.group(1) if cvss_match else "N/A"
+        lines.extend([
+            f"> 🚨 **CRITICAL SECURITY UPDATE:** This PR remediates **{cve_count} CVE(s)** "
+            f"(max CVSS: {cvss_str}). Verdict escalated to BLOCKED via CVE floor — "
+            f"prioritize security review.",
+            "",
+        ])
     if verdict == "SAFE" and build_verdict == "pre_existing":
         lines.extend([
             "> **ℹ️ Build/test issues shown below are pre-existing** (identical on the main branch) "
@@ -757,7 +863,7 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
         "|-------|--------|------------|----------|",
         f"| Build | {b_emoji} {build_verdict.upper()} | HIGH | Exit: {build.get('pr_exit', 'N/A')} |",
         f"| Tests | {t_status} | {'HIGH' if test_exit == 0 else 'MEDIUM'} | {'Exit: ' + str(test_exit) if test_exit is not None else 'N/A'} |",
-        f"| Behavioral Probe | {p_status} | {bg.get('confidence', '—').upper() if probe_same is not None else '—'} | — |",
+        f"| Behavioral Probe | {p_status} | {'LOW' if probe_mismatch else bg.get('confidence', '—').upper() if probe_same is not None else '—'} | {'⚠️ Package mismatch — re-evaluate' if probe_mismatch else '—'} |",
         f"| Reachability | {r_status} | {'HIGH' if reach_count > 0 else 'LOW'} | {'Direct import' if reach_count > 0 else 'Not reached'} |",
         f"| Changelog | {cl_short} | {'—' if cl_status in ('missing', '') or changelog_signal is None else 'MEDIUM'} | — |",
         f"| API Diff | {a_status} | {'—' if a_status.startswith('⏭️') else 'MEDIUM'} | — |",
@@ -1103,6 +1209,7 @@ def generate_comments(
         if comment:
             comment = _strip_agent_narration(comment)
             comment = _strip_govulncheck(comment)
+            comment = _sanitize_comment(comment, pr_data, pr_num)
             comment = _downgrade_mismatched_probe(comment, pr_data, pr_num)
             comment = _enforce_verdict_floor(comment, pr_data, pr_num)
             comment = _normalize_verdict_text(comment, pr_num)

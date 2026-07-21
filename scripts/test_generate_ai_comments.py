@@ -18,6 +18,10 @@ from generate_ai_comments import (
     _enforce_merge_risk_tag,
     _normalize_verdict_text,
     _inject_verdict_logic,
+    _strip_agent_narration,
+    _strip_govulncheck,
+    _sanitize_comment,
+    _downgrade_mismatched_probe,
 )
 
 
@@ -1110,6 +1114,219 @@ class TestFooterDateFromMetadata(unittest.TestCase):
     def test_footer_falls_back_to_today_without_metadata(self):
         comment = _fallback_comment(SAMPLE_PR, "42", None, None, "test-model")
         self.assertIn("Analyzed:", comment)
+
+
+class TestEnforceVerdictFloorBodyText(unittest.TestCase):
+    """C1/C2: _enforce_verdict_floor must rewrite body text, not just header."""
+
+    def test_merge_immediately_rewritten_for_blocked(self):
+        comment = (
+            "<!-- breakability-check -->\n"
+            "## 🚨 REVIEW RISK — `pkg` 1.0 → 2.0\n"
+            "Merge immediately.\n"
+            "Verdict: MERGE IMMEDIATELY\n"
+        )
+        pr = {"package": "pkg", "build": {"verdict": "fail"}, "test": {"ran": False}}
+        result = _enforce_verdict_floor(comment, pr, "54")
+        self.assertNotIn("MERGE IMMEDIATELY", result)
+        self.assertNotIn("Merge immediately", result)
+        self.assertIn("BLOCKED", result)
+        self.assertIn("Do not merge", result)
+
+    def test_review_risk_rewritten_to_blocked(self):
+        comment = (
+            "<!-- breakability-check -->\n"
+            "## 🚨 REVIEW RISK — `pkg` 1.0 → 2.0\n"
+            "Some REVIEW RISK text here.\n"
+        )
+        pr = {"package": "pkg", "build": {"verdict": "fail"}, "test": {"ran": False}}
+        result = _enforce_verdict_floor(comment, pr, "9")
+        self.assertNotIn("REVIEW RISK", result)
+        self.assertIn("BLOCKED", result)
+
+    def test_body_verdict_references_corrected(self):
+        comment = (
+            "<!-- breakability-check -->\n"
+            "## ⚠️ REVIEW — `pkg` 1.0 → 2.0\n"
+            "verdict = REVIEW\n"
+            "AI Arbiter: REVIEW\n"
+        )
+        pr = {"package": "pkg", "build": {"verdict": "fail"}, "test": {"ran": False}}
+        result = _enforce_verdict_floor(comment, pr, "23")
+        self.assertIn("verdict = BLOCKED", result)
+        self.assertIn("AI Arbiter: BLOCKED", result)
+
+    def test_correct_verdict_not_touched(self):
+        comment = (
+            "<!-- breakability-check -->\n"
+            "## 🚫 BLOCKED — `pkg` 1.0 → 2.0\n"
+            "verdict = BLOCKED\n"
+        )
+        pr = {"package": "pkg", "build": {"verdict": "fail"}, "test": {"ran": False}}
+        result = _enforce_verdict_floor(comment, pr, "32")
+        self.assertEqual(result, comment)
+
+    def test_positive_control_pr52_blocked_stays_correct(self):
+        comment = (
+            "<!-- breakability-check -->\n"
+            "## 🚫 BLOCKED — `golang.org/x/crypto` 0.46.0 → 0.52.0\n"
+            "verdict = BLOCKED\n"
+        )
+        pr = {
+            "package": "golang.org/x/crypto", "build": {"verdict": "fail"},
+            "test": {"ran": False},
+        }
+        result = _enforce_verdict_floor(comment, pr, "52")
+        self.assertIn("BLOCKED", result)
+        self.assertNotIn("REVIEW", result)
+
+
+class TestSanitizeComment(unittest.TestCase):
+    """C3: _sanitize_comment strips fabricated URLs and QA notes."""
+
+    def test_strips_qa_notes(self):
+        comment = "## REVIEW — pkg\nContent.\n**Character count:** ~15,800\n**Line count:** ~420 lines"
+        result = _sanitize_comment(comment, {}, "8")
+        self.assertNotIn("Character count", result)
+        self.assertNotIn("Line count", result)
+
+    def test_fixes_nvg_to_nvd(self):
+        comment = "See https://nvg.nist.gov/vuln/detail/CVE-2026-29181"
+        result = _sanitize_comment(comment, {}, "8")
+        self.assertIn("nvd.nist.gov", result)
+        self.assertNotIn("nvg.nist.gov", result)
+
+    def test_strips_fabricated_run_id(self):
+        comment = "Run: actions/runs/12345 completed."
+        result = _sanitize_comment(comment, {}, "8")
+        self.assertNotIn("actions/runs/12345", result)
+
+    def test_strips_your_org_placeholder(self):
+        comment = "Link: https://github.com/your-org/your-repo/issues/68"
+        result = _sanitize_comment(comment, {}, "8")
+        self.assertNotIn("your-org/your-repo", result)
+
+
+class TestStripAgentNarration(unittest.TestCase):
+    """C3: _strip_agent_narration removes leaked LLM self-narration."""
+
+    def test_strips_now_let_me(self):
+        comment = "Now let me create the complete PR comment for PR #8:\n\n---\n## REVIEW — pkg"
+        result = _strip_agent_narration(comment)
+        self.assertNotIn("Now let me", result)
+        self.assertIn("## REVIEW", result)
+
+    def test_strips_ill_create(self):
+        comment = "I'll create the analysis now.\n## SAFE — pkg"
+        result = _strip_agent_narration(comment)
+        self.assertNotIn("I'll create", result)
+
+    def test_preserves_normal_content(self):
+        comment = "## REVIEW — pkg\nThis is a normal comment."
+        result = _strip_agent_narration(comment)
+        self.assertIn("normal comment", result)
+
+
+class TestProbeMismatchDowngrade(unittest.TestCase):
+    """C6: PACKAGE-MISMATCH in reconciliation_note → LOW confidence in fallback."""
+
+    def test_mismatch_shows_low_in_fallback(self):
+        pr = {
+            **SAMPLE_PR,
+            "behavioral_grade": {
+                "same_behavior": True, "confidence": "high",
+                "reconciliation_note": "PACKAGE-MISMATCH: probe analyzed wrong package. Grade should be re-evaluated.",
+            },
+        }
+        comment = _fallback_comment(pr, "8", None, None, "test-model")
+        probe_row = [l for l in comment.splitlines() if "Behavioral Probe" in l][0]
+        self.assertIn("LOW", probe_row)
+        self.assertIn("mismatch", probe_row.lower())
+
+    def test_no_mismatch_keeps_actual_confidence(self):
+        pr = {
+            **SAMPLE_PR,
+            "behavioral_grade": {"same_behavior": True, "confidence": "high"},
+        }
+        comment = _fallback_comment(pr, "7", None, None, "test-model")
+        probe_row = [l for l in comment.splitlines() if "Behavioral Probe" in l][0]
+        self.assertIn("HIGH", probe_row)
+        self.assertNotIn("mismatch", probe_row.lower())
+
+    def test_downgrade_in_ai_comment(self):
+        comment = (
+            "<!-- breakability-check -->\n"
+            "| Behavioral Probe | ✅ STABLE | High confidence |\n"
+        )
+        pr = {
+            "behavioral_grade": {
+                "same_behavior": True, "confidence": "high",
+                "reconciliation_note": "PACKAGE-MISMATCH: wrong pkg",
+            },
+        }
+        result = _downgrade_mismatched_probe(comment, pr, "8")
+        self.assertIn("Low confidence", result)
+        self.assertIn("package mismatch", result)
+        self.assertNotIn("High confidence", result)
+
+
+class TestCveFloorBlockedBanner(unittest.TestCase):
+    """C7: CVE-floor BLOCKED PRs get security urgency banner in fallback."""
+
+    def test_cve_floor_blocked_has_banner(self):
+        pr = {
+            **SAMPLE_PR,
+            "build": {"verdict": "fail", "pr_exit": 1},
+            "test": {"ran": False},
+            "cve_details": [{"cve_id": "CVE-2026-33815", "severity": "critical", "cvss_score": 9.8}],
+            "deterministic": {
+                "security": {
+                    "isSecurity": True, "cveIds": ["CVE-2026-33815", "CVE-2026-33816", "CVE-2026-41889"],
+                    "cvssScore": 9.8,
+                },
+            },
+        }
+        comment = _fallback_comment(pr, "32", None, None, "test-model")
+        self.assertIn("CRITICAL SECURITY UPDATE", comment)
+        self.assertIn("BLOCKED", comment)
+
+    def test_non_cve_blocked_no_banner(self):
+        pr = {
+            **SAMPLE_PR,
+            "build": {"verdict": "fail", "pr_exit": 1},
+            "test": {"ran": False},
+        }
+        comment = _fallback_comment(pr, "42", None, None, "test-model")
+        self.assertNotIn("CRITICAL SECURITY UPDATE", comment)
+
+
+class TestGovulncheckStripping(unittest.TestCase):
+    """C11: govulncheck recommendations stripped from comments."""
+
+    def test_strips_govulncheck_install(self):
+        comment = "## REVIEW\n```bash\ngo install golang.org/x/vuln/cmd/govulncheck@latest\ngovulncheck ./...\n```"
+        result = _strip_govulncheck(comment)
+        self.assertNotIn("govulncheck", result)
+
+    def test_preserves_other_content(self):
+        comment = "## REVIEW\n```bash\ngo build ./...\ngo test ./...\n```"
+        result = _strip_govulncheck(comment)
+        self.assertIn("go build", result)
+        self.assertIn("go test", result)
+
+
+class TestDenyListInPrompt(unittest.TestCase):
+    """C11: AI prompt includes govulncheck deny list."""
+
+    def test_prompt_contains_deny_list(self):
+        prompt = _build_per_pr_prompt(
+            base_prompt="Base instructions",
+            pr=SAMPLE_PR, pr_num="42",
+            metadata={}, run_url=None, merge_plan_issue=None,
+            model_name="test", cross_deps=[], top_level={},
+        )
+        self.assertIn("govulncheck", prompt)
+        self.assertIn("DENY LIST", prompt)
 
 
 if __name__ == "__main__":
