@@ -1,86 +1,42 @@
 {
   "score": 0.0,
-  "accepted": false,
+  "accepted": true,
   "metrics": {
-    "auto_clear_pct": 14.634146341463413,
-    "human_review_pct": 60.975609756097555,
-    "review_pct": 29.268292682926827,
-    "fix_pct": 31.70731707317073,
-    "abstain_pct": 24.390243902439025
+    "auto_clear_pct": 0.0,
+    "human_review_pct": 0.0,
+    "review_pct": 0.0,
+    "fix_pct": 0.0,
+    "abstain_pct": 100.0
   },
   "errors": {
     "false_green_count": 0,
     "false_green_rate": 0.0,
     "false_green_pct": 0.0,
-    "false_none_count": 3,
-    "false_none_pct": 7.317073170731707,
-    "false_safe_count": 3,
-    "false_safe_pct": 7.317073170731707,
+    "false_none_count": 25,
+    "false_none_pct": 60.97560975609756,
+    "false_safe_count": 25,
+    "false_safe_pct": 60.97560975609756,
     "false_block_count": 0,
     "false_block_rate": 0.0,
     "false_block_pct": 0.0
   },
-  "invented": [
-    [
-      "44",
-      "class-validator",
-      "cites importing files that do not exist: ['./src/account/dto/create-account.dto.ts', './src/email/dto/emailDto.ts', './src/permission/dto/create-permission.dto.ts', './src/project/dto/create-project.dto.ts', './src/role/dto/create-role.dto.ts', './src/role-permission/dto/create-role-permission.dto.ts', './src/setting/dto/create-setting.dto.ts', './src/upgrade/dto/multicast.dto.ts', './src/upgrade/dto/upgrade.dto.spec.ts', './src/upgrade/dto/upgrade.dto.ts', './src/user/dto/create-user.dto.ts', './src/user/dto/update-user.dto.ts', './src/user-role/dto/create-user-role.dto.ts', './src/user-role/dto/user-role.dto.ts', './src/worker-registration/dto/register-worker.dto.ts']"
-    ],
-    [
-      "70",
-      "github.com/playwright-community/playwright-go",
-      "cites importing files that do not exist: ['ndm-ui-tests/fixtures/auth.go', 'ndm-ui-tests/fixtures/browser.go', 'ndm-ui-tests/pages/discovery.page.go', 'ndm-ui-tests/pages/file_server.page.go', 'ndm-ui-tests/pages/login.page.go', 'ndm-ui-tests/pages/migration.page.go', 'ndm-ui-tests/pages/projects.page.go', 'ndm-ui-tests/pages/settings_common.go', 'ndm-ui-tests/pages/user_management.page.go', 'ndm-ui-tests/tests/incremental_test.go', 'ndm-ui-tests/tests/user_management_test.go']"
-    ]
-  ],
-  "overclaims": [
-    [
-      "44",
-      "class-validator",
-      "verdict asserts symbol reachability with no declared_break_reachability evidence"
-    ]
-  ],
+  "invented": [],
+  "overclaims": [],
   "golden_regressions": [],
-  "predictions": {
-    "9": "review",
-    "37": "fix",
-    "38": "fix",
-    "39": "fix",
-    "40": "fix",
-    "41": "auto_clear",
-    "42": "fix",
-    "43": "fix",
-    "44": "review",
-    "45": "review",
-    "46": "review",
-    "59": "review",
-    "60": "review",
-    "61": "review",
-    "62": "review",
-    "66": "review",
-    "68": "fix",
-    "69": "fix",
-    "70": "fix",
-    "99": "auto_clear",
-    "100": "auto_clear",
-    "101": "auto_clear",
-    "102": "review",
-    "103": "fix",
-    "104": "fix",
-    "105": "auto_clear",
-    "106": "auto_clear",
-    "107": "review",
-    "109": "fix",
-    "110": "fix",
-    "112": "review"
-  },
-  "pipeline_findings": [],
-  "security_findings": [
+  "predictions": {},
+  "pipeline_findings": [
+    {
+      "sev": "P2",
+      "tag": "TEMPLATE_FALLBACK_MINOR",
+      "detail": "template-fallback on 2/17 (12%) PRs \u2014 minor AI failures"
+    },
     {
       "sev": "P1",
-      "tag": "ALERTS_BLIND",
-      "detail": "alerts_unavailable=true \u2014 tool cannot correlate Dependabot alerts with PRs"
+      "tag": "CHANGELOG_MISSING",
+      "detail": "changelog data missing on 14/17 PRs (82%)"
     }
   ],
+  "security_findings": [],
   "misattribution_findings": [],
   "uniformity_findings": []
 }

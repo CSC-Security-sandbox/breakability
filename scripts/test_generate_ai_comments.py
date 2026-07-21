@@ -15,6 +15,9 @@ from generate_ai_comments import (
     _ensure_marker,
     _extract_pr_data,
     _enforce_verdict_floor,
+    _rewrite_noncanonical_arbiter,
+    _strip_merge_encouraging,
+    _fix_body_verdict_contradictions,
     _enforce_merge_risk_tag,
     _normalize_verdict_text,
     _inject_verdict_logic,
@@ -25,6 +28,7 @@ from generate_ai_comments import (
     _guard_empty_build_output,
     _strip_wrong_ecosystem_refs,
     _validate_merge_risk_tag,
+    _inject_merge_risk,
 )
 
 
@@ -1134,7 +1138,6 @@ class TestEnforceVerdictFloorBodyText(unittest.TestCase):
         self.assertNotIn("MERGE IMMEDIATELY", result)
         self.assertNotIn("Merge immediately", result)
         self.assertIn("BLOCKED", result)
-        self.assertIn("Do not merge", result)
 
     def test_review_risk_rewritten_to_blocked(self):
         comment = (
@@ -1379,7 +1382,6 @@ class TestEnforceVerdictFloorAIFormats(unittest.TestCase):
         pr = {"package": "pkg", "build": {"verdict": "fail"}, "test": {"ran": False}}
         result = _enforce_verdict_floor(comment, pr, "54")
         self.assertNotIn("MUST be merged", result)
-        self.assertIn("Do not merge", result)
 
     def test_positive_control_fallback_blocked_unchanged(self):
         comment = (
@@ -1569,6 +1571,230 @@ class TestMergeRiskReasonEnrichment(unittest.TestCase):
         }
         av = authoritative_verdict(pr)
         self.assertNotIn("not imported", av.get("reason", ""))
+
+
+class TestStripMergeEncouraging(unittest.TestCase):
+    """Tests for C2: structural merge-encouraging language stripping."""
+
+    def test_strips_merge_immediately(self):
+        comment = "Header line\nMerge immediately for security.\nOther text."
+        result = _strip_merge_encouraging(comment, "9")
+        self.assertNotIn("Merge immediately", result)
+        self.assertIn("Other text", result)
+
+    def test_strips_merge_recommended(self):
+        comment = "Merge recommended despite verification limitations.\nSafe text."
+        result = _strip_merge_encouraging(comment, "52")
+        self.assertNotIn("Merge recommended", result)
+        self.assertIn("Safe text", result)
+
+    def test_strips_must_be_merged(self):
+        comment = "This upgrade must be merged for security.\nMore text."
+        result = _strip_merge_encouraging(comment, "54")
+        self.assertNotIn("must be merged", result)
+        self.assertIn("More text", result)
+
+    def test_strips_merge_without_delay(self):
+        comment = "Once verified, merge without delay.\nEnd."
+        result = _strip_merge_encouraging(comment, "9")
+        self.assertNotIn("merge without delay", result)
+
+    def test_strips_strongly_recommended_merge(self):
+        comment = "Strongly recommended for immediate merge.\nKeep."
+        result = _strip_merge_encouraging(comment, "54")
+        self.assertNotIn("merge", result.lower())
+        self.assertIn("Keep", result)
+
+    def test_strips_merge_this_pr_with_recommendation(self):
+        """Merge + should in same sentence gets stripped."""
+        comment = "You should merge this PR promptly.\nKeep this."
+        result = _strip_merge_encouraging(comment, "53")
+        self.assertNotIn("merge this PR", result)
+        self.assertIn("Keep this", result)
+
+
+class TestRewriteNoncanonicalArbiter(unittest.TestCase):
+    """Tests for C3: validate AI Arbiter tokens against canonical enum."""
+
+    def test_rewrites_merge_recommended(self):
+        comment = "| AI Arbiter | 🚨 MERGE RECOMMENDED | HIGH |"
+        result = _rewrite_noncanonical_arbiter(comment, "BLOCKED", "53")
+        self.assertNotIn("MERGE RECOMMENDED", result)
+        self.assertIn("BLOCKED", result)
+
+    def test_keeps_canonical_blocked(self):
+        comment = "| AI Arbiter | 🚨 BLOCKED | PARTIAL |"
+        result = _rewrite_noncanonical_arbiter(comment, "BLOCKED", "23")
+        self.assertIn("BLOCKED", result)
+
+    def test_keeps_canonical_safe(self):
+        comment = "| AI Arbiter | ✅ SAFE | HIGH |"
+        result = _rewrite_noncanonical_arbiter(comment, "SAFE", "42")
+        self.assertIn("SAFE", result)
+
+    def test_rewrites_security_risk(self):
+        comment = "| AI Arbiter | 🚨 SECURITY RISK | HIGH |"
+        result = _rewrite_noncanonical_arbiter(comment, "BLOCKED", "54")
+        self.assertNotIn("SECURITY RISK", result)
+        self.assertIn("BLOCKED", result)
+
+
+class TestGuardEmptyBuildOutputCodeBlocks(unittest.TestCase):
+    """Tests for C4: citation grounding — fabricated code blocks."""
+
+    def test_strips_fabricated_buffer_ids(self):
+        comment = (
+            "Build output:\n```\ncompile: writing output: "
+            "write $WORK/b109/_pkg_.a: no space left on device\n```\nEnd."
+        )
+        pr = {"build": {"output_tail": "\n", "pr_exit": -1}}
+        result = _guard_empty_build_output(comment, pr, "23")
+        self.assertNotIn("$WORK/b109", result)
+        self.assertIn("no diagnostic output captured", result)
+
+    def test_preserves_real_output(self):
+        comment = (
+            "Build output:\n```\ncompile: writing output: "
+            "write $WORK/b109/_pkg_.a: no space left on device\n```\n"
+        )
+        pr = {"build": {"output_tail": "real disk space error output", "pr_exit": 1}}
+        result = _guard_empty_build_output(comment, pr, "11")
+        self.assertIn("$WORK/b109", result)
+
+    def test_preserves_non_build_code_blocks(self):
+        comment = "```bash\ngo test ./...\n```\n"
+        pr = {"build": {"output_tail": "", "pr_exit": -1}}
+        result = _guard_empty_build_output(comment, pr, "52")
+        self.assertIn("go test", result)
+
+
+class TestInjectMergeRisk(unittest.TestCase):
+    """Tests for C5: inject Merge Risk section when missing from AI comments."""
+
+    def test_injects_when_missing(self):
+        comment = "## BLOCKED — pkg\nSome analysis.\n### Recommendation\nSteps."
+        pr = {
+            "merge_risk": {"tag": "High", "reason": "CVE floor applied"},
+            "build": {"verdict": "fail"}, "test": {"ran": False},
+        }
+        result = _inject_merge_risk(comment, pr, "9")
+        self.assertIn("Merge Risk", result)
+        self.assertIn("High", result)
+        self.assertIn("CVE floor", result)
+
+    def test_no_duplicate_when_present(self):
+        comment = "## BLOCKED\n### Merge Risk\n**🔴 High**\n### Recommendation"
+        pr = {
+            "merge_risk": {"tag": "High", "reason": "CVE floor"},
+            "build": {"verdict": "fail"}, "test": {"ran": False},
+        }
+        result = _inject_merge_risk(comment, pr, "23")
+        self.assertEqual(result.count("Merge Risk"), 1)
+
+    def test_no_injection_when_no_tag(self):
+        comment = "## REVIEW\nAnalysis."
+        pr = {"merge_risk": {}, "build": {"verdict": "pass"}, "test": {"ran": True, "exit": 0}}
+        result = _inject_merge_risk(comment, pr, "7")
+        self.assertNotIn("Merge Risk", result)
+
+
+class TestStripYamlCodeBlockNpm(unittest.TestCase):
+    """Tests for C6: npm/yarn substitution inside YAML code blocks."""
+
+    def test_replaces_npm_ci_in_yaml(self):
+        comment = (
+            "```yaml\nname: ci\nsteps:\n"
+            "      - run: npm ci\n"
+            "      - run: npm test\n```\n"
+        )
+        pr = {
+            "ecosystem": "actions",
+            "_top_level": {"codebase_context": {"has_package_json": False}},
+        }
+        result = _strip_wrong_ecosystem_refs(comment, pr, "22")
+        self.assertNotIn("npm ci", result)
+        self.assertNotIn("npm test", result)
+        self.assertIn("go build", result)
+        self.assertIn("go test", result)
+
+    def test_keeps_npm_for_node_repo(self):
+        comment = "```yaml\n      - run: npm ci\n      - run: npm test\n```\n"
+        pr = {
+            "ecosystem": "actions",
+            "_top_level": {"codebase_context": {"has_package_json": True}},
+        }
+        result = _strip_wrong_ecosystem_refs(comment, pr, "22")
+        self.assertIn("npm ci", result)
+        self.assertIn("npm test", result)
+
+
+class TestStripRuleCitations(unittest.TestCase):
+    """Tests for C7: fabricated Rule N citations."""
+
+    def test_strips_rule_numbers(self):
+        comment = (
+            "Analysis:\n"
+            "Rule 0.5 (Security Override) applies.\n"
+            "See Rule 23 for coordinated upgrades.\n"
+            "Normal text here.\n"
+        )
+        pr = {"package": "pkg", "build": {"verdict": "pass"}, "test": {"ran": True, "exit": 0}}
+        result = _sanitize_comment(comment, pr, "23")
+        self.assertNotIn("Rule 0.5", result)
+        self.assertNotIn("Rule 23", result)
+        self.assertIn("Normal text", result)
+
+    def test_strips_rule_with_colon(self):
+        comment = "Rule 8: Actions PRs default SAFE.\nEnd."
+        pr = {"package": "pkg", "build": {"verdict": "pass"}, "test": {"ran": True, "exit": 0}}
+        result = _sanitize_comment(comment, pr, "4")
+        self.assertNotIn("Rule 8", result)
+        self.assertIn("End", result)
+
+
+class TestVerdictReviewSafeContradiction(unittest.TestCase):
+    """Tests for C8: SAFE/REVIEW contradiction in body text."""
+
+    def test_review_verdict_strips_safe_language(self):
+        comment = (
+            "<!-- breakability-check -->\n"
+            "## ✅ SAFE — `go.opentelemetry.io/otel/sdk` 1.39.0 → 1.43.0\n"
+            "| AI Arbiter | ✅ SAFE | MEDIUM |\n"
+            "SAFE to merge with coordination.\n"
+            "Why SAFE: all signals green.\n"
+            "we keep SAFE and add coordination.\n"
+        )
+        pr = {
+            "package": "go.opentelemetry.io/otel/sdk",
+            "build": {"verdict": "pass", "pr_exit": 0},
+            "test": {"ran": False},
+            "behavioral_grade": {"same_behavior": True, "confidence": "high"},
+            "verdict_v2": {"verdict": "REVIEW", "severity": "medium"},
+            "dep_type": "dev", "bump": "minor",
+        }
+        result = _enforce_verdict_floor(comment, pr, "7")
+        self.assertIn("REVIEW", result)
+        self.assertNotIn("AI Arbiter | ✅ SAFE", result)
+        self.assertNotIn("SAFE to merge", result)
+        self.assertNotIn("Why SAFE", result)
+        self.assertNotIn("we keep SAFE", result)
+
+    def test_safe_verdict_keeps_safe_language(self):
+        comment = (
+            "<!-- breakability-check -->\n"
+            "## ✅ SAFE — `lodash` 4.17.20 → 4.17.21\n"
+            "| AI Arbiter | ✅ SAFE | HIGH |\n"
+            "SAFE to merge.\n"
+        )
+        pr = {
+            "package": "lodash",
+            "build": {"verdict": "pass", "pr_exit": 0},
+            "test": {"ran": True, "exit": 0},
+            "verdict_v2": {"verdict": "SAFE", "severity": "low"},
+        }
+        result = _enforce_verdict_floor(comment, pr, "42")
+        self.assertIn("SAFE to merge", result)
+        self.assertIn("AI Arbiter | ✅ SAFE", result)
 
 
 if __name__ == "__main__":

@@ -19,9 +19,12 @@ __all__ = [
     "_read_prompt", "_extract_pr_data", "_build_per_pr_prompt",
     "_reject_false_cve_claim", "_reject_cve_direction_error", "_reject_fabricated_probe",
     "_strip_agent_narration", "_strip_govulncheck", "_sanitize_comment",
-    "_enforce_verdict_floor", "_downgrade_mismatched_probe", "_enforce_merge_risk_tag",
+    "_enforce_verdict_floor", "_rewrite_noncanonical_arbiter", "_strip_merge_encouraging",
+    "_fix_body_verdict_contradictions",
+    "_downgrade_mismatched_probe", "_enforce_merge_risk_tag",
     "_normalize_verdict_text", "_inject_verdict_logic",
     "_guard_empty_build_output", "_strip_wrong_ecosystem_refs", "_validate_merge_risk_tag",
+    "_inject_merge_risk",
     "_ensure_marker", "_signal_table_ok", "_validate_comment", "_near_valid",
     "_fallback_comment", "generate_comments", "main",
 ]
@@ -357,6 +360,19 @@ def _sanitize_comment(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
 
     comment = re.sub(r'\b[0-9a-f]{40}\b', _strip_fabricated_sha, comment)
 
+    rule_stripped = re.sub(
+        r'(?im)^.*\bRule\s+\d+(?:\.\d+)?\b.*$',
+        '',
+        comment,
+    )
+    if rule_stripped != comment:
+        count = len(re.findall(r'\bRule\s+\d+(?:\.\d+)?', comment))
+        comment = re.sub(r'\n{3,}', '\n\n', rule_stripped)
+        print(
+            f"PR#{pr_num}: stripped {count} fabricated Rule N citation(s)",
+            file=sys.stderr,
+        )
+
     comment = re.sub(r"\n{3,}", "\n\n", comment)
     return comment
 
@@ -376,7 +392,8 @@ def _enforce_verdict_floor(comment: str, pr: Dict[str, Any], pr_num: str) -> str
     Rewrites: (1) the H2 header line, (2) body rows mentioning the wrong verdict
     (AI Arbiter, signal table, verdict logic), (3) contradictory action text like
     "MERGE IMMEDIATELY" when verdict is BLOCKED, (4) non-canonical verdict words
-    like SECURITY_RISK.
+    like SECURITY_RISK, (5) AI Arbiter tokens not in {SAFE,REVIEW,BLOCKED},
+    (6) SAFE/REVIEW contradictions in body text for all verdict levels.
     """
     av = authoritative_verdict(pr)
     contract_verdict = av.get("verdict", "REVIEW")
@@ -387,10 +404,13 @@ def _enforce_verdict_floor(comment: str, pr: Dict[str, Any], pr_num: str) -> str
         "SECURITY RISK": "REVIEW",
         "REVIEW RISK": "REVIEW",
         "REVIEW_RISK": "REVIEW",
+        "MERGE RECOMMENDED": "SAFE",
+        "MERGE_RECOMMENDED": "SAFE",
     }
+    _CANONICAL_VERDICTS = {"SAFE", "REVIEW", "BLOCKED"}
     header_re = re.compile(
         r'^(##\s+\S+\s+)'
-        r'(SAFE|GLANCE|REVIEW|BLOCKED|BUILD_FAILS|SECURITY_RISK|SECURITY\s+RISK|REVIEW\s+RISK)'
+        r'(REVIEW\s+RISK|SECURITY\s+RISK|MERGE\s+RECOMMENDED|SECURITY_RISK|REVIEW_RISK|MERGE_RECOMMENDED|SAFE|GLANCE|REVIEW|BLOCKED|BUILD_FAILS|[A-Z][A-Z_ ]{2,})'
         r'(?:\s+\w+)*'
         r'(\s+—\s+.*|$)',
         re.MULTILINE,
@@ -402,7 +422,12 @@ def _enforce_verdict_floor(comment: str, pr: Dict[str, Any], pr_num: str) -> str
     ai_normalized = _EXTENDED_VERDICT_MAP.get(ai_verdict_raw,
                      _EXTENDED_VERDICT_MAP.get(ai_verdict_raw.replace(" ", "_"),
                      _VERDICT_MAP.get(ai_verdict_raw, ai_verdict_raw)))
+    if ai_normalized not in _CANONICAL_VERDICTS:
+        ai_normalized = "REVIEW"
+
     if ai_normalized == contract_verdict:
+        comment = _rewrite_noncanonical_arbiter(comment, contract_verdict, pr_num)
+        comment = _fix_body_verdict_contradictions(comment, contract_verdict, pr_num)
         return comment
     print(
         f"PR#{pr_num}: verdict match enforcement — AI said {ai_verdict_raw!r}, "
@@ -415,7 +440,10 @@ def _enforce_verdict_floor(comment: str, pr: Dict[str, Any], pr_num: str) -> str
     comment = comment[:m.start()] + new_header + comment[m.end():]
 
     wrong_verdicts = {ai_verdict_raw, ai_normalized} - {contract_verdict}
-    wrong_verdicts.update(ai_verdict_raw.replace(" ", "_"))
+    if " " in ai_verdict_raw:
+        wrong_verdicts.add(ai_verdict_raw.replace(" ", "_"))
+    elif "_" in ai_verdict_raw:
+        wrong_verdicts.add(ai_verdict_raw.replace("_", " "))
     for wrong in sorted(wrong_verdicts, key=len, reverse=True):
         if len(wrong) < 3:
             continue
@@ -425,7 +453,7 @@ def _enforce_verdict_floor(comment: str, pr: Dict[str, Any], pr_num: str) -> str
             comment,
         )
         comment = re.sub(
-            rf'(?i)(AI\s+Arbiter\s*[:\|]\s*){re.escape(wrong)}',
+            rf'(?i)(AI\s+Arbiter\s*[:\|]\s*)\S*\s*{re.escape(wrong)}',
             rf'\g<1>{contract_verdict}',
             comment,
         )
@@ -435,17 +463,10 @@ def _enforce_verdict_floor(comment: str, pr: Dict[str, Any], pr_num: str) -> str
             comment,
         )
 
+    comment = _rewrite_noncanonical_arbiter(comment, contract_verdict, pr_num)
+
     if contract_verdict == "BLOCKED":
-        comment = re.sub(
-            r'(?im)^.*\bmerge\s+immediately\b.*$',
-            '**Do not merge** — verdict is BLOCKED. Review required.',
-            comment,
-        )
-        comment = re.sub(
-            r'(?im)^.*\bMUST\s+be\s+merged\b.*$',
-            '**Do not merge without human review** — verdict is BLOCKED.',
-            comment,
-        )
+        comment = _strip_merge_encouraging(comment, pr_num)
         comment = re.sub(
             r'(?i)\bREVIEW\s+RISK\b',
             'BLOCKED',
@@ -471,12 +492,110 @@ def _enforce_verdict_floor(comment: str, pr: Dict[str, Any], pr_num: str) -> str
             'REVIEW REQUIRED',
             comment,
         )
-        comment = re.sub(
-            r'(?i)\bRule\s+0\.\d\b[^.\n]*',
-            'verdict is BLOCKED — human review required',
-            comment,
-        )
 
+    comment = _fix_body_verdict_contradictions(comment, contract_verdict, pr_num)
+
+    return comment
+
+
+def _rewrite_noncanonical_arbiter(comment: str, contract_verdict: str, pr_num: str) -> str:
+    """Rewrite any AI Arbiter | <TOKEN> row where TOKEN is not in {SAFE, REVIEW, BLOCKED}."""
+    _CANONICAL = {"SAFE", "REVIEW", "BLOCKED"}
+    def _fix_arbiter(m):
+        token = m.group(2).strip()
+        if token in _CANONICAL:
+            return m.group(0)
+        print(
+            f"PR#{pr_num}: non-canonical AI Arbiter token '{token}' → '{contract_verdict}'",
+            file=sys.stderr,
+        )
+        return m.group(1) + contract_verdict + m.group(3)
+    comment = re.sub(
+        r'(AI\s+Arbiter\s*\|\s*\S*\s*)([A-Z][A-Z_ ]{2,}?)(\s*\|)',
+        _fix_arbiter,
+        comment,
+    )
+    return comment
+
+
+def _strip_merge_encouraging(comment: str, pr_num: str) -> str:
+    """Strip any sentence with merge + positive-action word when verdict is BLOCKED."""
+    _MERGE_POSITIVE_RE = re.compile(
+        r'^.*\bmerge[ds]?\b.*\b(?:recommend\w*|immediately|must|should|now|'
+        r'without\s+delay|essential|strongly|priorit\w*|urgent\w*)\b.*$|'
+        r'^.*\b(?:recommend\w*|immediately|must|should|strongly|priorit\w*|urgent\w*)\b'
+        r'.*\bmerge[ds]?\b.*$|'
+        r'^.*\bmerge\s+this\s+PR\b.*$',
+        re.MULTILINE | re.IGNORECASE,
+    )
+    stripped_count = 0
+    for _ in range(10):
+        new = _MERGE_POSITIVE_RE.sub('', comment)
+        if new == comment:
+            break
+        stripped_count += 1
+        comment = new
+    comment = re.sub(r'\n{3,}', '\n\n', comment)
+    if stripped_count:
+        print(
+            f"PR#{pr_num}: stripped {stripped_count} merge-encouraging line(s) from BLOCKED comment",
+            file=sys.stderr,
+        )
+    return comment
+
+
+def _fix_body_verdict_contradictions(comment: str, contract_verdict: str, pr_num: str) -> str:
+    """Fix body text that contradicts the contract verdict at any level."""
+    _VERDICT_ORDER = {"SAFE": 0, "REVIEW": 1, "BLOCKED": 2}
+    contract_level = _VERDICT_ORDER.get(contract_verdict, 1)
+    changed = False
+
+    if contract_verdict in ("REVIEW", "BLOCKED"):
+        arbiter_safe = re.search(r'(?i)AI\s+Arbiter\s*[:\|]\s*\S*\s*SAFE\b', comment)
+        if arbiter_safe:
+            comment = re.sub(
+                r'(?i)(AI\s+Arbiter\s*[:\|]\s*)\S*\s*SAFE\b',
+                rf'\g<1>{contract_verdict}',
+                comment,
+            )
+            changed = True
+        if re.search(r'(?i)\bSAFE\s+to\s+merge\b', comment):
+            comment = re.sub(
+                r'(?i)\bSAFE\s+to\s+merge\b',
+                f'{contract_verdict} — requires human verification',
+                comment,
+            )
+            changed = True
+        if re.search(r'(?i)\bWhy\s+SAFE\b', comment):
+            comment = re.sub(
+                r'(?im)^.*\bWhy\s+SAFE\b.*$',
+                f'Why {contract_verdict}:',
+                comment,
+            )
+            changed = True
+        if re.search(r'(?i)\bwe\s+keep\s+SAFE\b', comment):
+            comment = re.sub(
+                r'(?i)\bwe\s+keep\s+SAFE\b',
+                f'verdict is {contract_verdict}',
+                comment,
+            )
+            changed = True
+
+    if contract_verdict == "BLOCKED":
+        if re.search(r'(?i)AI\s+Arbiter\s*[:\|]\s*\S*\s*REVIEW\b', comment):
+            comment = re.sub(
+                r'(?i)(AI\s+Arbiter\s*[:\|]\s*)\S*\s*REVIEW\b',
+                rf'\g<1>BLOCKED',
+                comment,
+            )
+            changed = True
+
+    if changed:
+        print(
+            f"PR#{pr_num}: fixed body verdict contradictions "
+            f"(contract={contract_verdict})",
+            file=sys.stderr,
+        )
     return comment
 
 
@@ -669,9 +788,15 @@ def _enforce_merge_risk_tag(comment: str, pr: Dict[str, Any], pr_num: str) -> st
 
 
 def _guard_empty_build_output(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
-    """Strip fabricated infra root causes when build produced no diagnostic output."""
+    """Strip fabricated infra root causes when build produced no diagnostic output.
+
+    Also strips fabricated code blocks presented as 'captured build output' when
+    build.output_tail is empty — these are AI hallucinations.
+    """
     build = pr.get("build") or {}
     output_tail = (build.get("output_tail") or "").strip()
+    test_output = (build.get("test", {}) if isinstance(build.get("test"), dict) else
+                   (pr.get("test") or {})).get("output_tail", "").strip() if isinstance(pr.get("test"), dict) else ""
     pr_exit = build.get("pr_exit")
     if output_tail or pr_exit != -1:
         return comment
@@ -692,11 +817,37 @@ def _guard_empty_build_output(comment: str, pr: Dict[str, Any], pr_num: str) -> 
             f"build.output_tail is empty, pr_exit={pr_exit}",
             file=sys.stderr,
         )
+
+    _CODE_BLOCK_RE = re.compile(r'```[^\n]*\n(.*?)```', re.DOTALL)
+    _BUILD_OUTPUT_MARKERS = re.compile(
+        r'(?i)\$WORK/b\d+|_pkg_\.a|no space left on device|'
+        r'compile:\s+writing output|go build\s+.*failed|'
+        r'FAIL\s+github\.com/|exit status \d+',
+    )
+    stripped_blocks = 0
+    def _check_block(m):
+        nonlocal stripped_blocks
+        block_content = m.group(1)
+        if _BUILD_OUTPUT_MARKERS.search(block_content):
+            stripped_blocks += 1
+            return '```\nbuild errored — no diagnostic output captured (pr_exit=-1)\n```'
+        return m.group(0)
+    comment = _CODE_BLOCK_RE.sub(_check_block, comment)
+    if stripped_blocks:
+        print(
+            f"PR#{pr_num}: stripped {stripped_blocks} fabricated build output code block(s) — "
+            f"output_tail is empty",
+            file=sys.stderr,
+        )
     return comment
 
 
 def _strip_wrong_ecosystem_refs(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
-    """Strip Node.js/npm/TypeScript references from comments on Go-only repos."""
+    """Strip Node.js/npm/TypeScript references from comments on Go-only repos.
+
+    Also scans inside code blocks (``` markers) and substitutes npm/yarn commands
+    with Go equivalents.
+    """
     eco = str(pr.get("ecosystem", "")).strip().lower()
     if eco not in ("gomod", "actions"):
         return comment
@@ -704,6 +855,20 @@ def _strip_wrong_ecosystem_refs(comment: str, pr: Dict[str, Any], pr_num: str) -
     has_pkg_json = codebase_ctx.get("has_package_json", True)
     if has_pkg_json:
         return comment
+
+    def _fix_code_block(m):
+        block = m.group(0)
+        block = re.sub(r'(?m)^\s*-?\s*run:\s*npm\s+ci\s*$', '      - run: go build ./...', block)
+        block = re.sub(r'(?m)^\s*-?\s*run:\s*npm\s+test\s*$', '      - run: go test ./...', block)
+        block = re.sub(r'(?m)^npm\s+ci\s*$', 'go build ./...', block)
+        block = re.sub(r'(?m)^npm\s+test\s*$', 'go test ./...', block)
+        block = re.sub(r'(?m)^npm\s+install\b.*$', 'go build ./...', block)
+        block = re.sub(r'(?m)^npm\s+run\s+build\b.*$', 'go build ./...', block)
+        block = re.sub(r'(?m)^yarn\s+(?:install|test)\b.*$', 'go test ./...', block)
+        return block
+
+    comment = re.sub(r'```[^\n]*\n.*?```', _fix_code_block, comment, flags=re.DOTALL)
+
     _NODE_INSTRUCTION_RE = re.compile(
         r'(?im)^.*\b(?:npm\s+(?:install|run|test|cache|ci)|'
         r'node\.?js\s+\d+\s+is\s+installed|'
@@ -746,6 +911,35 @@ def _validate_merge_risk_tag(comment: str, pr: Dict[str, Any], pr_num: str) -> s
         _fix_tag,
         comment,
     )
+    return comment
+
+
+def _inject_merge_risk(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
+    """Inject Merge Risk section if data exists but the comment omits it."""
+    mr = pr.get("merge_risk") or (pr.get("deterministic") or {}).get("merge_risk") or {}
+    mr_tag = mr.get("tag", "")
+    if not mr_tag:
+        return comment
+    if re.search(r'(?i)merge\s+risk', comment):
+        return comment
+    mr_emoji = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}.get(mr_tag, "⚪")
+    mr_reason = mr.get("reason", "")
+    section = f"\n\n### Merge Risk\n\n**{mr_emoji} {mr_tag}**\n"
+    if mr_reason:
+        section += f"- {mr_reason}\n"
+    rec_m = re.search(
+        r'^###?\s+.*(?:Recommend|Next\s+Step|Action|Verification|How\s+to|Developer|What\s+to)',
+        comment, re.MULTILINE | re.IGNORECASE,
+    )
+    if rec_m:
+        comment = comment[:rec_m.start()] + section + "\n" + comment[rec_m.start():]
+    else:
+        footer_m = re.search(r'^---\s*$', comment, re.MULTILINE)
+        if footer_m:
+            comment = comment[:footer_m.start()] + section + "\n" + comment[footer_m.start():]
+        else:
+            comment = comment.rstrip() + section
+    print(f"PR#{pr_num}: injected missing Merge Risk section ({mr_tag})", file=sys.stderr)
     return comment
 
 
@@ -1365,6 +1559,7 @@ def generate_comments(
             comment = _normalize_verdict_text(comment, pr_num)
             comment = _enforce_merge_risk_tag(comment, pr_data, pr_num)
             comment = _validate_merge_risk_tag(comment, pr_data, pr_num)
+            comment = _inject_merge_risk(comment, pr_data, pr_num)
             comment = _inject_verdict_logic(comment, pr_data, pr_num)
             comments[pr_num] = comment
         else:
