@@ -274,6 +274,14 @@ def overclaims_function_reach(pr):
     if not dbr:  # text claims reachability, zero structured evidence (PR#38)
         return True, "verdict asserts symbol reachability with no declared_break_reachability evidence"
     if dbr.get("reachability_kind") == "import" and not dbr.get("behavior_confirmed"):
+        # Check if probe or symbol verification provides the evidence
+        bg = pr.get("behavioral_grade") or {}
+        ver = (pr.get("deterministic") or {}).get("verification") or {}
+        has_probe_diff = bg.get("source") == "probe" and bg.get("confidence") == "high"
+        symbol_results = ver.get("symbol_results") or ver.get("symbolResults") or {}
+        has_symbol_proof = ver.get("compatible") is True and bool(symbol_results)
+        if has_probe_diff or has_symbol_proof:
+            return False, ""
         return True, ("verdict asserts symbol/function reachability but evidence is import-level "
                       "+ behavior_confirmed=false (needs symbol-usage proof or probe diff)")
     return False, ""
