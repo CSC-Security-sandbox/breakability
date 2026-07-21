@@ -19,7 +19,7 @@ __all__ = [
     "_read_prompt", "_extract_pr_data", "_build_per_pr_prompt",
     "_reject_false_cve_claim", "_reject_cve_direction_error", "_reject_fabricated_probe",
     "_strip_agent_narration", "_strip_govulncheck",
-    "_enforce_verdict_floor", "_enforce_merge_risk_tag", "_normalize_verdict_text", "_inject_verdict_logic",
+    "_enforce_verdict_floor", "_downgrade_mismatched_probe", "_enforce_merge_risk_tag", "_normalize_verdict_text", "_inject_verdict_logic",
     "_ensure_marker", "_signal_table_ok", "_validate_comment", "_near_valid",
     "_fallback_comment", "generate_comments", "main",
 ]
@@ -467,6 +467,26 @@ def _reject_fabricated_probe(comment: str, pr: Dict[str, Any], pr_num: str) -> s
             f'Reason: {bg.get("rationale", "unavailable")}. Confidence: LOW.\n',
             comment, count=1, flags=re.DOTALL | re.IGNORECASE,
         )
+    return comment
+
+
+def _downgrade_mismatched_probe(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
+    """Downgrade displayed probe confidence when reconciliation_note flags a mismatch."""
+    bg = pr.get("behavioral_grade") or {}
+    note = bg.get("reconciliation_note") or ""
+    if "MISMATCH" not in note.upper():
+        return comment
+    probe_re = re.compile(
+        r'(Behavioral\s+Probe\s*\|[^|]*\|)\s*(High|Medium)\s+confidence',
+        re.IGNORECASE,
+    )
+    m = probe_re.search(comment)
+    if m:
+        replacement = (m.group(1) +
+                       " Low confidence — ⚠️ package mismatch detected, probe may have analyzed wrong package")
+        comment = comment[:m.start()] + replacement + comment[m.end():]
+        print(f"PR#{pr_num}: downgraded probe confidence due to PACKAGE-MISMATCH reconciliation note",
+              file=sys.stderr)
     return comment
 
 
@@ -1083,6 +1103,7 @@ def generate_comments(
         if comment:
             comment = _strip_agent_narration(comment)
             comment = _strip_govulncheck(comment)
+            comment = _downgrade_mismatched_probe(comment, pr_data, pr_num)
             comment = _enforce_verdict_floor(comment, pr_data, pr_num)
             comment = _normalize_verdict_text(comment, pr_num)
             comment = _enforce_merge_risk_tag(comment, pr_data, pr_num)

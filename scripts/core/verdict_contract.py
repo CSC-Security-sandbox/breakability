@@ -640,6 +640,11 @@ def _raw_authoritative_verdict(pr: Mapping[str, Any]) -> dict:
             bg_conf = str(bg.get("confidence", "")).strip().lower()
             if bg_conf in ("medium", "high"):
                 reason = f"behavioral probe confirmed same API surface ({bg_conf} confidence); {reason}"
+        elif isinstance(bg, Mapping) and bg.get("same_behavior") is False:
+            bg_conf = str(bg.get("confidence", "")).strip().lower()
+            if bg_conf in ("medium", "high") and bg.get("source") == "probe":
+                cb = bg.get("changed_behavior") or "API surface changes detected"
+                reason = f"behavioral probe detected changes ({bg_conf} confidence): {cb}; {reason}"
         result = {
             "verdict": bucket, "severity": sev,
             "confidence": det.get("confidence") or "L2",
@@ -929,6 +934,25 @@ if __name__ == "__main__":
             (pr_data.get("deterministic") or {})["merge_risk"] = det_mr
     if mr_actions_fixed:
         print(f"ℹ️  Escalated merge_risk for {mr_actions_fixed} Actions major-bump PR(s)", file=sys.stderr)
+
+    # Escalate merge_risk.tag when CVE floor pushes verdict to BLOCKED (VCP C9)
+    mr_cve_fixed = 0
+    for pr_key, pr_data in prs.items():
+        v2 = pr_data.get("verdict_v2") or {}
+        if not v2.get("cve_floor_applied"):
+            continue
+        if v2.get("verdict") != BUCKET_BLOCKED:
+            continue
+        for mr_obj in [pr_data.get("merge_risk"), (pr_data.get("deterministic") or {}).get("merge_risk")]:
+            if not isinstance(mr_obj, dict):
+                continue
+            if mr_obj.get("tag") in ("Low", "Medium"):
+                mr_obj["tag"] = "High"
+                mr_obj["reason"] = (mr_obj.get("reason", "") +
+                                    "; escalated to High — CVE floor applied BLOCKED verdict").lstrip("; ")
+                mr_cve_fixed += 1
+    if mr_cve_fixed:
+        print(f"ℹ️  Escalated merge_risk.tag for {mr_cve_fixed} CVE-floor BLOCKED PR(s)", file=sys.stderr)
 
     # Fix verification_level for Actions PRs with passing builds (C8)
     vl_fixed = 0
