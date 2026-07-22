@@ -26,9 +26,14 @@ from generate_ai_comments import (
     _sanitize_comment,
     _downgrade_mismatched_probe,
     _guard_empty_build_output,
+    _fix_infra_root_cause,
     _strip_wrong_ecosystem_refs,
     _validate_merge_risk_tag,
+    _hedge_fabricated_changelog,
+    _fix_api_changes_overclaim,
+    _fix_merge_risk_reason,
     _inject_merge_risk,
+    _renumber_lists,
 )
 
 
@@ -1795,6 +1800,325 @@ class TestVerdictReviewSafeContradiction(unittest.TestCase):
         result = _enforce_verdict_floor(comment, pr, "42")
         self.assertIn("SAFE to merge", result)
         self.assertIn("AI Arbiter | ✅ SAFE", result)
+
+
+class TestStripMergeEncouragingSemantic(unittest.TestCase):
+    """C1: Semantic patterns that reinterpret BLOCKED verdict."""
+
+    def test_strips_conservative_signal(self):
+        from generate_ai_comments import _strip_merge_encouraging
+        comment = "The BLOCKED verdict is a conservative signal — not do not merge under any circumstances."
+        result = _strip_merge_encouraging(comment, "52")
+        self.assertNotIn("conservative signal", result)
+
+    def test_strips_must_be_prioritized(self):
+        from generate_ai_comments import _strip_merge_encouraging
+        comment = "This PR must be prioritized because it remediates CVEs."
+        result = _strip_merge_encouraging(comment, "23")
+        self.assertNotIn("must be prioritized", result)
+
+    def test_strips_practical_risk_low(self):
+        from generate_ai_comments import _strip_merge_encouraging
+        comment = "The practical risk of merging is low."
+        result = _strip_merge_encouraging(comment, "52")
+        self.assertNotIn("practical risk", result)
+
+    def test_strips_merge_together_batch(self):
+        from generate_ai_comments import _strip_merge_encouraging
+        comment = "Merge together in a single batch."
+        result = _strip_merge_encouraging(comment, "23")
+        self.assertNotIn("Merge together", result)
+
+    def test_preserves_non_blocked_merge_guidance(self):
+        from generate_ai_comments import _strip_merge_encouraging
+        comment = "This is safe to merge after review."
+        result = _strip_merge_encouraging(comment, "7")
+        self.assertIn("safe to merge", result)
+
+    def test_strips_not_do_not_merge(self):
+        from generate_ai_comments import _strip_merge_encouraging
+        comment = "BLOCKED means pay attention, not do not merge under any circumstances."
+        result = _strip_merge_encouraging(comment, "52")
+        self.assertNotIn("not do not merge", result)
+
+
+class TestRenumberLists(unittest.TestCase):
+    """C2: Renumber broken numbered lists after line deletion."""
+
+    def test_renumbers_gap(self):
+        from generate_ai_comments import _renumber_lists
+        comment = "1. First\n3. Third\n4. Fourth"
+        result = _renumber_lists(comment)
+        self.assertIn("1. First", result)
+        self.assertIn("2. Third", result)
+        self.assertIn("3. Fourth", result)
+
+    def test_renumbers_starting_at_two(self):
+        from generate_ai_comments import _renumber_lists
+        comment = "2. Second\n3. Third\n4. Fourth"
+        result = _renumber_lists(comment)
+        self.assertIn("1. Second", result)
+        self.assertIn("2. Third", result)
+        self.assertIn("3. Fourth", result)
+
+    def test_preserves_correct_numbering(self):
+        from generate_ai_comments import _renumber_lists
+        comment = "1. First\n2. Second\n3. Third"
+        result = _renumber_lists(comment)
+        self.assertEqual(comment, result)
+
+    def test_handles_multiple_lists(self):
+        from generate_ai_comments import _renumber_lists
+        comment = "1. A\n3. B\n\nSome text\n\n2. C\n4. D"
+        result = _renumber_lists(comment)
+        self.assertIn("1. A\n2. B", result)
+        self.assertIn("1. C\n2. D", result)
+
+    def test_handles_paren_format(self):
+        from generate_ai_comments import _renumber_lists
+        comment = "1) First\n3) Third"
+        result = _renumber_lists(comment)
+        self.assertIn("1) First", result)
+        self.assertIn("2) Third", result)
+
+
+class TestSanitizeLineNumbers(unittest.TestCase):
+    """C3: Strip fabricated line numbers and workspace cascade claims."""
+
+    def test_strips_unattested_line_numbers_empty_usages(self):
+        from generate_ai_comments import _sanitize_comment
+        pr = {"usages": [], "files_importing": [], "cascade_impact": []}
+        comment = "Found in vcp-core/cmd/main.go:11 importing the package."
+        result = _sanitize_comment(comment, pr, "10")
+        self.assertNotIn(":11", result)
+        self.assertIn("vcp-core/cmd/main.go", result)
+
+    def test_preserves_attested_line_number(self):
+        from generate_ai_comments import _sanitize_comment
+        pr = {"usages": [{"line": 23}], "files_importing": ["hostgroup_test.go"], "cascade_impact": []}
+        comment = "Found in hostgroup_test.go:23 calling the function."
+        result = _sanitize_comment(comment, pr, "42")
+        self.assertIn(":23", result)
+
+    def test_strips_cascade_claims_when_empty(self):
+        from generate_ai_comments import _sanitize_comment
+        pr = {"usages": [], "files_importing": [], "cascade_impact": []}
+        comment = "This affects 8 modules via go.work workspace."
+        result = _sanitize_comment(comment, pr, "54")
+        self.assertNotIn("8 modules via go.work", result)
+
+    def test_preserves_cascade_when_populated(self):
+        from generate_ai_comments import _sanitize_comment
+        pr = {"usages": [], "files_importing": [], "cascade_impact": [{"module": "foo"}]}
+        comment = "This cascades to 1 modules via go.work."
+        result = _sanitize_comment(comment, pr, "54")
+        self.assertIn("modules via go.work", result)
+
+    def test_strips_wrong_line_number_keeps_right(self):
+        from generate_ai_comments import _sanitize_comment
+        pr = {"usages": [{"line": 23}], "files_importing": ["test.go"], "cascade_impact": []}
+        comment = "See test.go:18 and test.go:23 for details."
+        result = _sanitize_comment(comment, pr, "42")
+        self.assertNotIn(":18", result)
+        self.assertIn(":23", result)
+
+
+class TestFallbackHowWeChecked(unittest.TestCase):
+    """C4: Fallback 'How We Checked' matches build.verdict."""
+
+    def test_error_build_says_errored(self):
+        pr = {**SAMPLE_PR, "build": {"verdict": "error", "pr_exit": -1},
+              "verdict_v2": {"verdict": "REVIEW"}}
+        comment = _fallback_comment(pr, "8", None, None, "test-model")
+        self.assertNotIn("ran full build", comment)
+        self.assertIn("build errored", comment.lower())
+
+    def test_pre_existing_build_says_pre_existing(self):
+        pr = {**SAMPLE_PR, "build": {"verdict": "pre_existing", "pr_exit": 1},
+              "verdict_v2": {"verdict": "REVIEW"}}
+        comment = _fallback_comment(pr, "32", None, None, "test-model")
+        self.assertNotIn("ran full build", comment)
+        self.assertIn("pre-existing", comment.lower())
+
+    def test_pass_build_says_ran_full_build(self):
+        comment = _fallback_comment(SAMPLE_PR, "42", None, None, "test-model")
+        self.assertIn("ran full build", comment)
+
+
+class TestHedgeFabricatedChangelog(unittest.TestCase):
+    """C5: Hedge changelog HIGH confidence when no data exists."""
+
+    def test_hedges_high_confidence_no_data(self):
+        from generate_ai_comments import _hedge_fabricated_changelog
+        pr = {"deterministic": {"changelogSignal": None}}
+        comment = "Changelog analysis shows Confidence: HIGH — no breaking changes."
+        result = _hedge_fabricated_changelog(comment, pr, "21")
+        self.assertNotIn("Confidence: HIGH", result)
+        self.assertIn("LOW", result)
+
+    def test_preserves_high_confidence_with_data(self):
+        from generate_ai_comments import _hedge_fabricated_changelog
+        pr = {"deterministic": {"changelogSignal": {"status": "clean"}}}
+        comment = "Changelog analysis shows Confidence: HIGH — no breaking changes."
+        result = _hedge_fabricated_changelog(comment, pr, "20")
+        self.assertIn("HIGH", result)
+
+    def test_hedges_table_row(self):
+        from generate_ai_comments import _hedge_fabricated_changelog
+        pr = {"deterministic": {"changelogSignal": None}}
+        comment = "| Changelog | ✅ Clean | HIGH | No breaking changes |"
+        result = _hedge_fabricated_changelog(comment, pr, "22")
+        self.assertNotIn("HIGH", result)
+        self.assertIn("LOW", result)
+
+
+class TestFallbackBuildConfidence(unittest.TestCase):
+    """C6: Template-fallback build confidence LOW when pr_exit=-1."""
+
+    def test_pr_exit_minus1_shows_low(self):
+        pr = {**SAMPLE_PR, "build": {"verdict": "error", "pr_exit": -1},
+              "verdict_v2": {"verdict": "REVIEW"}}
+        comment = _fallback_comment(pr, "8", None, None, "test-model")
+        self.assertIn("| Build |", comment)
+        build_line = [l for l in comment.splitlines() if "| Build |" in l][0]
+        self.assertIn("LOW", build_line)
+        self.assertNotIn("| HIGH |", build_line)
+
+    def test_pr_exit_zero_shows_high(self):
+        comment = _fallback_comment(SAMPLE_PR, "42", None, None, "test-model")
+        build_line = [l for l in comment.splitlines() if "| Build |" in l][0]
+        self.assertIn("HIGH", build_line)
+
+
+class TestFixInfraRootCause(unittest.TestCase):
+    """C7: Replace fabricated 'Go unavailable' with actual root cause."""
+
+    def test_replaces_go_unavailable_with_disk_space(self):
+        from generate_ai_comments import _fix_infra_root_cause
+        pr = {
+            "build": {"verdict": "error", "pr_exit": -1, "output_tail": ""},
+            "_top_level": {"main_build": {"go": {"output_tail": "fatal: no space left on device"}}},
+        }
+        comment = "The build failed because Go is unavailable on the runner."
+        result = _fix_infra_root_cause(comment, pr, "7")
+        self.assertNotIn("Go is unavailable", result)
+        self.assertIn("disk space exhaustion", result)
+
+    def test_preserves_when_output_tail_present(self):
+        from generate_ai_comments import _fix_infra_root_cause
+        pr = {
+            "build": {"verdict": "error", "pr_exit": -1, "output_tail": "some real output"},
+            "_top_level": {"main_build": {"go": {"output_tail": "no space left on device"}}},
+        }
+        comment = "Go toolchain unavailable."
+        result = _fix_infra_root_cause(comment, pr, "7")
+        self.assertEqual(comment, result)
+
+    def test_preserves_when_pr_exit_not_minus1(self):
+        from generate_ai_comments import _fix_infra_root_cause
+        pr = {
+            "build": {"verdict": "fail", "pr_exit": 1, "output_tail": ""},
+            "_top_level": {"main_build": {"go": {"output_tail": "no space left on device"}}},
+        }
+        comment = "Go is not found."
+        result = _fix_infra_root_cause(comment, pr, "7")
+        self.assertEqual(comment, result)
+
+
+class TestFixCodeBlockNpmAllMatches(unittest.TestCase):
+    """C8: Process ALL YAML code blocks for npm references."""
+
+    def test_replaces_npm_in_second_code_block(self):
+        from generate_ai_comments import _strip_wrong_ecosystem_refs
+        pr = {
+            "ecosystem": "actions",
+            "_top_level": {"codebase_context": {"has_package_json": False}},
+        }
+        comment = (
+            "```bash\necho hello\n```\n\n"
+            "```yaml\nsteps:\n      - run: npm ci\n      - run: npm test\n```"
+        )
+        result = _strip_wrong_ecosystem_refs(comment, pr, "22")
+        self.assertNotIn("npm ci", result)
+        self.assertNotIn("npm test", result)
+        self.assertIn("go build", result)
+        self.assertIn("go test", result)
+
+    def test_preserves_npm_when_has_package_json(self):
+        from generate_ai_comments import _strip_wrong_ecosystem_refs
+        pr = {
+            "ecosystem": "actions",
+            "_top_level": {"codebase_context": {"has_package_json": True}},
+        }
+        comment = "```yaml\n      - run: npm ci\n```"
+        result = _strip_wrong_ecosystem_refs(comment, pr, "22")
+        self.assertIn("npm ci", result)
+
+
+class TestFixApiChangesOverclaim(unittest.TestCase):
+    """C9: Fix '48 breaking changes' overclaim."""
+
+    def test_corrects_overclaim(self):
+        from generate_ai_comments import _fix_api_changes_overclaim
+        pr = {"deterministic": {"api_changes_detail": [
+            *[{"isHardBreak": True} for _ in range(8)],
+            *[{"changeType": "added"} for _ in range(40)],
+        ]}}
+        comment = "This PR introduces 48 breaking changes to the API."
+        result = _fix_api_changes_overclaim(comment, pr, "9")
+        self.assertNotIn("48 breaking changes", result)
+        self.assertIn("8 breaking", result)
+        self.assertIn("40 additions", result)
+
+    def test_preserves_correct_count(self):
+        from generate_ai_comments import _fix_api_changes_overclaim
+        pr = {"deterministic": {"api_changes_detail": [
+            *[{"isHardBreak": True} for _ in range(5)],
+        ]}}
+        comment = "Found 5 breaking changes."
+        result = _fix_api_changes_overclaim(comment, pr, "9")
+        self.assertIn("5 breaking changes", result)
+
+    def test_no_detail_no_change(self):
+        from generate_ai_comments import _fix_api_changes_overclaim
+        pr = {"deterministic": {}}
+        comment = "Found 48 breaking changes."
+        result = _fix_api_changes_overclaim(comment, pr, "9")
+        self.assertEqual(comment, result)
+
+
+class TestFixMergeRiskReason(unittest.TestCase):
+    """C10: Render merge_risk.reason verbatim."""
+
+    def test_replaces_fabricated_reason(self):
+        from generate_ai_comments import _fix_merge_risk_reason
+        pr = {"merge_risk": {
+            "tag": "High",
+            "reason": "missing changelog; CVE floor applied; not imported by application code",
+        }}
+        comment = (
+            "### Merge Risk\n\n"
+            "**🔴 High** — some fabricated text from AI\n"
+            "- Fabricated reason here\n\n"
+            "### Recommendation"
+        )
+        result = _fix_merge_risk_reason(comment, pr, "52")
+        self.assertIn("missing changelog; CVE floor applied; not imported by application code", result)
+        self.assertNotIn("Fabricated reason here", result)
+
+    def test_preserves_when_reason_present(self):
+        from generate_ai_comments import _fix_merge_risk_reason
+        pr = {"merge_risk": {"tag": "High", "reason": "actual reason"}}
+        comment = "### Merge Risk\n\n**🔴 High**\n- actual reason\n\n### Recommendation"
+        result = _fix_merge_risk_reason(comment, pr, "52")
+        self.assertEqual(comment, result)
+
+    def test_no_section_no_change(self):
+        from generate_ai_comments import _fix_merge_risk_reason
+        pr = {"merge_risk": {"tag": "High", "reason": "some reason"}}
+        comment = "No merge risk section here."
+        result = _fix_merge_risk_reason(comment, pr, "52")
+        self.assertEqual(comment, result)
 
 
 if __name__ == "__main__":

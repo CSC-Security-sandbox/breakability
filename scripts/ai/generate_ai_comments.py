@@ -23,8 +23,10 @@ __all__ = [
     "_fix_body_verdict_contradictions",
     "_downgrade_mismatched_probe", "_enforce_merge_risk_tag",
     "_normalize_verdict_text", "_inject_verdict_logic",
-    "_guard_empty_build_output", "_strip_wrong_ecosystem_refs", "_validate_merge_risk_tag",
-    "_inject_merge_risk",
+    "_guard_empty_build_output", "_fix_infra_root_cause",
+    "_strip_wrong_ecosystem_refs", "_validate_merge_risk_tag",
+    "_fix_api_changes_overclaim", "_hedge_fabricated_changelog",
+    "_fix_merge_risk_reason", "_inject_merge_risk", "_renumber_lists",
     "_ensure_marker", "_signal_table_ok", "_validate_comment", "_near_valid",
     "_fallback_comment", "generate_comments", "main",
 ]
@@ -373,6 +375,60 @@ def _sanitize_comment(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
             file=sys.stderr,
         )
 
+    attested_lines = set()
+    for u in (pr.get("usages") or []):
+        if isinstance(u, dict) and u.get("line"):
+            attested_lines.add(int(u["line"]))
+
+    if not attested_lines:
+        def _strip_unattested_line_num(m):
+            filename = m.group(1)
+            line_num = m.group(2)
+            if filename in attested_paths:
+                return m.group(0)
+            return filename
+        comment = re.sub(
+            r'(`?[\w./-]+\.\w+`?):(\d+)',
+            _strip_unattested_line_num,
+            comment,
+        )
+    else:
+        def _validate_line_num(m):
+            filename = m.group(1)
+            line_num = int(m.group(2))
+            if line_num in attested_lines:
+                return m.group(0)
+            if filename in attested_paths:
+                return filename
+            return filename
+        comment = re.sub(
+            r'(`?[\w./-]+\.\w+`?):(\d+)',
+            _validate_line_num,
+            comment,
+        )
+
+    cascade_impact = pr.get("cascade_impact")
+    has_cascade = cascade_impact and (
+        (isinstance(cascade_impact, list) and len(cascade_impact) > 0) or
+        (isinstance(cascade_impact, dict) and cascade_impact)
+    )
+    if not has_cascade:
+        _CASCADE_RE = re.compile(
+            r'^.*\b\d+\s+modules?\s+via\s+go\.work\b.*$|'
+            r'^.*\bcascade[sd]?\s+(?:impact|across|to)\s+\d+\s+modules?\b.*$|'
+            r'^.*\bworkspace[-\s]+wide\s+(?:impact|cascade)\b.*$',
+            re.MULTILINE | re.IGNORECASE,
+        )
+        cascade_stripped = _CASCADE_RE.sub('', comment)
+        if cascade_stripped != comment:
+            count = len(_CASCADE_RE.findall(comment))
+            comment = re.sub(r'\n{3,}', '\n\n', cascade_stripped)
+            print(
+                f"PR#{pr_num}: stripped {count} fabricated workspace cascade claim(s) "
+                f"— cascade_impact is empty",
+                file=sys.stderr,
+            )
+
     comment = re.sub(r"\n{3,}", "\n\n", comment)
     return comment
 
@@ -428,6 +484,8 @@ def _enforce_verdict_floor(comment: str, pr: Dict[str, Any], pr_num: str) -> str
     if ai_normalized == contract_verdict:
         comment = _rewrite_noncanonical_arbiter(comment, contract_verdict, pr_num)
         comment = _fix_body_verdict_contradictions(comment, contract_verdict, pr_num)
+        if contract_verdict == "BLOCKED":
+            comment = _strip_merge_encouraging(comment, pr_num)
         return comment
     print(
         f"PR#{pr_num}: verdict match enforcement — AI said {ai_verdict_raw!r}, "
@@ -519,13 +577,29 @@ def _rewrite_noncanonical_arbiter(comment: str, contract_verdict: str, pr_num: s
 
 
 def _strip_merge_encouraging(comment: str, pr_num: str) -> str:
-    """Strip any sentence with merge + positive-action word when verdict is BLOCKED."""
+    """Strip any sentence with merge + positive-action word when verdict is BLOCKED.
+
+    Also strips sentences that reinterpret or soften what BLOCKED means — e.g.
+    'conservative signal', 'not do not merge', 'practical risk.*low'.
+    """
     _MERGE_POSITIVE_RE = re.compile(
         r'^.*\bmerge[ds]?\b.*\b(?:recommend\w*|immediately|must|should|now|'
         r'without\s+delay|essential|strongly|priorit\w*|urgent\w*)\b.*$|'
         r'^.*\b(?:recommend\w*|immediately|must|should|strongly|priorit\w*|urgent\w*)\b'
         r'.*\bmerge[ds]?\b.*$|'
         r'^.*\bmerge\s+this\s+PR\b.*$',
+        re.MULTILINE | re.IGNORECASE,
+    )
+    _REINTERPRET_BLOCKED_RE = re.compile(
+        r'^.*\bconservative\s+signal\b.*$|'
+        r'^.*\bnot\b.*\bdo\s+not\s+merge\b.*$|'
+        r'^.*\bpractical\s+risk\b.*\blow\b.*$|'
+        r'^.*\bmust\s+be\s+prioritized\b.*$|'
+        r'^.*\bmerge\s+together\b.*$|'
+        r'^.*\bmerge\s+.*\bbatch\b.*$|'
+        r'^.*\bBLOCKED\s+verdict\s+is\s+a\b.*$|'
+        r'^.*\bnot\s+.*under\s+any\s+circumstances\b.*$|'
+        r'^.*\bpay\s+attention\b.*\bnot\b.*$',
         re.MULTILINE | re.IGNORECASE,
     )
     stripped_count = 0
@@ -535,10 +609,24 @@ def _strip_merge_encouraging(comment: str, pr_num: str) -> str:
             break
         stripped_count += 1
         comment = new
+    for _ in range(10):
+        new = _REINTERPRET_BLOCKED_RE.sub('', comment)
+        if new == comment:
+            break
+        stripped_count += 1
+        comment = new
+    _INLINE_REPLACE_RE = re.compile(
+        r'\b[Ss]trongly\s+recommended\.?\s*',
+    )
+    inline_stripped = _INLINE_REPLACE_RE.sub('', comment)
+    if inline_stripped != comment:
+        stripped_count += 1
+        comment = inline_stripped
+
     comment = re.sub(r'\n{3,}', '\n\n', comment)
     if stripped_count:
         print(
-            f"PR#{pr_num}: stripped {stripped_count} merge-encouraging line(s) from BLOCKED comment",
+            f"PR#{pr_num}: stripped {stripped_count} merge-encouraging/reinterpret line(s) from BLOCKED comment",
             file=sys.stderr,
         )
     return comment
@@ -842,6 +930,50 @@ def _guard_empty_build_output(comment: str, pr: Dict[str, Any], pr_num: str) -> 
     return comment
 
 
+def _fix_infra_root_cause(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
+    """Replace fabricated 'Go unavailable' with actual root cause from main_build output.
+
+    When build errored with pr_exit=-1 and there's no per-PR output_tail, check
+    main_build output for the real error (disk space, OOM, etc.) and replace
+    any fabricated diagnosis.
+    """
+    build = pr.get("build") or {}
+    pr_exit = build.get("pr_exit")
+    if pr_exit != -1:
+        return comment
+    output_tail = (build.get("output_tail") or "").strip()
+    if output_tail:
+        return comment
+    top_level = pr.get("_top_level") or {}
+    main_build = top_level.get("main_build") or {}
+    go_build = main_build.get("go") or {}
+    main_output = (go_build.get("output_tail") or "").strip()
+    if not main_output:
+        return comment
+    actual_cause = None
+    if "no space left on device" in main_output.lower():
+        actual_cause = "disk space exhaustion on build runner"
+    elif "out of memory" in main_output.lower() or "oom" in main_output.lower():
+        actual_cause = "out of memory on build runner"
+    elif "timeout" in main_output.lower():
+        actual_cause = "build timeout"
+    if not actual_cause:
+        return comment
+    _WRONG_CAUSE_RE = re.compile(
+        r'(?i)\bGo\s+(?:is\s+)?(?:unavailable|not\s+found|not\s+installed|'
+        r'not\s+accessible|missing|not\s+in\s+PATH)\b|'
+        r'\btoolchain\s+(?:unavailable|not\s+found|missing)\b',
+    )
+    if _WRONG_CAUSE_RE.search(comment):
+        count = len(_WRONG_CAUSE_RE.findall(comment))
+        comment = _WRONG_CAUSE_RE.sub(actual_cause, comment)
+        print(
+            f"PR#{pr_num}: corrected {count} wrong infra root-cause label(s) → '{actual_cause}'",
+            file=sys.stderr,
+        )
+    return comment
+
+
 def _strip_wrong_ecosystem_refs(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
     """Strip Node.js/npm/TypeScript references from comments on Go-only repos.
 
@@ -851,20 +983,25 @@ def _strip_wrong_ecosystem_refs(comment: str, pr: Dict[str, Any], pr_num: str) -
     eco = str(pr.get("ecosystem", "")).strip().lower()
     if eco not in ("gomod", "actions"):
         return comment
-    codebase_ctx = pr.get("_top_level", {}).get("codebase_context") or {}
-    has_pkg_json = codebase_ctx.get("has_package_json", True)
+    codebase_ctx = (pr.get("_top_level") or {}).get("codebase_context") or {}
+    has_pkg_json = codebase_ctx.get("has_package_json")
+    if has_pkg_json is None:
+        repo = ((pr.get("_metadata") or {}).get("repo") or "").lower()
+        has_pkg_json = "ndm" in repo
     if has_pkg_json:
         return comment
 
     def _fix_code_block(m):
         block = m.group(0)
-        block = re.sub(r'(?m)^\s*-?\s*run:\s*npm\s+ci\s*$', '      - run: go build ./...', block)
-        block = re.sub(r'(?m)^\s*-?\s*run:\s*npm\s+test\s*$', '      - run: go test ./...', block)
-        block = re.sub(r'(?m)^npm\s+ci\s*$', 'go build ./...', block)
-        block = re.sub(r'(?m)^npm\s+test\s*$', 'go test ./...', block)
-        block = re.sub(r'(?m)^npm\s+install\b.*$', 'go build ./...', block)
-        block = re.sub(r'(?m)^npm\s+run\s+build\b.*$', 'go build ./...', block)
-        block = re.sub(r'(?m)^yarn\s+(?:install|test)\b.*$', 'go test ./...', block)
+        block = re.sub(r'(?m)^(\s*-\s*run:\s*)npm\s+ci\s*$', r'\g<1>go build ./...', block)
+        block = re.sub(r'(?m)^(\s*-\s*run:\s*)npm\s+test\s*$', r'\g<1>go test ./...', block)
+        block = re.sub(r'(?m)^(\s*-\s*run:\s*)npm\s+install\b.*$', r'\g<1>go build ./...', block)
+        block = re.sub(r'(?m)^(\s*-\s*run:\s*)npm\s+run\s+\S+\b.*$', r'\g<1>go build ./...', block)
+        block = re.sub(r'(?m)^(\s*)npm\s+ci\s*$', r'\g<1>go build ./...', block)
+        block = re.sub(r'(?m)^(\s*)npm\s+test\s*$', r'\g<1>go test ./...', block)
+        block = re.sub(r'(?m)^(\s*)npm\s+install\b.*$', r'\g<1>go build ./...', block)
+        block = re.sub(r'(?m)^(\s*)npm\s+run\s+build\b.*$', r'\g<1>go build ./...', block)
+        block = re.sub(r'(?m)^(\s*)yarn\s+(?:install|test)\b.*$', r'\g<1>go test ./...', block)
         return block
 
     comment = re.sub(r'```[^\n]*\n.*?```', _fix_code_block, comment, flags=re.DOTALL)
@@ -914,6 +1051,152 @@ def _validate_merge_risk_tag(comment: str, pr: Dict[str, Any], pr_num: str) -> s
     return comment
 
 
+def _fix_api_changes_overclaim(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
+    """Correct overclaimed API breaking change counts using api_changes_detail.
+
+    When the comment says 'N breaking changes' but api_changes_detail shows
+    fewer isHardBreak=true entries, rewrite with accurate breakdown.
+    """
+    det = pr.get("deterministic") or {}
+    api_changes_detail = det.get("api_changes_detail") or []
+    if not api_changes_detail:
+        return comment
+    total = len(api_changes_detail)
+    hard_breaks = sum(1 for a in api_changes_detail if a.get("isHardBreak"))
+    added = sum(1 for a in api_changes_detail if a.get("changeType") == "added")
+    other = total - hard_breaks - added
+
+    _OVERCLAIM_RE = re.compile(
+        r'\b(\d+)\s+breaking\s+(?:API\s+)?changes?\b',
+        re.IGNORECASE,
+    )
+    def _fix_count(m):
+        claimed = int(m.group(1))
+        if claimed <= hard_breaks:
+            return m.group(0)
+        parts = []
+        if hard_breaks:
+            parts.append(f"{hard_breaks} breaking")
+        if added:
+            parts.append(f"{added} additions")
+        if other:
+            parts.append(f"{other} other")
+        breakdown = ", ".join(parts)
+        print(
+            f"PR#{pr_num}: corrected API changes overclaim — "
+            f"claimed {claimed} breaking, actual: {breakdown}",
+            file=sys.stderr,
+        )
+        return f"{total} API changes ({breakdown})"
+    comment = _OVERCLAIM_RE.sub(_fix_count, comment)
+    return comment
+
+
+def _hedge_fabricated_changelog(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
+    """Downgrade changelog confidence to LOW when no changelog data exists.
+
+    When changelogSignal=None AND changelogText=None, the AI has no changelog
+    data to base assertions on. Any 'Confidence: HIGH' on changelog claims is
+    fabricated and should be hedged.
+    """
+    det = pr.get("deterministic") or {}
+    changelog_signal = det.get("changelogSignal")
+    changelog_text = pr.get("changelogText") or det.get("changelogText")
+    if changelog_signal is not None or changelog_text is not None:
+        return comment
+    changed = False
+    _CL_HIGH_RE = re.compile(
+        r'(?im)(changelog.*?confidence:\s*)HIGH',
+    )
+    if _CL_HIGH_RE.search(comment):
+        comment = _CL_HIGH_RE.sub(r'\g<1>LOW (no changelog data available)', comment)
+        changed = True
+    _HIGH_CL_RE = re.compile(
+        r'(?im)(confidence:\s*)(HIGH)(.*changelog)',
+    )
+    if _HIGH_CL_RE.search(comment):
+        comment = _HIGH_CL_RE.sub(r'\g<1>LOW (no changelog data)\g<3>', comment)
+        changed = True
+
+    _CL_TABLE_RE = re.compile(
+        r'(\|[^|]*Changelog\s*\|[^|]*\|\s*)HIGH(\s*\|)',
+        re.IGNORECASE,
+    )
+    if _CL_TABLE_RE.search(comment):
+        comment = _CL_TABLE_RE.sub(r'\g<1>LOW\2', comment)
+        changed = True
+
+    if changed:
+        print(
+            f"PR#{pr_num}: hedged fabricated changelog HIGH confidence "
+            f"— changelogSignal=None, changelogText=None",
+            file=sys.stderr,
+        )
+    return comment
+
+
+def _fix_merge_risk_reason(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
+    """Ensure Merge Risk section renders the verbatim merge_risk.reason from data.
+
+    AI comments often fabricate or truncate the merge_risk reason. When a Merge Risk
+    section exists but doesn't contain the actual reason string, replace the section
+    content with the ground-truth reason.
+    """
+    mr = pr.get("merge_risk") or (pr.get("deterministic") or {}).get("merge_risk") or {}
+    mr_reason = mr.get("reason", "")
+    mr_tag = mr.get("tag", "")
+    if not mr_reason or not mr_tag:
+        return comment
+    if mr_reason in comment:
+        return comment
+    mr_section = re.search(
+        r'(###?\s+Merge\s+Risk\s*\n)(.*?)(?=\n###?\s|\n---|\Z)',
+        comment,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if mr_section:
+        mr_emoji = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}.get(mr_tag, "⚪")
+        new_body = f"\n**{mr_emoji} {mr_tag}**\n- {mr_reason}\n"
+        comment = (comment[:mr_section.start(2)] + new_body +
+                   comment[mr_section.end(2):])
+        print(
+            f"PR#{pr_num}: replaced Merge Risk section body with verbatim reason",
+            file=sys.stderr,
+        )
+        return comment
+    inline_mr = re.search(
+        r'(\*\*Merge\s+Risk:\*\*\s*\S+)',
+        comment,
+        re.IGNORECASE,
+    )
+    if inline_mr:
+        mr_emoji = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}.get(mr_tag, "⚪")
+        replacement = f"**Merge Risk:** {mr_emoji} {mr_tag}\n- {mr_reason}"
+        comment = comment[:inline_mr.start()] + replacement + comment[inline_mr.end():]
+        print(
+            f"PR#{pr_num}: expanded inline Merge Risk with verbatim reason",
+            file=sys.stderr,
+        )
+        return comment
+    heading_mr = re.search(
+        r'(###?\s+[^\n]*Merge\s+Risk[^\n]*)\n(.*?)(?=\n###?\s|\n---|\Z)',
+        comment,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if heading_mr:
+        section_body = heading_mr.group(2).strip()
+        if mr_reason not in section_body:
+            mr_emoji = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}.get(mr_tag, "⚪")
+            new_content = f"\n\n**{mr_emoji} {mr_tag}**\n- {mr_reason}\n"
+            comment = comment[:heading_mr.end(1)] + new_content + comment[heading_mr.end(2):]
+            print(
+                f"PR#{pr_num}: injected verbatim reason into existing Merge Risk heading",
+                file=sys.stderr,
+            )
+            return comment
+    return comment
+
+
 def _inject_merge_risk(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
     """Inject Merge Risk section if data exists but the comment omits it."""
     mr = pr.get("merge_risk") or (pr.get("deterministic") or {}).get("merge_risk") or {}
@@ -941,6 +1224,40 @@ def _inject_merge_risk(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
             comment = comment.rstrip() + section
     print(f"PR#{pr_num}: injected missing Merge Risk section ({mr_tag})", file=sys.stderr)
     return comment
+
+
+def _renumber_lists(comment: str) -> str:
+    """Renumber all markdown numbered lists sequentially from 1.
+
+    Fixes gaps left by post-processing line deletions (e.g., 1,3,4 → 1,2,3).
+    Handles both `N. ` and `N) ` formats. Preserves indented continuation lines.
+    """
+    lines = comment.split('\n')
+    result = []
+    counter = 0
+    in_list = False
+    list_re = re.compile(r'^(\s*)(\d+)([.\)])\s')
+    for line in lines:
+        m = list_re.match(line)
+        if m:
+            indent, _num, sep = m.group(1), m.group(2), m.group(3)
+            if not in_list or indent == '':
+                if not in_list:
+                    counter = 0
+                    in_list = True
+                elif indent == '' and in_list:
+                    pass
+            counter += 1
+            result.append(f"{indent}{counter}{sep} {line[m.end():]}")
+        else:
+            if line.strip() == '' and in_list:
+                in_list = False
+                counter = 0
+            elif in_list and not line.startswith('  ') and not line.startswith('\t') and line.strip():
+                in_list = False
+                counter = 0
+            result.append(line)
+    return '\n'.join(result)
 
 
 def _ensure_marker(comment: str) -> str:
@@ -1203,7 +1520,7 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
         "",
         "| Layer | Result | Confidence | Evidence |",
         "|-------|--------|------------|----------|",
-        f"| Build | {b_emoji} {build_verdict.upper()} | HIGH | Exit: {build.get('pr_exit', 'N/A')} |",
+        f"| Build | {b_emoji} {build_verdict.upper()} | {'LOW' if build.get('pr_exit') == -1 else 'HIGH'} | Exit: {build.get('pr_exit', 'N/A')} |",
         f"| Tests | {t_status} | {'HIGH' if test_exit == 0 else 'MEDIUM'} | {'Exit: ' + str(test_exit) if test_exit is not None else 'N/A'} |",
         f"| Behavioral Probe | {p_status} | {'LOW' if probe_mismatch else bg.get('confidence', '—').upper() if probe_same is not None else '—'} | {'⚠️ Package mismatch — re-evaluate' if probe_mismatch else '—'} |",
         f"| Reachability | {r_status} | {'HIGH' if reach_count > 0 else 'LOW'} | {'Direct import' if reach_count > 0 else 'Not reached'} |",
@@ -1341,10 +1658,18 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
         lines.extend(["", "</details>", ""])
 
     ecosystem = pr.get("ecosystem", "npm")
+    if build_verdict == "error" or build.get("pr_exit") == -1:
+        build_desc = f"attempted build of `{pkg}@{to_ver}` — build errored (exit {build.get('pr_exit', 'N/A')})"
+    elif build_verdict == "pre_existing":
+        build_desc = f"attempted build of `{pkg}@{to_ver}` — build failed (pre-existing failure)"
+    elif build_verdict == "fail":
+        build_desc = f"attempted build of `{pkg}@{to_ver}` — build failed"
+    else:
+        build_desc = f"installed `{pkg}@{to_ver}` and ran full build"
     lines.extend([
         "### How We Checked",
         "",
-        f"- **Build:** Installed `{pkg}@{to_ver}` and ran full build",
+        f"- **Build:** {build_desc.capitalize()}",
         f"- **Tests:** {'Executed test suite' if test_ran else 'No test execution available'}",
         f"- **Behavioral probe:** {'Compared runtime exports before/after' if probe_same is not None else 'Not available for this package'}",
         f"- **Reachability:** Scanned project source for direct imports of `{pkg}`",
@@ -1415,7 +1740,8 @@ def generate_comments(
 
     top_level = {
         k: build_results.get(k)
-        for k in ("workspace_graph", "nestjs_skew", "govulncheck", "security_posture")
+        for k in ("workspace_graph", "nestjs_skew", "govulncheck", "security_posture",
+                   "main_build", "codebase_context")
         if build_results.get(k)
     }
 
@@ -1469,6 +1795,7 @@ def generate_comments(
     diagnostics_log: list = []
 
     for pr_num, pr_data in sorted(pr_items, key=lambda x: int(x[0]) if x[0].isdigit() else 0):
+        pr_data["_top_level"] = top_level
         print(f"PR#{pr_num}: Generating AI comment (model={backend.model})...", file=sys.stderr)
 
         prompt = _build_per_pr_prompt(
@@ -1554,13 +1881,18 @@ def generate_comments(
             comment = _sanitize_comment(comment, pr_data, pr_num)
             comment = _downgrade_mismatched_probe(comment, pr_data, pr_num)
             comment = _guard_empty_build_output(comment, pr_data, pr_num)
+            comment = _fix_infra_root_cause(comment, pr_data, pr_num)
             comment = _strip_wrong_ecosystem_refs(comment, pr_data, pr_num)
             comment = _enforce_verdict_floor(comment, pr_data, pr_num)
             comment = _normalize_verdict_text(comment, pr_num)
             comment = _enforce_merge_risk_tag(comment, pr_data, pr_num)
             comment = _validate_merge_risk_tag(comment, pr_data, pr_num)
+            comment = _fix_api_changes_overclaim(comment, pr_data, pr_num)
+            comment = _hedge_fabricated_changelog(comment, pr_data, pr_num)
+            comment = _fix_merge_risk_reason(comment, pr_data, pr_num)
             comment = _inject_merge_risk(comment, pr_data, pr_num)
             comment = _inject_verdict_logic(comment, pr_data, pr_num)
+            comment = _renumber_lists(comment)
             comments[pr_num] = comment
         else:
             print(f"PR#{pr_num}: AI failed after retry, using fallback", file=sys.stderr)
