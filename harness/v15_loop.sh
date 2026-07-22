@@ -599,6 +599,13 @@ json.dump(s, open('$STATE_FILE', 'w'), indent=2)
     if [[ "$NEW_COMMIT" != "$PREV_COMMIT" ]]; then
         log "Generator committed changes ($PREV_COMMIT → $NEW_COMMIT)"
 
+        # Auto-push so CI uses the latest code
+        if (cd "$CODE_DIR" && git push origin cleanup 2>&1); then
+            log "Pushed $NEW_COMMIT to origin/cleanup"
+        else
+            log "WARNING: git push failed — CI may run stale code"
+        fi
+
         # Trigger CI if configured
         if [[ "${INBOX_SKIP_CI:-}" == "true" || "${INBOX_SKIP_CI:-}" == "True" ]]; then
             log "Skipping CI trigger (external signal)"

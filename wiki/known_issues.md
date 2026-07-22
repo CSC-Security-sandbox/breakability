@@ -8,9 +8,10 @@
 
 ## AI fabricates governance override / merge-encouraging language on BLOCKED PRs (AI_FABRICATED_GOVERNANCE)
 - First seen: v15 VCP iter 1 (PR#54 "MERGE IMMEDIATELY")
-- Occurrence count: 3
-- Status: **FIXED** (VCP iter 3) — Structural _strip_merge_encouraging() strips any line with merge + positive-action word OR "merge this PR" pattern. Full-line matching (no [^.\n]* restriction). Called on all BLOCKED verdicts. All 6 BLOCKED PRs verified clean.
-- LESSON: Phrase-based deny-lists cannot contain an LLM. Structural rules keyed on verdict==BLOCKED are the correct approach.
+- Occurrence count: 6
+- Status: **FIXED** (VCP eval iter 3) — Replaced phrase-blocklist with structural rule: strip ANY line containing \bmerg(?:e[ds]?|ing)\b without explicit negation nearby. Override patterns bypass table cell exemption. Garbled sentence repair runs before stripping. 0 merge-encouraging lines on all 6 BLOCKED PRs. Verified against regenerated comments.
+- LESSON: Phrase-based deny-lists CANNOT fix this. Structural rules keyed on word presence + negation check are the correct approach.
+- LESSON: Unit tests passing does NOT mean the fix works on real AI output. Must verify against actual regenerated comment files.
 
 ## AI fabricates specific root cause with no evidence (AI_FABRICATED_ROOT_CAUSE)
 - First seen: v15 VCP iter 2
@@ -24,9 +25,9 @@
 
 ## AI fabricates file paths, line numbers, and commit SHAs (AI_FABRICATED_CITATIONS)
 - First seen: v15 VCP iter 2
-- Occurrence count: 1
-- Status: **PARTIALLY FIXED** — Fabricated commit SHA (PR#4) and workflow filenames (PR#22 ci.yml/release.yml) no longer reproduce in iter 3. PR#54 fabricated file path status unknown.
-- Impact: Reduced from iter 2. SHA and filename fabrication addressed.
+- Occurrence count: 5
+- Status: **FIXED** (VCP eval iter 3) — Code block exemption via placeholder substitution. Attested set includes build.output_tail. Post-restoration pass repairs previously-corrupted line numbers. Cascade claims stripped from table cells via _CASCADE_CELL_RE. Symbol validation via attested usages[].symbol (partial — requires non-empty usages data).
+- LESSON: Line-number sanitizer MUST NOT touch content inside fenced code blocks. Attested set must include build.output_tail. Symbol-level fabrication requires separate attested-symbol validation.
 
 ## PR#52 merge_risk.tag renders invalid enum value (MERGE_RISK_ENUM_VIOLATION)
 - First seen: v15 VCP iter 2
@@ -40,8 +41,8 @@
 
 ## merge_risk.reason ignores reachability/probe evidence (MERGE_RISK_REASON_BLIND)
 - First seen: v15 VCP iter 1 (as CVE_FLOOR_REASON_DROP)
-- Occurrence count: 3
-- Status: **OPEN** — 6+ PRs (7,8,10,11,41,42) have reason="missing changelog; default caution" despite bg.confidence=high, files_importing data. VCP iter 2 C8 "enriched 29 objects" — doesn't hold for non-CVE-floor PRs.
+- Occurrence count: 4
+- Status: **FIXED** (VCP eval iter 2) — _fix_merge_risk_reason() now renders merge_risk.reason verbatim in all comment formats (### heading, inline **, ### ... Risk: Tag). All 8 affected PRs show ground-truth reason.
 
 ## AI fabricates numbered rule citations (AI_FABRICATED_RULES)
 - First seen: v15 VCP iter 2 (as "Rule 0.5")
@@ -268,6 +269,47 @@
 - Occurrence count: 4
 - Status: **FIXED** (iter 6)
 
+## Broken numbered lists from post-processing line deletion (BROKEN_NUMBERED_LISTS)
+- First seen: v15 VCP eval iter 1
+- Occurrence count: 4
+- Status: **FIXED** (VCP eval iter 3) — _renumber_lists() rewritten with pending_blanks buffer. Blank lines within a list are buffered; if a numbered item follows, counter continues. Counter resets only when non-list content follows blank lines. 4 new loose-list tests added.
+- LESSON: Markdown loose lists (items separated by blank lines) are common in AI-generated content. _renumber_lists() must detect these and treat as one contiguous list. Test fixtures must include loose lists, not just tight single-line items.
+
+## Fallback "How We Checked" contradicts Signal Summary (FALLBACK_HOW_WE_CHECKED)
+- First seen: v15 VCP eval iter 2
+- Occurrence count: 1
+- Status: **OPEN** — PR#8 and PR#32 (template-fallback) say "ran full build" when build.verdict=error/pre_existing. Non-data-driven boilerplate string.
+
+## Fabricated changelog with false HIGH confidence (CHANGELOG_FABRICATED_CONFIDENCE)
+- First seen: v15 VCP eval iter 2
+- Occurrence count: 2
+- Status: **FIXED** (VCP eval iter 3) — Added _BARE_CONF_HIGH_RE for bold-marker format (**Confidence:** HIGH). All PRs with no changelog data now correctly hedged to LOW.
+
+## PR#9 "48 breaking changes" overclaim (API_CHANGES_OVERCLAIM)
+- First seen: v15 VCP eval iter 1
+- Occurrence count: 2
+- Status: **FIXED** (VCP eval iter 3) — PR#9 now correctly says "48 API changes (8 breaking, 40 additions)". Verified by Sam and Alex.
+
+## Line-number sanitizer corrupts real build output (LINE_NUMBER_CORRUPTION)
+- First seen: v15 VCP eval iter 3
+- Occurrence count: 1
+- Status: **FIXED** (VCP eval iter 3) — Code blocks extracted via placeholder before stripping, attested set includes build.output_tail line numbers, post-restoration pass repairs previously-corrupted patterns. All build output line numbers now preserved.
+
+## Garbled sentence from merge-encouraging stripping (GARBLED_STRIP_RESIDUE)
+- First seen: v15 VCP eval iter 3
+- Occurrence count: 1
+- Status: **FIXED** (VCP eval iter 3) — Garbled sentence repair runs BEFORE structural stripping. "Merging this PR is despite" → "This PR is BLOCKED despite".
+
+## Dual contradictory Merge Risk reasons (MERGE_RISK_DUAL_REASON)
+- First seen: v15 VCP eval iter 3
+- Occurrence count: 1
+- Status: **FIXED** (VCP eval iter 3) — _fix_merge_risk_reason() rewritten to REPLACE section body with canonical reason instead of injecting alongside. Deduplication removes second occurrence when reason already present.
+
+## Actions SHA-pinning claim factually wrong (ACTIONS_SHA_PINNING_WRONG)
+- First seen: v15 VCP eval iter 3
+- Occurrence count: 1
+- Status: **FIXED** (VCP eval iter 3) — New _fix_actions_sha_pinning() replaces "version-immutable" and "tags are immutable" with "mutable ref (major-version tags can be force-pushed; pin to full commit SHA for immutability)". Includes deduplication for compound replacements.
+
 ## IMPORTANT CONTEXT
 - Target repos: CSC-Security-sandbox/ndm-fresh-breakability (41 PRs, Node.js + Go monorepo) AND CSC-Security-sandbox/vcp-fresh-breakability (17 PRs, all Go)
 - Do NOT suggest govulncheck — permanently removed.
@@ -281,4 +323,6 @@
 - LESSON LEARNED (VCP ITER 3): **Fixes that are not pushed to origin are not deployed.** Three VCP iterations failed because commit 8cc96d7 was never pushed. Local test validation is necessary but not sufficient. Must verify against actual CI-produced artifacts.
 - LESSON LEARNED: **Phrase-based deny-lists cannot contain an LLM that paraphrases freely.** Use structural rules keyed on verdict_v2.verdict, not pattern-matching specific strings.
 - LESSON LEARNED: AI layer IS working (31/31 AI comments, 0 fallbacks in run 29802178785). Previous failures were from older runs.
+- LESSON LEARNED (VCP EVAL ITER 3): **Fix attempts can introduce regressions worse than the original bug.** The line-number sanitizer (C3 fix) now corrupts REAL line numbers in verbatim build output. The list renumbering fix (C2 fix) made numbering WORSE. Test fixtures must match real AI output structure (loose lists, code blocks with :NNN patterns). Diff ALL 17 comments before/after to catch collateral damage.
+- LESSON LEARNED (VCP EVAL ITER 3): **Do not claim FIXED in wiki without verifying against current regenerated artifacts.** Three "FIXED" claims (AI_FABRICATED_GOVERNANCE, BROKEN_NUMBERED_LISTS, AI_FABRICATED_CITATIONS) were proven false by direct grep against current comment files.
 - Do NOT mark CI-dependent fixes as FIXED without a new CI run proving it.

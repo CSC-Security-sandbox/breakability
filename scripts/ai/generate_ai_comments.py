@@ -25,7 +25,8 @@ __all__ = [
     "_normalize_verdict_text", "_inject_verdict_logic",
     "_guard_empty_build_output", "_fix_infra_root_cause",
     "_strip_wrong_ecosystem_refs", "_validate_merge_risk_tag",
-    "_fix_api_changes_overclaim", "_hedge_fabricated_changelog",
+    "_fix_api_changes_overclaim", "_fix_actions_sha_pinning",
+    "_hedge_fabricated_changelog",
     "_fix_merge_risk_reason", "_inject_merge_risk", "_renumber_lists",
     "_ensure_marker", "_signal_table_ok", "_validate_comment", "_near_valid",
     "_fallback_comment", "generate_comments", "main",
@@ -379,6 +380,16 @@ def _sanitize_comment(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
     for u in (pr.get("usages") or []):
         if isinstance(u, dict) and u.get("line"):
             attested_lines.add(int(u["line"]))
+    build_output = ((pr.get("build") or {}).get("output_tail") or "").strip()
+    if build_output:
+        for line_m in re.finditer(r'[\w./-]+\.\w+:(\d+)', build_output):
+            attested_lines.add(int(line_m.group(1)))
+
+    code_blocks = []
+    def _save_code_block(m):
+        code_blocks.append(m.group(0))
+        return f"\x00CODEBLOCK{len(code_blocks) - 1}\x00"
+    comment = re.sub(r'```[^\n]*\n.*?```', _save_code_block, comment, flags=re.DOTALL)
 
     if not attested_lines:
         def _strip_unattested_line_num(m):
@@ -407,6 +418,53 @@ def _sanitize_comment(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
             comment,
         )
 
+    for i, block in enumerate(code_blocks):
+        comment = comment.replace(f"\x00CODEBLOCK{i}\x00", block)
+
+    attested_symbols = set()
+    for u in (pr.get("usages") or []):
+        if isinstance(u, dict) and u.get("symbol"):
+            sym = u["symbol"]
+            attested_symbols.add(sym)
+            if "." in sym:
+                attested_symbols.add(sym.rsplit(".", 1)[-1])
+    if attested_symbols:
+        def _fix_fabricated_symbol(m):
+            func_name = m.group(1)
+            if func_name in attested_symbols:
+                return m.group(0)
+            candidates = [s for s in attested_symbols if s.lower().startswith(func_name.lower()[:3])]
+            if len(candidates) == 1:
+                replacement = candidates[0] + m.group(2)
+                print(
+                    f"PR#{pr_num}: replaced unattested symbol '{func_name}' → '{candidates[0]}'",
+                    file=sys.stderr,
+                )
+                return replacement
+            return m.group(0)
+        comment = re.sub(
+            r'\b([A-Z]\w+)(\s*\()',
+            _fix_fabricated_symbol,
+            comment,
+        )
+        def _fix_backtick_symbol(m):
+            func_name = m.group(2)
+            if func_name in attested_symbols:
+                return m.group(0)
+            candidates = [s for s in attested_symbols if s.lower().startswith(func_name.lower()[:3])]
+            if len(candidates) == 1:
+                print(
+                    f"PR#{pr_num}: replaced unattested backtick symbol '{func_name}' → '{candidates[0]}'",
+                    file=sys.stderr,
+                )
+                return m.group(1) + candidates[0] + m.group(3)
+            return m.group(0)
+        comment = re.sub(
+            r'(`)((?!```)[A-Z]\w+)(`)',
+            _fix_backtick_symbol,
+            comment,
+        )
+
     cascade_impact = pr.get("cascade_impact")
     has_cascade = cascade_impact and (
         (isinstance(cascade_impact, list) and len(cascade_impact) > 0) or
@@ -416,18 +474,48 @@ def _sanitize_comment(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
         _CASCADE_RE = re.compile(
             r'^.*\b\d+\s+modules?\s+via\s+go\.work\b.*$|'
             r'^.*\bcascade[sd]?\s+(?:impact|across|to)\s+\d+\s+modules?\b.*$|'
-            r'^.*\bworkspace[-\s]+wide\s+(?:impact|cascade)\b.*$',
+            r'^.*\bworkspace[-\s]+wide\s+(?:impact|cascade)\b.*$|'
+            r'^.*\baffects?\s+\d+\s+modules?\b.*$',
             re.MULTILINE | re.IGNORECASE,
         )
         cascade_stripped = _CASCADE_RE.sub('', comment)
+        _CASCADE_CELL_RE = re.compile(
+            r'(\|[^|]*?)(?:\d+\s+modules?\s+via\s+go\.work|'
+            r'cascade[sd]?\s+(?:impact|across|to)\s+\d+\s+modules?|'
+            r'affects?\s+\d+\s+modules?\s+via\s+go\.work)([^|]*?\|)',
+            re.IGNORECASE,
+        )
+        cascade_stripped = _CASCADE_CELL_RE.sub(r'\1—\2', cascade_stripped)
         if cascade_stripped != comment:
-            count = len(_CASCADE_RE.findall(comment))
+            count = len(_CASCADE_RE.findall(comment)) + len(_CASCADE_CELL_RE.findall(comment))
             comment = re.sub(r'\n{3,}', '\n\n', cascade_stripped)
             print(
                 f"PR#{pr_num}: stripped {count} fabricated workspace cascade claim(s) "
                 f"— cascade_impact is empty",
                 file=sys.stderr,
             )
+
+    if build_output:
+        output_patterns = {}
+        for m in re.finditer(r'([\w./-]+\.\w+):(\d+):(\d+):', build_output):
+            fn, line, col = m.group(1), m.group(2), m.group(3)
+            output_patterns[f"{fn}:{col}:"] = f"{fn}:{line}:{col}:"
+        if output_patterns:
+            def _restore_block(m):
+                block = m.group(0)
+                for corrupted, correct in output_patterns.items():
+                    if corrupted in block and correct not in block:
+                        block = block.replace(corrupted, correct)
+                return block
+            new_comment = re.sub(r'```[^\n]*\n.*?```', _restore_block, comment, flags=re.DOTALL)
+            if new_comment != comment:
+                count = sum(1 for c, r in output_patterns.items() if c in comment and r not in comment)
+                comment = new_comment
+                if count:
+                    print(
+                        f"PR#{pr_num}: restored {count} corrupted line number(s) in code blocks from build.output_tail",
+                        file=sys.stderr,
+                    )
 
     comment = re.sub(r"\n{3,}", "\n\n", comment)
     return comment
@@ -577,56 +665,77 @@ def _rewrite_noncanonical_arbiter(comment: str, contract_verdict: str, pr_num: s
 
 
 def _strip_merge_encouraging(comment: str, pr_num: str) -> str:
-    """Strip any sentence with merge + positive-action word when verdict is BLOCKED.
+    """Strip any sentence containing 'merge' without explicit negation on BLOCKED PRs.
 
-    Also strips sentences that reinterpret or soften what BLOCKED means — e.g.
-    'conservative signal', 'not do not merge', 'practical risk.*low'.
+    Structural rule: instead of maintaining a phrase blocklist that LLMs paraphrase
+    around, strip ANY line containing 'merge' unless it also has nearby negation
+    ('do not', "don't", 'never', 'avoid', 'block', 'prevent', 'cannot', 'must not',
+    'should not', 'not merge'). This is intentionally aggressive — false positives
+    (stripping a legitimate merge reference) are much cheaper than false negatives
+    (leaving merge-encouraging language on a BLOCKED PR).
+
+    Exemptions: lines inside code blocks, table headers, verdict headers, and
+    lines that are purely structural (Merge Risk section headings).
     """
-    _MERGE_POSITIVE_RE = re.compile(
-        r'^.*\bmerge[ds]?\b.*\b(?:recommend\w*|immediately|must|should|now|'
-        r'without\s+delay|essential|strongly|priorit\w*|urgent\w*)\b.*$|'
-        r'^.*\b(?:recommend\w*|immediately|must|should|strongly|priorit\w*|urgent\w*)\b'
-        r'.*\bmerge[ds]?\b.*$|'
-        r'^.*\bmerge\s+this\s+PR\b.*$',
-        re.MULTILINE | re.IGNORECASE,
+    _NEGATION_RE = re.compile(
+        r'\bdo\s+not\s+merg\w*\b|\bdon\'t\s+merg\w*\b|\bnever\s+merg\w*\b|'
+        r'\bavoid\s+merg\b|\bblock\w*\s+merg\b|\bprevent\w*\s+merg\b|'
+        r'\bcannot\s+merg\w*\b|\bmust\s+not\s+merg\w*\b|\bshould\s+not\s+merg\w*\b|'
+        r'\bnot\s+merg\w*\b|\bno\s+merg\w*\b|\bmerge\s+risk\b|'
+        r'\bmerge\s+conflict\b|\bmerge\s+plan\b',
+        re.IGNORECASE,
     )
-    _REINTERPRET_BLOCKED_RE = re.compile(
-        r'^.*\bconservative\s+signal\b.*$|'
-        r'^.*\bnot\b.*\bdo\s+not\s+merge\b.*$|'
-        r'^.*\bpractical\s+risk\b.*\blow\b.*$|'
-        r'^.*\bmust\s+be\s+prioritized\b.*$|'
-        r'^.*\bmerge\s+together\b.*$|'
-        r'^.*\bmerge\s+.*\bbatch\b.*$|'
-        r'^.*\bBLOCKED\s+verdict\s+is\s+a\b.*$|'
-        r'^.*\bnot\s+.*under\s+any\s+circumstances\b.*$|'
-        r'^.*\bpay\s+attention\b.*\bnot\b.*$',
-        re.MULTILINE | re.IGNORECASE,
+    _STRUCTURAL_RE = re.compile(
+        r'^#{1,4}\s|^\|.*\|.*\|.*\||^```|^\s*[-*]\s+\*\*.*Merge\s+Risk',
+        re.IGNORECASE,
     )
+
     stripped_count = 0
-    for _ in range(10):
-        new = _MERGE_POSITIVE_RE.sub('', comment)
-        if new == comment:
-            break
-        stripped_count += 1
-        comment = new
-    for _ in range(10):
-        new = _REINTERPRET_BLOCKED_RE.sub('', comment)
-        if new == comment:
-            break
-        stripped_count += 1
-        comment = new
-    _INLINE_REPLACE_RE = re.compile(
-        r'\b[Ss]trongly\s+recommended\.?\s*',
+
+    _GARBLED_RE = re.compile(
+        r'(?i)\bMerging\s+this\s+PR\s+is\s+(?:despite|although|even\s+though|however|but)\b',
     )
+    if _GARBLED_RE.search(comment):
+        comment = _GARBLED_RE.sub('This PR is BLOCKED despite', comment)
+        stripped_count += 1
+
+    _INLINE_REPLACE_RE = re.compile(r'\b[Ss]trongly\s+recommended\.?\s*')
     inline_stripped = _INLINE_REPLACE_RE.sub('', comment)
     if inline_stripped != comment:
         stripped_count += 1
         comment = inline_stripped
 
+    code_blocks = []
+    def _save_block(m):
+        code_blocks.append(m.group(0))
+        return f"\x00MERGEBLOCK{len(code_blocks) - 1}\x00"
+    comment = re.sub(r'```[^\n]*\n.*?```', _save_block, comment, flags=re.DOTALL)
+
+    lines = comment.split('\n')
+    result = []
+    for line in lines:
+        has_merge = re.search(r'\bmerg(?:e[ds]?|ing)\b', line, re.IGNORECASE)
+        has_override = re.search(r'\boverride[sd]?\b.*\b(?:build|verification|gap)\b', line, re.IGNORECASE)
+        if not has_merge and not has_override:
+            result.append(line)
+            continue
+        if has_merge and _NEGATION_RE.search(line):
+            result.append(line)
+            continue
+        if has_merge and not has_override and _STRUCTURAL_RE.match(line):
+            result.append(line)
+            continue
+        stripped_count += 1
+
+    comment = '\n'.join(result)
+
+    for i, block in enumerate(code_blocks):
+        comment = comment.replace(f"\x00MERGEBLOCK{i}\x00", block)
+
     comment = re.sub(r'\n{3,}', '\n\n', comment)
     if stripped_count:
         print(
-            f"PR#{pr_num}: stripped {stripped_count} merge-encouraging/reinterpret line(s) from BLOCKED comment",
+            f"PR#{pr_num}: stripped {stripped_count} merge-encouraging line(s) from BLOCKED comment",
             file=sys.stderr,
         )
     return comment
@@ -931,38 +1040,35 @@ def _guard_empty_build_output(comment: str, pr: Dict[str, Any], pr_num: str) -> 
 
 
 def _fix_infra_root_cause(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
-    """Replace fabricated 'Go unavailable' with actual root cause from main_build output.
+    """Replace fabricated infra root causes with actual cause from main_build output.
 
-    When build errored with pr_exit=-1 and there's no per-PR output_tail, check
-    main_build output for the real error (disk space, OOM, etc.) and replace
-    any fabricated diagnosis.
+    Applied to ALL pr_exit=-1 PRs (not just those with matching patterns in
+    own output_tail). Uses main_build.go.output_tail for the real error.
     """
     build = pr.get("build") or {}
     pr_exit = build.get("pr_exit")
     if pr_exit != -1:
         return comment
-    output_tail = (build.get("output_tail") or "").strip()
-    if output_tail:
-        return comment
     top_level = pr.get("_top_level") or {}
     main_build = top_level.get("main_build") or {}
     go_build = main_build.get("go") or {}
     main_output = (go_build.get("output_tail") or "").strip()
-    if not main_output:
-        return comment
     actual_cause = None
-    if "no space left on device" in main_output.lower():
-        actual_cause = "disk space exhaustion on build runner"
-    elif "out of memory" in main_output.lower() or "oom" in main_output.lower():
-        actual_cause = "out of memory on build runner"
-    elif "timeout" in main_output.lower():
-        actual_cause = "build timeout"
+    if main_output:
+        if "no space left on device" in main_output.lower():
+            actual_cause = "disk space exhaustion on build runner"
+        elif "out of memory" in main_output.lower() or "oom" in main_output.lower():
+            actual_cause = "out of memory on build runner"
+        elif "timeout" in main_output.lower():
+            actual_cause = "build timeout"
     if not actual_cause:
-        return comment
+        actual_cause = "build errored (no diagnostic output captured)"
     _WRONG_CAUSE_RE = re.compile(
-        r'(?i)\bGo\s+(?:is\s+)?(?:unavailable|not\s+found|not\s+installed|'
-        r'not\s+accessible|missing|not\s+in\s+PATH)\b|'
-        r'\btoolchain\s+(?:unavailable|not\s+found|missing)\b',
+        r'(?i)\bGo\s+(?:toolchain\s+(?:was\s+)?)?(?:is\s+)?'
+        r'(?:unavailable|not\s+found|not\s+installed|not\s+accessible|missing|'
+        r'not\s+in\s+PATH|was\s+unavailable)\b|'
+        r'\btoolchain\s+(?:was\s+)?(?:unavailable|not\s+found|missing)\b|'
+        r'\bGo\s+toolchain\s+was\s+unavailable\b',
     )
     if _WRONG_CAUSE_RE.search(comment):
         count = len(_WRONG_CAUSE_RE.findall(comment))
@@ -1092,6 +1198,33 @@ def _fix_api_changes_overclaim(comment: str, pr: Dict[str, Any], pr_num: str) ->
     return comment
 
 
+def _fix_actions_sha_pinning(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
+    """Correct factually wrong claim that Actions version tags are immutable.
+
+    Major-version tags (v8, v4, etc.) are MUTABLE refs — they can be force-pushed.
+    Only full commit SHA pinning provides immutability. Replace wrong claims.
+    """
+    eco = str(pr.get("ecosystem", "")).strip().lower()
+    if eco != "actions":
+        return comment
+    _REPLACEMENT = 'mutable ref (major-version tags can be force-pushed; pin to full commit SHA for immutability)'
+    _IMMUTABLE_RE = re.compile(
+        r'(?i)version[- ]immutable(?:\s*\((?:v\d+\s+)?tags?\s+points?\s+to\s+a\s+specific\s+commit\s+SHA\))?|'
+        r'(?:v\d+\s+)?tags?\s+points?\s+to\s+a\s+specific\s+commit\s+SHA|'
+        r'tags?\s+(?:are|is)\s+immutable',
+    )
+    dup = f'{_REPLACEMENT} ({_REPLACEMENT})'
+    if dup in comment:
+        comment = comment.replace(dup, _REPLACEMENT)
+    if _IMMUTABLE_RE.search(comment):
+        comment = _IMMUTABLE_RE.sub(_REPLACEMENT, comment)
+        dup = f'{_REPLACEMENT} ({_REPLACEMENT})'
+        if dup in comment:
+            comment = comment.replace(dup, _REPLACEMENT)
+        print(f"PR#{pr_num}: corrected factually wrong Actions SHA-pinning claim", file=sys.stderr)
+    return comment
+
+
 def _hedge_fabricated_changelog(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
     """Downgrade changelog confidence to LOW when no changelog data exists.
 
@@ -1106,16 +1239,22 @@ def _hedge_fabricated_changelog(comment: str, pr: Dict[str, Any], pr_num: str) -
         return comment
     changed = False
     _CL_HIGH_RE = re.compile(
-        r'(?im)(changelog.*?confidence:\s*)HIGH',
+        r'(?im)(changelog.*?confidence:\s*\**\s*)HIGH',
     )
     if _CL_HIGH_RE.search(comment):
         comment = _CL_HIGH_RE.sub(r'\g<1>LOW (no changelog data available)', comment)
         changed = True
     _HIGH_CL_RE = re.compile(
-        r'(?im)(confidence:\s*)(HIGH)(.*changelog)',
+        r'(?im)(confidence:\s*\**\s*)(HIGH)(.*changelog)',
     )
     if _HIGH_CL_RE.search(comment):
         comment = _HIGH_CL_RE.sub(r'\g<1>LOW (no changelog data)\g<3>', comment)
+        changed = True
+    _BARE_CONF_HIGH_RE = re.compile(
+        r'(?im)((?:\*\*)?Confidence:(?:\*\*)?\s*)HIGH\b',
+    )
+    if not changed and _BARE_CONF_HIGH_RE.search(comment):
+        comment = _BARE_CONF_HIGH_RE.sub(r'\g<1>LOW (no changelog data available)', comment)
         changed = True
 
     _CL_TABLE_RE = re.compile(
@@ -1136,64 +1275,58 @@ def _hedge_fabricated_changelog(comment: str, pr: Dict[str, Any], pr_num: str) -
 
 
 def _fix_merge_risk_reason(comment: str, pr: Dict[str, Any], pr_num: str) -> str:
-    """Ensure Merge Risk section renders the verbatim merge_risk.reason from data.
+    """Replace Merge Risk section content with verbatim merge_risk.reason from data.
 
-    AI comments often fabricate or truncate the merge_risk reason. When a Merge Risk
-    section exists but doesn't contain the actual reason string, replace the section
-    content with the ground-truth reason.
+    Previous approach injected ground truth alongside fabricated text — now we
+    fully REPLACE the section body. Also deduplicates reason text.
     """
     mr = pr.get("merge_risk") or (pr.get("deterministic") or {}).get("merge_risk") or {}
     mr_reason = mr.get("reason", "")
     mr_tag = mr.get("tag", "")
     if not mr_reason or not mr_tag:
         return comment
+    mr_emoji = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}.get(mr_tag, "⚪")
+    canonical_body = f"\n**{mr_emoji} {mr_tag}**\n- {mr_reason}\n"
+
     if mr_reason in comment:
+        count = comment.count(mr_reason)
+        if count > 1:
+            first_idx = comment.index(mr_reason) + len(mr_reason)
+            comment = comment[:first_idx] + comment[first_idx:].replace(mr_reason, '')
+            print(f"PR#{pr_num}: deduplicated merge_risk reason ({count} → 1)", file=sys.stderr)
         return comment
+
     mr_section = re.search(
         r'(###?\s+Merge\s+Risk\s*\n)(.*?)(?=\n###?\s|\n---|\Z)',
         comment,
         re.DOTALL | re.IGNORECASE,
     )
     if mr_section:
-        mr_emoji = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}.get(mr_tag, "⚪")
-        new_body = f"\n**{mr_emoji} {mr_tag}**\n- {mr_reason}\n"
-        comment = (comment[:mr_section.start(2)] + new_body +
-                   comment[mr_section.end(2):])
-        print(
-            f"PR#{pr_num}: replaced Merge Risk section body with verbatim reason",
-            file=sys.stderr,
-        )
+        comment = comment[:mr_section.start(2)] + canonical_body + comment[mr_section.end(2):]
+        print(f"PR#{pr_num}: replaced Merge Risk section body with verbatim reason", file=sys.stderr)
         return comment
+
     inline_mr = re.search(
         r'(\*\*Merge\s+Risk:\*\*\s*\S+)',
         comment,
         re.IGNORECASE,
     )
     if inline_mr:
-        mr_emoji = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}.get(mr_tag, "⚪")
         replacement = f"**Merge Risk:** {mr_emoji} {mr_tag}\n- {mr_reason}"
         comment = comment[:inline_mr.start()] + replacement + comment[inline_mr.end():]
-        print(
-            f"PR#{pr_num}: expanded inline Merge Risk with verbatim reason",
-            file=sys.stderr,
-        )
+        print(f"PR#{pr_num}: expanded inline Merge Risk with verbatim reason", file=sys.stderr)
         return comment
+
     heading_mr = re.search(
         r'(###?\s+[^\n]*Merge\s+Risk[^\n]*)\n(.*?)(?=\n###?\s|\n---|\Z)',
         comment,
         re.DOTALL | re.IGNORECASE,
     )
     if heading_mr:
-        section_body = heading_mr.group(2).strip()
-        if mr_reason not in section_body:
-            mr_emoji = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}.get(mr_tag, "⚪")
-            new_content = f"\n\n**{mr_emoji} {mr_tag}**\n- {mr_reason}\n"
-            comment = comment[:heading_mr.end(1)] + new_content + comment[heading_mr.end(2):]
-            print(
-                f"PR#{pr_num}: injected verbatim reason into existing Merge Risk heading",
-                file=sys.stderr,
-            )
-            return comment
+        comment = comment[:heading_mr.end(1)] + canonical_body + comment[heading_mr.end(2):]
+        print(f"PR#{pr_num}: replaced Merge Risk heading body with verbatim reason", file=sys.stderr)
+        return comment
+
     return comment
 
 
@@ -1230,33 +1363,45 @@ def _renumber_lists(comment: str) -> str:
     """Renumber all markdown numbered lists sequentially from 1.
 
     Fixes gaps left by post-processing line deletions (e.g., 1,3,4 → 1,2,3).
-    Handles both `N. ` and `N) ` formats. Preserves indented continuation lines.
+    Handles both `N. ` and `N) ` formats. Supports loose lists (items
+    separated by blank lines) by looking ahead to see if a numbered item
+    follows the blank line.
     """
     lines = comment.split('\n')
     result = []
     counter = 0
     in_list = False
+    pending_blanks = []
     list_re = re.compile(r'^(\s*)(\d+)([.\)])\s')
-    for line in lines:
+    for i, line in enumerate(lines):
         m = list_re.match(line)
         if m:
-            indent, _num, sep = m.group(1), m.group(2), m.group(3)
-            if not in_list or indent == '':
-                if not in_list:
-                    counter = 0
-                    in_list = True
-                elif indent == '' and in_list:
-                    pass
+            indent = m.group(1)
+            sep = m.group(3)
+            if not in_list:
+                counter = 0
+                in_list = True
+            if pending_blanks:
+                result.extend(pending_blanks)
+                pending_blanks = []
             counter += 1
             result.append(f"{indent}{counter}{sep} {line[m.end():]}")
-        else:
-            if line.strip() == '' and in_list:
-                in_list = False
-                counter = 0
-            elif in_list and not line.startswith('  ') and not line.startswith('\t') and line.strip():
-                in_list = False
-                counter = 0
+        elif line.strip() == '' and in_list:
+            pending_blanks.append(line)
+        elif in_list and (line.startswith('  ') or line.startswith('\t') or not line.strip()):
+            if pending_blanks:
+                result.extend(pending_blanks)
+                pending_blanks = []
             result.append(line)
+        else:
+            if pending_blanks:
+                result.extend(pending_blanks)
+                pending_blanks = []
+            in_list = False
+            counter = 0
+            result.append(line)
+    if pending_blanks:
+        result.extend(pending_blanks)
     return '\n'.join(result)
 
 
@@ -1888,6 +2033,7 @@ def generate_comments(
             comment = _enforce_merge_risk_tag(comment, pr_data, pr_num)
             comment = _validate_merge_risk_tag(comment, pr_data, pr_num)
             comment = _fix_api_changes_overclaim(comment, pr_data, pr_num)
+            comment = _fix_actions_sha_pinning(comment, pr_data, pr_num)
             comment = _hedge_fabricated_changelog(comment, pr_data, pr_num)
             comment = _fix_merge_risk_reason(comment, pr_data, pr_num)
             comment = _inject_merge_risk(comment, pr_data, pr_num)

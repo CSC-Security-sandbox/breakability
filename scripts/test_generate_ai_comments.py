@@ -1805,41 +1805,54 @@ class TestVerdictReviewSafeContradiction(unittest.TestCase):
 class TestStripMergeEncouragingSemantic(unittest.TestCase):
     """C1: Semantic patterns that reinterpret BLOCKED verdict."""
 
-    def test_strips_conservative_signal(self):
+    def test_strips_merge_with_recommend(self):
         from generate_ai_comments import _strip_merge_encouraging
-        comment = "The BLOCKED verdict is a conservative signal — not do not merge under any circumstances."
+        comment = "security impact is severe enough to recommend merging."
         result = _strip_merge_encouraging(comment, "52")
-        self.assertNotIn("conservative signal", result)
+        self.assertNotIn("recommend merging", result)
 
-    def test_strips_must_be_prioritized(self):
+    def test_strips_merge_together(self):
         from generate_ai_comments import _strip_merge_encouraging
-        comment = "This PR must be prioritized because it remediates CVEs."
+        comment = "Merge all three PRs together."
         result = _strip_merge_encouraging(comment, "23")
-        self.assertNotIn("must be prioritized", result)
+        self.assertNotIn("Merge all three", result)
 
-    def test_strips_practical_risk_low(self):
+    def test_strips_override_merge(self):
         from generate_ai_comments import _strip_merge_encouraging
-        comment = "The practical risk of merging is low."
-        result = _strip_merge_encouraging(comment, "52")
-        self.assertNotIn("practical risk", result)
+        comment = "You can override build verification gaps and merge."
+        result = _strip_merge_encouraging(comment, "23")
+        self.assertNotIn("override", result)
 
-    def test_strips_merge_together_batch(self):
+    def test_preserves_do_not_merge(self):
+        from generate_ai_comments import _strip_merge_encouraging
+        comment = "Do not merge without human review."
+        result = _strip_merge_encouraging(comment, "52")
+        self.assertIn("Do not merge", result)
+
+    def test_preserves_merge_risk_heading(self):
+        from generate_ai_comments import _strip_merge_encouraging
+        comment = "### Merge Risk\n\n**🔴 High**"
+        result = _strip_merge_encouraging(comment, "52")
+        self.assertIn("### Merge Risk", result)
+
+    def test_preserves_merge_plan_ref(self):
+        from generate_ai_comments import _strip_merge_encouraging
+        comment = "📋 Merge plan: #42"
+        result = _strip_merge_encouraging(comment, "52")
+        self.assertIn("Merge plan", result)
+
+    def test_repairs_garbled_sentence(self):
+        from generate_ai_comments import _strip_merge_encouraging
+        comment = "Merging this PR is despite pre-existing build failures."
+        result = _strip_merge_encouraging(comment, "53")
+        self.assertNotIn("Merging this PR is despite", result)
+        self.assertIn("BLOCKED despite", result)
+
+    def test_strips_merge_in_batch(self):
         from generate_ai_comments import _strip_merge_encouraging
         comment = "Merge together in a single batch."
         result = _strip_merge_encouraging(comment, "23")
         self.assertNotIn("Merge together", result)
-
-    def test_preserves_non_blocked_merge_guidance(self):
-        from generate_ai_comments import _strip_merge_encouraging
-        comment = "This is safe to merge after review."
-        result = _strip_merge_encouraging(comment, "7")
-        self.assertIn("safe to merge", result)
-
-    def test_strips_not_do_not_merge(self):
-        from generate_ai_comments import _strip_merge_encouraging
-        comment = "BLOCKED means pay attention, not do not merge under any circumstances."
-        result = _strip_merge_encouraging(comment, "52")
-        self.assertNotIn("not do not merge", result)
 
 
 class TestRenumberLists(unittest.TestCase):
@@ -2004,7 +2017,7 @@ class TestFixInfraRootCause(unittest.TestCase):
         self.assertNotIn("Go is unavailable", result)
         self.assertIn("disk space exhaustion", result)
 
-    def test_preserves_when_output_tail_present(self):
+    def test_corrects_even_when_output_tail_present(self):
         from generate_ai_comments import _fix_infra_root_cause
         pr = {
             "build": {"verdict": "error", "pr_exit": -1, "output_tail": "some real output"},
@@ -2012,7 +2025,7 @@ class TestFixInfraRootCause(unittest.TestCase):
         }
         comment = "Go toolchain unavailable."
         result = _fix_infra_root_cause(comment, pr, "7")
-        self.assertEqual(comment, result)
+        self.assertIn("disk space exhaustion", result)
 
     def test_preserves_when_pr_exit_not_minus1(self):
         from generate_ai_comments import _fix_infra_root_cause
@@ -2119,6 +2132,237 @@ class TestFixMergeRiskReason(unittest.TestCase):
         comment = "No merge risk section here."
         result = _fix_merge_risk_reason(comment, pr, "52")
         self.assertEqual(comment, result)
+
+
+class TestC1CodeBlockExemption(unittest.TestCase):
+    """C1: Line-number sanitizer must not corrupt real build output in code blocks."""
+
+    def test_preserves_line_numbers_in_code_blocks(self):
+        from generate_ai_comments import _sanitize_comment
+        pr = {
+            "usages": [{"line": 112, "symbol": "DialTimeout"}],
+            "build": {"output_tail": "sqlite3-binding.c:255680:1: warning: something"},
+        }
+        comment = (
+            "Some prose ssh_client.go:999 should be stripped.\n\n"
+            "```\nsqlite3-binding.c:255680:1: warning: something\n"
+            "ssh_client.go:111:25: error here\n```"
+        )
+        result = _sanitize_comment(comment, pr, "9")
+        self.assertIn("sqlite3-binding.c:255680:1:", result)
+        self.assertIn("ssh_client.go:111:25:", result)
+        self.assertNotIn("ssh_client.go:999", result)
+
+    def test_strips_fabricated_lines_in_prose(self):
+        from generate_ai_comments import _sanitize_comment
+        pr = {
+            "usages": [{"line": 10, "symbol": "Foo"}],
+            "build": {"output_tail": ""},
+        }
+        comment = "See main.go:9999 for details."
+        result = _sanitize_comment(comment, pr, "54")
+        self.assertNotIn(":9999", result)
+
+    def test_attested_build_output_lines_preserved(self):
+        from generate_ai_comments import _sanitize_comment
+        pr = {
+            "usages": [],
+            "build": {"output_tail": "foo.go:42: error"},
+        }
+        comment = "Error at foo.go:42 in the build."
+        result = _sanitize_comment(comment, pr, "10")
+        self.assertIn("foo.go:42", result)
+
+
+class TestC3LooseListRenumbering(unittest.TestCase):
+    """C3: _renumber_lists must handle loose lists (items separated by blank lines)."""
+
+    def test_loose_list_continuous_numbering(self):
+        from generate_ai_comments import _renumber_lists
+        comment = "1. First item\n\n2. Second item\n\n3. Third item"
+        result = _renumber_lists(comment)
+        self.assertIn("1. First item", result)
+        self.assertIn("2. Second item", result)
+        self.assertIn("3. Third item", result)
+
+    def test_loose_list_renumbers_from_one(self):
+        from generate_ai_comments import _renumber_lists
+        comment = "1. CVE-2024-0001\n\n1. CVE-2024-0002\n\n1. CVE-2024-0003"
+        result = _renumber_lists(comment)
+        lines = [l for l in result.split('\n') if l.strip()]
+        self.assertTrue(lines[0].startswith("1."))
+        self.assertTrue(lines[1].startswith("2."))
+        self.assertTrue(lines[2].startswith("3."))
+
+    def test_tight_list_still_works(self):
+        from generate_ai_comments import _renumber_lists
+        comment = "1. First\n3. Third\n4. Fourth"
+        result = _renumber_lists(comment)
+        self.assertIn("1. First", result)
+        self.assertIn("2. Third", result)
+        self.assertIn("3. Fourth", result)
+
+    def test_separate_lists_reset(self):
+        from generate_ai_comments import _renumber_lists
+        comment = "1. A\n2. B\n\nSome text between.\n\n1. X\n2. Y"
+        result = _renumber_lists(comment)
+        self.assertEqual(result.count("1."), 2)
+        self.assertEqual(result.count("2."), 2)
+
+
+class TestC4SymbolValidation(unittest.TestCase):
+    """C4: Fabricated symbol names must be replaced with attested ones."""
+
+    def test_replaces_dial_with_dialtimeout(self):
+        from generate_ai_comments import _sanitize_comment
+        pr = {
+            "usages": [{"symbol": "DialTimeout", "line": 112}],
+            "build": {"output_tail": ""},
+        }
+        comment = "Uses Dial() for connections and Dial() again."
+        result = _sanitize_comment(comment, pr, "54")
+        self.assertIn("DialTimeout(", result)
+        self.assertNotIn("Dial(", result.replace("DialTimeout(", ""))
+
+    def test_preserves_real_symbols(self):
+        from generate_ai_comments import _sanitize_comment
+        pr = {
+            "usages": [
+                {"symbol": "NewClientConn", "line": 50},
+                {"symbol": "PublicKeys", "line": 60},
+            ],
+            "build": {"output_tail": ""},
+        }
+        comment = "Calls NewClientConn() and PublicKeys() at various points."
+        result = _sanitize_comment(comment, pr, "54")
+        self.assertIn("NewClientConn()", result)
+        self.assertIn("PublicKeys()", result)
+
+
+class TestC5CascadeTableCell(unittest.TestCase):
+    """C5: Cascade stripping must work on table cell format."""
+
+    def test_strips_table_cell_cascade(self):
+        from generate_ai_comments import _sanitize_comment
+        pr = {
+            "cascade_impact": [],
+            "build": {"output_tail": ""},
+        }
+        comment = "| Cascade | Affects 8 modules via go.work |"
+        result = _sanitize_comment(comment, pr, "54")
+        self.assertNotIn("8 modules via go.work", result)
+
+    def test_preserves_real_cascade(self):
+        from generate_ai_comments import _sanitize_comment
+        pr = {
+            "cascade_impact": [{"module": "foo"}],
+            "build": {"output_tail": ""},
+        }
+        comment = "| Cascade | Affects 8 modules via go.work |"
+        result = _sanitize_comment(comment, pr, "54")
+        self.assertIn("8 modules via go.work", result)
+
+
+class TestC6BareConfidenceHigh(unittest.TestCase):
+    """C6: _hedge_fabricated_changelog must catch non-bold Confidence: HIGH."""
+
+    def test_hedges_bare_confidence_high(self):
+        from generate_ai_comments import _hedge_fabricated_changelog
+        pr = {"deterministic": {"changelogSignal": None}}
+        comment = "### Changelog\n\nConfidence: HIGH — detailed analysis"
+        result = _hedge_fabricated_changelog(comment, pr, "22")
+        self.assertNotIn("Confidence: HIGH", result)
+        self.assertIn("LOW", result)
+
+    def test_preserves_when_changelog_exists(self):
+        from generate_ai_comments import _hedge_fabricated_changelog
+        pr = {"deterministic": {"changelogSignal": {"status": "breaking"}}}
+        comment = "Confidence: HIGH"
+        result = _hedge_fabricated_changelog(comment, pr, "22")
+        self.assertIn("HIGH", result)
+
+
+class TestC8MergeRiskReplace(unittest.TestCase):
+    """C8: _fix_merge_risk_reason replaces (not injects) fabricated content."""
+
+    def test_replaces_all_fabricated_content(self):
+        from generate_ai_comments import _fix_merge_risk_reason
+        pr = {"merge_risk": {
+            "tag": "High",
+            "reason": "ground truth reason text",
+        }}
+        comment = (
+            "### Merge Risk\n\n"
+            "**🔴 High**\n"
+            "- First fabricated reason\n"
+            "- Second fabricated reason\n\n"
+            "### Recommendation"
+        )
+        result = _fix_merge_risk_reason(comment, pr, "52")
+        self.assertIn("ground truth reason text", result)
+        self.assertNotIn("First fabricated reason", result)
+        self.assertNotIn("Second fabricated reason", result)
+
+    def test_deduplicates_reason(self):
+        from generate_ai_comments import _fix_merge_risk_reason
+        pr = {"merge_risk": {
+            "tag": "High",
+            "reason": "the actual reason",
+        }}
+        comment = "Reason: the actual reason. Also the actual reason again."
+        result = _fix_merge_risk_reason(comment, pr, "23")
+        self.assertEqual(result.count("the actual reason"), 1)
+
+
+class TestC10InfraAllPrExit(unittest.TestCase):
+    """C10: _fix_infra_root_cause applies to ALL pr_exit=-1 PRs."""
+
+    def test_corrects_pr41_go_unavailable(self):
+        from generate_ai_comments import _fix_infra_root_cause
+        pr = {
+            "build": {"verdict": "error", "pr_exit": -1, "output_tail": ""},
+            "_top_level": {"main_build": {"go": {"output_tail": "no space left on device"}}},
+        }
+        comment = "Go toolchain was unavailable during the build."
+        result = _fix_infra_root_cause(comment, pr, "41")
+        self.assertIn("disk space exhaustion", result)
+        self.assertNotIn("Go toolchain was unavailable", result)
+
+    def test_corrects_even_with_output_tail(self):
+        from generate_ai_comments import _fix_infra_root_cause
+        pr = {
+            "build": {"verdict": "error", "pr_exit": -1, "output_tail": "partial output"},
+            "_top_level": {"main_build": {"go": {"output_tail": "no space left on device"}}},
+        }
+        comment = "Go toolchain was unavailable."
+        result = _fix_infra_root_cause(comment, pr, "41")
+        self.assertIn("disk space exhaustion", result)
+
+
+class TestC11ActionsSHAPinning(unittest.TestCase):
+    """C11: Correct factually wrong Actions SHA-pinning claims."""
+
+    def test_corrects_immutable_claim(self):
+        from generate_ai_comments import _fix_actions_sha_pinning
+        pr = {"ecosystem": "actions"}
+        comment = "GitHub-hosted Actions are version-immutable (v8 tag points to a specific commit SHA)."
+        result = _fix_actions_sha_pinning(comment, pr, "4")
+        self.assertNotIn("version-immutable", result)
+        self.assertIn("mutable ref", result)
+
+    def test_preserves_non_actions(self):
+        from generate_ai_comments import _fix_actions_sha_pinning
+        pr = {"ecosystem": "gomod"}
+        comment = "Tags are version-immutable."
+        result = _fix_actions_sha_pinning(comment, pr, "4")
+        self.assertIn("version-immutable", result)
+
+    def test_corrects_tag_immutable_claim(self):
+        from generate_ai_comments import _fix_actions_sha_pinning
+        pr = {"ecosystem": "actions"}
+        comment = "The v4 tags are immutable references."
+        result = _fix_actions_sha_pinning(comment, pr, "4")
+        self.assertIn("mutable ref", result)
 
 
 if __name__ == "__main__":

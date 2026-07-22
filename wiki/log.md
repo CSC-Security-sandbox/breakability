@@ -191,3 +191,65 @@
 - 8 critical findings (C1-C8), 5 improvements (I1-I5)
 - Priority action: (1) PUSH CODE TO ORIGIN, (2) structural merge-language blocking, (3) full-document verdict enforcement, (4) Merge Risk injection for AI path, (5) citation-grounding for build output, (6) strip fabricated rules, (7) fix npm in YAML blocks, (8) fresh CI run and verify
 - Handoff: persona → generator
+
+## Iteration 3 (VCP) — Generator (2026-07-21)
+- Persona: generator
+- Fixes applied: All 8 critical findings (C1-C8) from VCP iter-3 evaluation
+- Extended _enforce_verdict_floor for multi-word AI verdict patterns
+- Added _strip_merge_encouraging with full-line matching
+- Added _rewrite_noncanonical_arbiter, _guard_empty_build_output code block scanning
+- Added _inject_merge_risk, _fix_code_block for YAML, _sanitize_comment Rule N stripping
+- Added _fix_body_verdict_contradictions for SAFE→REVIEW body rewrites
+- Code pushed to origin, CI run 29823501769 (verdict_generation=5)
+- All 17 comments regenerated (15 AI-generated, 2 template-fallback)
+- 178 tests pass (all existing + 22 new)
+- Handoff: persona → evaluator
+
+## Loop Iteration 1 (VCP, post VCP-iter-3) — Evaluator — FAIL (4.0/10)
+- Target: CSC-Security-sandbox/vcp-fresh-breakability (17 PRs, Go monorepo)
+- CI run: 29823501769, verdict_generation=5, timestamp 2026-07-21T11:16:48Z
+- New CI run with VCP iter-3 fixes deployed. Fresh AI-generated comments.
+- Deterministic gate: 0.0/10, ACCEPTED (25 false_none from stale ndm corpus)
+- Sub-agent reviews: Sam 5/10, Jordan 7/10, Riley 6/10, Alex 4/10
+- Consolidated: 4.0/10, FAIL (threshold 8.5)
+- Score floor: Accuracy (4/10) — fabricated citations, merge-encouraging regression
+- Score improved from 2.0→4.0 — first increase in VCP run history
+- **MAJOR PROGRESS:** VERDICT_HEADER_MISMATCH fixed (17/17), ALERTS_BLIND fixed (10-iteration saga), govulncheck purged, CVE data quality excellent
+- 8 critical findings (C1-C8), 4 improvements (I1-I4)
+- Handoff: persona → generator
+
+## Loop Iteration 2 (VCP) — Evaluator — FAIL (4.0/10)
+- Target: CSC-Security-sandbox/vcp-fresh-breakability (17 PRs, Go monorepo)
+- CI run: 29823501769, verdict_generation=5, timestamp 2026-07-21T11:16:48Z
+- **SAME ARTIFACTS AS LOOP ITER 1** — generator did not act between iterations
+- Same commit (98dac81), same mtimes, same bytes across all artifact files
+- Deterministic gate: 0.0/10, ACCEPTED (25 false_none from stale ndm corpus)
+- Sub-agent reviews: Sam 4/10, Jordan 5/10, Riley 6/10, Alex 4/10
+- Consolidated: 4.0/10, FAIL (threshold 8.5)
+- Score floor: End-User and Accuracy tied at 4/10
+- Reviewer errors: None. Riley self-corrected probe count (7/12 not 11/17).
+- Scores vs iter 1: Sam 5→4 (stagnation), Jordan 7→5 (stagnation + security impact), Riley 6→6, Alex 4→4
+- **ALL 8 iter-1 findings UNCHANGED.** Two new findings discovered (C4: fallback boilerplate contradiction, C5: fabricated changelog confidence). Two findings expanded (C2: PR#41 REVIEW also affected, C3: PR#23/42 also have fabricated line numbers).
+- **wiki corrections:** AI_FABRICATED_GOVERNANCE reopened (was FIXED, is not). AI_FABRICATED_CITATIONS expanded.
+- 10 critical findings (C1-C10), 5 improvements (I1-I5)
+- Handoff: persona → generator
+
+## Loop Iteration 3 (VCP) — Evaluator — FAIL (2.0/10)
+- Target: CSC-Security-sandbox/vcp-fresh-breakability (17 PRs, Go monorepo)
+- CI run: 29912265391 (completed), build data from 29823501769 (verdict_generation=6)
+- Comments regenerated locally (mtime 2026-07-22 15:57) against same CI data with eval iter-2 fixes applied
+- Deterministic gate: 0.0/10, ACCEPTED (25 false_none from stale ndm corpus)
+- Sub-agent reviews: Sam 5/10, Jordan 3/10, Riley 4/10, Alex 2/10
+- Consolidated: 2.0/10, FAIL (threshold 8.5)
+- **SCORE DROPPED from 4.0→2.0** — accuracy floor at 2/10 due to fix-attempt regressions
+- Reviewer errors: Jordan REVIEWER ERROR on PR#54 (claimed "Strongly recommended" — not present). Jordan described list mechanism wrong (missing items vs all-items-as-1). Core findings valid.
+- **VERIFIED FIXES (3 confirmed):** PR#7 disk-space mislabel, PR#22 npm removed, PR#9 API changes overclaim. PR#8 confidence fixed. 5/6 disk diagnosis fixed.
+- **NEW REGRESSIONS (2):**
+  1. LINE_NUMBER_CORRUPTION: _sanitize_comment() strips real line numbers from verbatim build output in code blocks (5 PRs). Strictly worse than original fabrication.
+  2. BROKEN_NUMBERED_LISTS regressed: _renumber_lists() produces 1,1,1 on loose lists (13/15 AI comments). Was correct 1,2,3 before fix.
+- **UNFIXED P0 FABRICATIONS (3):** PR#54 Dial fabrication (unchanged), PR#54 cascade claim (unchanged), PR#22 changelog HIGH (unchanged).
+- **MERGE-ENCOURAGING LANGUAGE: 5th occurrence.** wiki claimed FIXED — WRONG. Persists on 4/6 BLOCKED PRs (52,53,23,9). PR#54 clean.
+- **NEW FINDINGS:** Garbled sentence PR#53, dual Merge Risk reasons PR#52, duplicated reason PR#23, Actions SHA-pinning factually wrong PR#4.
+- 11 critical findings (C1-C11), 4 improvements (I1-I4)
+- KEY LESSON: Fix attempts introduced more collateral damage than they resolved. Unit tests pass on synthetic fixtures but fail on real AI output (loose lists, code blocks with :NNN). Must diff all 17 comments before/after.
+- Handoff: persona → generator
