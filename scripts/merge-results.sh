@@ -434,31 +434,40 @@ prs = data.get("prs", {})
 meta = data.get("metadata", {})
 subset_requested = bool(meta.get("subset_requested"))
 pr_cves = {}
-total_cve_count = 0
+all_cve_ids = set()
 for num, pr in prs.items():
     cves = pr.get("cves", [])
     if not cves:
         cves = ((pr.get("deterministic") or {}).get("security") or {}).get("cveIds") or []
     if cves:
         pr_cves[num] = cves
-        total_cve_count += len(cves)
+        all_cve_ids.update(cves)
+total_cve_count = len(all_cve_ids)
 
 fixes_by_pr = {}
+all_fixable_urls = set()
 for num, pr in prs.items():
     pkg = pr.get("package", "")
     matching_alerts = [a for a in open_alerts
                        if a.get("dependency", {}).get("package", "") == pkg]
     if matching_alerts:
+        advisory_urls = [a.get("html_url") or "" for a in matching_alerts]
         fixes_by_pr[num] = {
             "package": pkg,
             "alert_count": len(matching_alerts),
             "severities": [a.get("security_advisory", {}).get("severity", "unknown") for a in matching_alerts],
             "cve_ids": [a.get("security_advisory", {}).get("cve_id") or a.get("security_advisory", {}).get("ghsa_id", "") for a in matching_alerts],
             "cvss_scores": [((a.get("security_advisory", {}).get("cvss") or {}).get("score") or "") for a in matching_alerts],
-            "advisory_urls": [a.get("html_url") or "" for a in matching_alerts]
+            "advisory_urls": advisory_urls
         }
+        all_fixable_urls.update(u for u in advisory_urls if u)
 
 cve_fixes, orphan_alerts = build_cve_attribution(open_alerts, prs)
+
+alerts_fixable = len(all_fixable_urls)
+if alerts_fixable > len(open_alerts):
+    print(f"WARNING: alerts_fixable_by_merging ({alerts_fixable}) > total_open_alerts ({len(open_alerts)}), clamping", file=sys.stderr)
+    alerts_fixable = len(open_alerts)
 
 security_posture = {
     "scope": "subset" if subset_requested else "repository",
@@ -470,7 +479,7 @@ security_posture = {
     "total_cves_in_prs": total_cve_count,
     "prs_fixing_alerts": fixes_by_pr,
     "prs_with_cves": pr_cves,
-    "alerts_fixable_by_merging": sum(f["alert_count"] for f in fixes_by_pr.values()),
+    "alerts_fixable_by_merging": alerts_fixable,
     "cve_fixes": cve_fixes,
     "orphan_alerts": orphan_alerts,
 }

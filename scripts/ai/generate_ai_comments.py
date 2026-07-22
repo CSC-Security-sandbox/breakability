@@ -657,7 +657,7 @@ def _rewrite_noncanonical_arbiter(comment: str, contract_verdict: str, pr_num: s
         )
         return m.group(1) + contract_verdict + m.group(3)
     comment = re.sub(
-        r'(AI\s+Arbiter\s*\|\s*\S*\s*)([A-Z][A-Z_ ]{2,}?)(\s*\|)',
+        r'(AI\s+Arbiter\s*\|\s*(?:[^\w|]*\s*)?)([A-Z][A-Z_ ]*?)(\s*\|)',
         _fix_arbiter,
         comment,
     )
@@ -692,6 +692,12 @@ def _strip_merge_encouraging(comment: str, pr_num: str) -> str:
 
     stripped_count = 0
 
+    code_blocks = []
+    def _save_block(m):
+        code_blocks.append(m.group(0))
+        return f"\x00MERGEBLOCK{len(code_blocks) - 1}\x00"
+    comment = re.sub(r'```[^\n]*\n.*?```', _save_block, comment, flags=re.DOTALL)
+
     _GARBLED_RE = re.compile(
         r'(?i)\bMerging\s+this\s+PR\s+is\s+(?:despite|although|even\s+though|however|but)\b',
     )
@@ -704,12 +710,6 @@ def _strip_merge_encouraging(comment: str, pr_num: str) -> str:
     if inline_stripped != comment:
         stripped_count += 1
         comment = inline_stripped
-
-    code_blocks = []
-    def _save_block(m):
-        code_blocks.append(m.group(0))
-        return f"\x00MERGEBLOCK{len(code_blocks) - 1}\x00"
-    comment = re.sub(r'```[^\n]*\n.*?```', _save_block, comment, flags=re.DOTALL)
 
     lines = comment.split('\n')
     result = []
@@ -958,6 +958,15 @@ def _downgrade_mismatched_probe(comment: str, pr: Dict[str, Any], pr_num: str) -
                        " Low confidence — ⚠️ package mismatch detected, probe may have analyzed wrong package")
         comment = comment[:m.start()] + replacement + comment[m.end():]
         print(f"PR#{pr_num}: downgraded probe confidence due to PACKAGE-MISMATCH reconciliation note",
+              file=sys.stderr)
+    elif "package mismatch" not in comment.lower():
+        warning = "\n\n> ⚠️ **Package mismatch detected:** The behavioral probe may have analyzed a different package than the one being upgraded. Probe results should be treated with low confidence.\n"
+        footer_m = re.search(r'\n---\n.*?(?:Mode:|Analyzed:)', comment, re.DOTALL)
+        if footer_m:
+            comment = comment[:footer_m.start()] + warning + comment[footer_m.start():]
+        else:
+            comment += warning
+        print(f"PR#{pr_num}: injected package mismatch warning (table pattern not found)",
               file=sys.stderr)
     return comment
 
@@ -1441,7 +1450,7 @@ def _validate_comment(comment: str, pr_num: str, pr_data: Dict[str, Any] = None)
 
     diagnostics = {
         "line_count": {"passed": line_count >= 150, "value": line_count},
-        "has_h2": {"passed": "##" in comment, "value": "##" in comment},
+        "has_h2": {"passed": bool(re.search(r'^## ', comment, re.MULTILINE)), "value": bool(re.search(r'^## ', comment, re.MULTILINE))},
         "has_signal_table": {
             "passed": bool(_signal_table_ok(comment)),
             "value": _signal_table_ok(comment),
@@ -1539,6 +1548,9 @@ def _near_valid(diagnostics: dict) -> bool:
     line_count = lc.get("value") or 0
     if line_count < 100:
         return False
+    h2_check = diagnostics.get("has_h2", {})
+    if not h2_check.get("passed", True):
+        return False
     h3_check = diagnostics.get("has_h3_narrative_sections", {})
     if not h3_check.get("passed", True):
         return False
@@ -1600,8 +1612,17 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
     if probe_mismatch:
         p_status += " — ⚠️ package mismatch"
 
+    prod_files = [f for f in files_importing if not f.endswith("_test.go") and not f.endswith("_test.js") and not f.endswith(".test.ts") and not f.endswith(".spec.ts") and "/test/" not in f and "/tests/" not in f]
+    test_files = [f for f in files_importing if f not in prod_files]
     reach_count = len(files_importing)
-    r_status = f"📦 {reach_count} file(s)" if reach_count > 0 else "✅ Not imported"
+    if reach_count == 0:
+        r_status = "✅ Not imported"
+    elif not prod_files and test_files:
+        r_status = f"📦 {len(test_files)} file(s) (test only)"
+    elif prod_files and test_files:
+        r_status = f"📦 {len(prod_files)} production file(s) + {len(test_files)} test file(s)"
+    else:
+        r_status = f"📦 {len(prod_files)} file(s)"
 
     changelog_signal = det.get("changelogSignal")
     if isinstance(changelog_signal, dict):
@@ -1668,7 +1689,7 @@ def _fallback_comment(pr: Dict[str, Any], pr_num: str, run_url: Optional[str],
         f"| Build | {b_emoji} {build_verdict.upper()} | {'LOW' if build.get('pr_exit') == -1 else 'HIGH'} | Exit: {build.get('pr_exit', 'N/A')} |",
         f"| Tests | {t_status} | {'HIGH' if test_exit == 0 else 'MEDIUM'} | {'Exit: ' + str(test_exit) if test_exit is not None else 'N/A'} |",
         f"| Behavioral Probe | {p_status} | {'LOW' if probe_mismatch else bg.get('confidence', '—').upper() if probe_same is not None else '—'} | {'⚠️ Package mismatch — re-evaluate' if probe_mismatch else '—'} |",
-        f"| Reachability | {r_status} | {'HIGH' if reach_count > 0 else 'LOW'} | {'Direct import' if reach_count > 0 else 'Not reached'} |",
+        f"| Reachability | {r_status} | {'HIGH' if prod_files else ('MEDIUM' if test_files else 'LOW')} | {'Direct import' if prod_files else ('Test import only' if test_files else 'Not reached')} |",
         f"| Changelog | {cl_short} | {'—' if cl_status in ('missing', '') or changelog_signal is None else 'MEDIUM'} | — |",
         f"| API Diff | {a_status} | {'—' if a_status.startswith('⏭️') else 'MEDIUM'} | — |",
         "",

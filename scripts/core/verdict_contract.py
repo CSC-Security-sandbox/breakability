@@ -485,6 +485,22 @@ def _annotate_untested_safe(pr: Mapping[str, Any], result: dict) -> dict:
     return result
 
 
+def _dedup_reason(reason: str) -> str:
+    """Deduplicate semicolon-separated reason fragments preserving order."""
+    if not reason:
+        return reason
+    parts = [p.strip() for p in reason.split(";")]
+    seen = set()
+    deduped = []
+    for p in parts:
+        if not p:
+            continue
+        if p.lower() not in seen:
+            seen.add(p.lower())
+            deduped.append(p)
+    return "; ".join(deduped)
+
+
 def authoritative_verdict(pr: Mapping[str, Any]) -> dict:
     """THE one accessor. Returns the authoritative rendered verdict object for a PR.
 
@@ -494,7 +510,10 @@ def authoritative_verdict(pr: Mapping[str, Any]) -> dict:
     """
     result = _raw_authoritative_verdict(pr)
     result = _apply_cve_floor(pr, result)
-    return _annotate_untested_safe(pr, result)
+    result = _annotate_untested_safe(pr, result)
+    if result.get("reason"):
+        result["reason"] = _dedup_reason(result["reason"])
+    return result
 
 
 def _raw_authoritative_verdict(pr: Mapping[str, Any]) -> dict:
@@ -637,21 +656,21 @@ def _raw_authoritative_verdict(pr: Mapping[str, Any]) -> dict:
         reason = (mr.get("reason") if isinstance(mr, Mapping) else "") or tag
         files_importing = pr.get("files_importing") or []
         usages = pr.get("usages") or []
-        if not files_importing and not usages:
+        if not files_importing and not usages and "not imported" not in reason:
             reason = f"not imported by application code; {reason}"
-        elif files_importing:
+        elif files_importing and "import" not in reason.lower():
             reason = f"imported by {len(files_importing)} file(s); {reason}"
         api_diff = det.get("api_diff_tool") or {}
-        if isinstance(api_diff, Mapping) and api_diff.get("status") == "semantic":
+        if isinstance(api_diff, Mapping) and api_diff.get("status") == "semantic" and "api" not in reason.lower():
             reason = f"API diff: semantic analysis available; {reason}"
         bg = pr.get("behavioral_grade") or {}
         if isinstance(bg, Mapping) and bg.get("same_behavior") is True:
             bg_conf = str(bg.get("confidence", "")).strip().lower()
-            if bg_conf in ("medium", "high"):
+            if bg_conf in ("medium", "high") and "probe" not in reason.lower():
                 reason = f"behavioral probe confirmed same API surface ({bg_conf} confidence); {reason}"
         elif isinstance(bg, Mapping) and bg.get("same_behavior") is False:
             bg_conf = str(bg.get("confidence", "")).strip().lower()
-            if bg_conf in ("medium", "high") and bg.get("source") == "probe":
+            if bg_conf in ("medium", "high") and bg.get("source") == "probe" and "probe" not in reason.lower():
                 cb = bg.get("changed_behavior") or "API surface changes detected"
                 reason = f"behavioral probe detected changes ({bg_conf} confidence): {cb}; {reason}"
         result = {

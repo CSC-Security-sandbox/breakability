@@ -2365,5 +2365,185 @@ class TestC11ActionsSHAPinning(unittest.TestCase):
         self.assertIn("mutable ref", result)
 
 
+class TestC1ValidateCommentH2(unittest.TestCase):
+    """C1: has_h2 must use line-start match, not substring."""
+
+    def test_h3_only_fails_h2_check(self):
+        from generate_ai_comments import _validate_comment
+        comment = "### Section A\n" * 60 + "Mode: test\n1. foo\n```bash\ntest\n```\nreachability import sha256\nverdict logic IF THEN\nHIGH confidence\n#123"
+        passed, diag = _validate_comment(comment, "8")
+        self.assertFalse(diag["has_h2"]["passed"])
+
+    def test_real_h2_passes(self):
+        from generate_ai_comments import _validate_comment
+        comment = "## 🚫 BLOCKED — pkg\n### Section A\n" * 10 + "Mode: test\n1. foo\n```bash\ntest\n```\nreachability import sha256\nverdict logic IF THEN verdict=\nHIGH confidence\n#123"
+        _, diag = _validate_comment(comment, "8")
+        self.assertTrue(diag["has_h2"]["passed"])
+
+    def test_near_valid_rejects_missing_h2(self):
+        from generate_ai_comments import _near_valid
+        diag = {
+            "line_count": {"passed": True, "value": 300},
+            "has_h2": {"passed": False, "value": False},
+            "has_h3_narrative_sections": {"passed": True, "value": 5},
+            "has_signal_table": {"passed": True, "value": True},
+        }
+        self.assertFalse(_near_valid(diag))
+
+
+class TestC2RewriteNoncanonicalArbiter(unittest.TestCase):
+    """C2: _rewrite_noncanonical_arbiter must not corrupt already-canonical tokens."""
+
+    def test_already_canonical_blocked_unchanged(self):
+        from generate_ai_comments import _rewrite_noncanonical_arbiter
+        comment = "| AI Arbiter | BLOCKED | HIGH |"
+        result = _rewrite_noncanonical_arbiter(comment, "BLOCKED", "9")
+        self.assertEqual(result, comment)
+        self.assertNotIn("BLOCKBLOCKED", result)
+
+    def test_noncanonical_replaced(self):
+        from generate_ai_comments import _rewrite_noncanonical_arbiter
+        comment = "| AI Arbiter | MERGE RECOMMENDED | HIGH |"
+        result = _rewrite_noncanonical_arbiter(comment, "BLOCKED", "53")
+        self.assertIn("BLOCKED", result)
+        self.assertNotIn("MERGE RECOMMENDED", result)
+
+    def test_safe_arbiter_unchanged(self):
+        from generate_ai_comments import _rewrite_noncanonical_arbiter
+        comment = "| AI Arbiter | SAFE | LOW |"
+        result = _rewrite_noncanonical_arbiter(comment, "REVIEW", "32")
+        self.assertEqual(result, comment)
+
+    def test_review_arbiter_unchanged(self):
+        from generate_ai_comments import _rewrite_noncanonical_arbiter
+        comment = "| AI Arbiter | REVIEW | MEDIUM |"
+        result = _rewrite_noncanonical_arbiter(comment, "REVIEW", "32")
+        self.assertEqual(result, comment)
+
+
+class TestC4CodeBlockProtection(unittest.TestCase):
+    """C4: _strip_merge_encouraging must not touch content inside code blocks."""
+
+    def test_pseudocode_preserved_in_code_block(self):
+        from generate_ai_comments import _strip_merge_encouraging
+        comment = (
+            "Some text\n"
+            "```\n"
+            "Final verdict = BLOCKED (CVE floor applied — Do not merge without human review)\n"
+            "Priority = P0\n"
+            "```\n"
+            "More text"
+        )
+        result = _strip_merge_encouraging(comment, "52")
+        self.assertIn("Do not merge without human review)", result)
+
+    def test_merge_in_prose_stripped(self):
+        from generate_ai_comments import _strip_merge_encouraging
+        comment = "You should merge this PR immediately."
+        result = _strip_merge_encouraging(comment, "52")
+        self.assertNotIn("merge this PR immediately", result)
+
+    def test_code_block_with_language_preserved(self):
+        from generate_ai_comments import _strip_merge_encouraging
+        comment = (
+            "```pseudocode\n"
+            "IF merge_risk THEN block merge\n"
+            "```\n"
+        )
+        result = _strip_merge_encouraging(comment, "54")
+        self.assertIn("merge_risk", result)
+
+
+class TestC5ReasonDedup(unittest.TestCase):
+    """C5: Reason string deduplication in data layer."""
+
+    def test_duplicate_import_fragments_deduped(self):
+        from core.verdict_contract import _dedup_reason
+        reason = "imported by 2 file(s); missing or unparsable changelog; imported by 2 file(s)"
+        result = _dedup_reason(reason)
+        self.assertEqual(result.count("imported by 2 file(s)"), 1)
+        self.assertIn("missing or unparsable changelog", result)
+
+    def test_distinct_fragments_preserved(self):
+        from core.verdict_contract import _dedup_reason
+        reason = "behavioral probe detected changes (high confidence): 91 API doc line(s) changed; CVE floor applied (max CVSS 10.0, 26 CVE(s))"
+        result = _dedup_reason(reason)
+        self.assertIn("behavioral probe", result)
+        self.assertIn("CVE floor applied", result)
+
+    def test_not_imported_deduped(self):
+        from core.verdict_contract import _dedup_reason
+        reason = "not imported by application code; not imported by application code; default caution"
+        result = _dedup_reason(reason)
+        self.assertEqual(result.count("not imported by application code"), 1)
+
+
+class TestC6ReachabilityTestSplit(unittest.TestCase):
+    """C6: Fallback distinguishes production vs test-only imports."""
+
+    def test_test_only_files(self):
+        from generate_ai_comments import _fallback_comment
+        pr = {
+            "package": "golang.org/x/text",
+            "ecosystem": "gomod",
+            "from_version": "0.1.0",
+            "to_version": "0.2.0",
+            "build": {"verdict": "pass", "pr_exit": 0},
+            "test": {"ran": True, "exit": 0},
+            "behavioral_grade": {},
+            "deterministic": {},
+            "files_importing": ["pkg/foo_test.go", "pkg/bar_test.go"],
+            "usages": [],
+            "verdict_v2": {"verdict": "REVIEW", "severity": "medium", "reason": "test"},
+        }
+        result = _fallback_comment(pr, "42", None, None, "test-model")
+        self.assertIn("test only", result)
+
+    def test_mixed_files(self):
+        from generate_ai_comments import _fallback_comment
+        pr = {
+            "package": "golang.org/x/text",
+            "ecosystem": "gomod",
+            "from_version": "0.1.0",
+            "to_version": "0.2.0",
+            "build": {"verdict": "pass", "pr_exit": 0},
+            "test": {"ran": True, "exit": 0},
+            "behavioral_grade": {},
+            "deterministic": {},
+            "files_importing": ["pkg/handler.go", "pkg/handler_test.go"],
+            "usages": [],
+            "verdict_v2": {"verdict": "REVIEW", "severity": "medium", "reason": "test"},
+        }
+        result = _fallback_comment(pr, "23", None, None, "test-model")
+        self.assertIn("1 production", result)
+        self.assertIn("1 test", result)
+
+
+class TestC7ProbeMismatchIndependent(unittest.TestCase):
+    """C7: _downgrade_mismatched_probe works even without table pattern."""
+
+    def test_injects_warning_when_no_table(self):
+        from generate_ai_comments import _downgrade_mismatched_probe
+        pr = {"behavioral_grade": {"reconciliation_note": "PACKAGE-MISMATCH: analyzed wrong package"}}
+        comment = "Some comment without a signal table."
+        result = _downgrade_mismatched_probe(comment, pr, "8")
+        self.assertIn("package mismatch", result.lower())
+
+    def test_table_pattern_still_works(self):
+        from generate_ai_comments import _downgrade_mismatched_probe
+        pr = {"behavioral_grade": {"reconciliation_note": "PACKAGE-MISMATCH"}}
+        comment = "| Behavioral Probe | ✅ Same behavior | High confidence |"
+        result = _downgrade_mismatched_probe(comment, pr, "8")
+        self.assertIn("Low confidence", result)
+        self.assertIn("package mismatch", result)
+
+    def test_no_mismatch_unchanged(self):
+        from generate_ai_comments import _downgrade_mismatched_probe
+        pr = {"behavioral_grade": {"reconciliation_note": ""}}
+        comment = "| Behavioral Probe | ✅ Same behavior | High confidence |"
+        result = _downgrade_mismatched_probe(comment, pr, "8")
+        self.assertIn("High confidence", result)
+
+
 if __name__ == "__main__":
     unittest.main()
