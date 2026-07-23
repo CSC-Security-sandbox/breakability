@@ -1022,7 +1022,16 @@ if __name__ == "__main__":
                 enrichments.append("behavioral probe: API changes detected")
             if enrichments:
                 enrichment_str = "; ".join(enrichments)
-                mr_obj["reason"] = (reason + "; " + enrichment_str).lstrip("; ")
+                combined = (reason + "; " + enrichment_str).lstrip("; ")
+                # Deduplicate semicolon-separated fragments
+                seen = set()
+                deduped = []
+                for frag in combined.split("; "):
+                    frag_stripped = frag.strip()
+                    if frag_stripped and frag_stripped not in seen:
+                        seen.add(frag_stripped)
+                        deduped.append(frag_stripped)
+                mr_obj["reason"] = "; ".join(deduped)
                 mr_reason_enriched += 1
     if mr_reason_enriched:
         print(f"ℹ️  Enriched merge_risk.reason for {mr_reason_enriched} merge_risk object(s) with reachability/probe evidence", file=sys.stderr)

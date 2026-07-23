@@ -648,16 +648,17 @@ def _rewrite_noncanonical_arbiter(comment: str, contract_verdict: str, pr_num: s
     """Rewrite any AI Arbiter | <TOKEN> row where TOKEN is not in {SAFE, REVIEW, BLOCKED}."""
     _CANONICAL = {"SAFE", "REVIEW", "BLOCKED"}
     def _fix_arbiter(m):
-        token = m.group(2).strip()
-        if token in _CANONICAL:
-            return m.group(0)
+        full_cell = m.group(2).strip()
+        for canon in _CANONICAL:
+            if canon in full_cell:
+                return m.group(0)
         print(
-            f"PR#{pr_num}: non-canonical AI Arbiter token '{token}' → '{contract_verdict}'",
+            f"PR#{pr_num}: non-canonical AI Arbiter token '{full_cell}' → '{contract_verdict}'",
             file=sys.stderr,
         )
         return m.group(1) + contract_verdict + m.group(3)
     comment = re.sub(
-        r'(AI\s+Arbiter\s*\|\s*(?:[^\w|]*\s*)?)([A-Z][A-Z_ ]*?)(\s*\|)',
+        r'(AI\s+Arbiter\s*\|\s*)([^|]+?)(\s*\|)',
         _fix_arbiter,
         comment,
     )
@@ -686,7 +687,8 @@ def _strip_merge_encouraging(comment: str, pr_num: str) -> str:
         re.IGNORECASE,
     )
     _STRUCTURAL_RE = re.compile(
-        r'^#{1,4}\s|^\|.*\|.*\|.*\||^```|^\s*[-*]\s+\*\*.*Merge\s+Risk',
+        r'^#{1,4}\s|^\|.*\|.*\|.*\||^```|^\s*[-*]\s+\*\*.*Merge\s+Risk'
+        r'|\bverdict\s*=|\bTHEN\b.*verdict|\bIF\b.*\bTHEN\b.*verdict|\bELSE\b.*verdict',
         re.IGNORECASE,
     )
 
